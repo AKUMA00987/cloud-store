@@ -1,0 +1,2043 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>云田野 - 自家地里种的</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <style>
+    * {
+      font-family: system-ui, -apple-system, sans-serif
+    }
+
+    body {
+      background: #F5F0E8;
+      max-width: 428px;
+      margin: 0 auto;
+      min-height: 100vh
+    }
+
+    .btn:active {
+      transform: scale(0.97)
+    }
+
+    .level-lv1 {
+      background: #E8F5EC;
+      color: #2D9D4E
+    }
+
+    .level-lv2 {
+      background: #E8F5EC;
+      color: #1E7A3A
+    }
+
+    .level-lv3 {
+      background: #FCEBD8;
+      color: #C4602A
+    }
+
+    .level-lv4 {
+      background: #2D9D4E;
+      color: #fff
+    }
+  </style>
+</head>
+
+<body class="bg-[#F5F0E8] pb-16">
+  <div id="app"></div>
+  <nav id="nav" class="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-2"
+    style="max-width:428px;margin:0 auto">
+    <button onclick="go('home')" class="flex flex-col items-center p-2"><i data-lucide="home" class="w-5 h-5"></i><span
+        class="text-xs">首页</span></button>
+    <button onclick="go('category')" class="flex flex-col items-center p-2"><i data-lucide="grid-3x3"
+        class="w-5 h-5"></i><span class="text-xs">分类</span></button>
+    <button onclick="go('cart')" class="flex flex-col items-center p-2 relative"><i data-lucide="shopping-cart"
+        class="w-5 h-5"></i><span class="text-xs">购物车</span><span id="cart-badge"
+        class="hidden absolute -top-1 right-2 bg-[#E07B39] text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">0</span></button>
+    <button onclick="go('profile')" class="flex flex-col items-center p-2"><i data-lucide="user"
+        class="w-5 h-5"></i><span class="text-xs">我的</span></button>
+  </nav>
+  <script>
+    // === DATA ===
+    const PRODUCTS = [
+      {
+        id: 1, name: '王大爷家的土鸡蛋', price: 45, orig: 58, unit: '30枚', img: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=400', cat: 'egg', tags: ['热销', '有机'], sales: 856, farmer: '王建国', village: '青山县王家村', harvest: '2026-03-24', trace: [
+          { stage: '采摘', time: '06:30', desc: '清晨露水未干时采摘', op: '王建国', done: true },
+          { stage: '打包', time: '08:00', desc: '纸格独立保护，放入溯源卡', op: '张姐', done: true },
+          { stage: '配送发出', time: '10:00', desc: '专车配送，预计14:00送达', op: '配送员小陈', done: false },
+        ]
+      },
+      {
+        id: 2, name: '李婶的有机青菜', price: 12, orig: 16, unit: '500g', img: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400', cat: 'veg', tags: ['当日采摘', '有机'], sales: 432, farmer: '李秀英', village: '青山县李家村', harvest: '2026-03-24', trace: [
+          { stage: '采摘', time: '06:00', desc: '新鲜采摘', op: '李秀英', done: true },
+          { stage: '打包', time: '08:30', desc: '保鲜膜+纸袋包装', op: '李秀英', done: true },
+          { stage: '配送发出', time: '10:00', desc: '当日发出', op: '配送员小陈', done: false },
+        ]
+      },
+      {
+        id: 3, name: '老赵家的山地苹果', price: 38, orig: 48, unit: '5斤', img: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=400', cat: 'fruit', tags: ['热销'], sales: 298, farmer: '赵德明', village: '青山县赵家坡', harvest: '2026-03-20', trace: [
+          { stage: '采摘', time: '07:00', desc: '山泉水灌溉，自然成熟', op: '赵德明', done: true },
+          { stage: '打包', time: '09:00', desc: '纸箱防震包装', op: '赵德明', done: true },
+          { stage: '配送发出', time: '14:00', desc: '已发出', op: '配送员小陈', done: false },
+        ]
+      },
+      {
+        id: 4, name: '张家村的土蜂蜜', price: 88, orig: 108, unit: '500g', img: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=400', cat: 'processed', tags: ['有机', '新品'], sales: 156, farmer: '张怀恩', village: '青山县张家村', harvest: '2026-03-15', trace: [
+          { stage: '采蜜', time: '全天', desc: '深山野蜂蜜，一年一取', op: '张怀恩', done: true },
+          { stage: '灌装', time: '08:00', desc: '玻璃瓶灌装，密封', op: '张怀恩', done: true },
+          { stage: '配送发出', time: '10:00', desc: '发出', op: '配送员小陈', done: false },
+        ]
+      },
+      {
+        id: 5, name: '刘大爷的五常大米', price: 68, orig: 82, unit: '5kg', img: 'https://images.unsplash.com/photo-1536304993881-ff6e9eefa2a6?w=400', cat: 'grain', tags: ['有机', '热销'], sales: 512, farmer: '刘广福', village: '五常市刘家屯', harvest: '2026-03-10', trace: [
+          { stage: '收割', time: '09:00', desc: '自留种，农家肥种植', op: '刘广福', done: true },
+          { stage: '晾晒', time: '12:00', desc: '自然晾晒3天', op: '刘广福', done: true },
+          { stage: '碾米', time: '14:00', desc: '传统碾米，不抛光不打蜡', op: '刘广福', done: true },
+          { stage: '打包发出', time: '10:00', desc: '牛皮纸袋包装，发出', op: '配送员小陈', done: false },
+        ]
+      },
+    ];
+    const CATEGORIES = [
+      { id: 'veg', name: '时令蔬菜', icon: '🥬' },
+      { id: 'egg', name: '散养禽蛋', icon: '🥚' },
+      { id: 'fruit', name: '新鲜水果', icon: '🍎' },
+      { id: 'grain', name: '五谷杂粮', icon: '🌾' },
+      { id: 'processed', name: '加工制品', icon: '🍯' },
+    ];
+    const PRODUCT_TAG_OPTIONS = ['热销', '有机', '新品', '精选'];
+    const BANNERS = [
+      { title: '春日新鲜直供', sub: '当日采摘，当日配送', img: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=800' },
+      { title: '新人首单礼', sub: '满50减10元', img: 'https://images.unsplash.com/photo-1490885578174-acda8905c2c6?w=800' },
+    ];
+    const ANNOUNCEMENTS = [
+      { text: '周二、周五统一发货，请提前完成下单', active: true },
+      { text: '今日时令蔬菜已补货，可直接下单', active: true }
+    ];
+    // === STATE ===
+    let user = null, cart = [], view = 'home', cat = '', orders = [], member = { levelId: 'normal', points: 0, totalSpent: 0 }, paramId = 0;
+    var productsState = [];
+    var productsLoaded = false;
+    var bannersState = [];
+    var announcementsState = [];
+    var usersState = {};
+    var couponTemplatesState = [];
+    var adminProductExpandState = {};
+    var farmerProductExpandState = {};
+    var couponRecipientState = { templateId: '', keyword: '', roleFilter: 'all', selectedUsers: {} };
+    var activeBannerIndex = 0;
+    var bannerAutoTimer = null;
+
+    // === HELPERS ===
+    // 统一格式化价格，避免页面里重复拼接金额字符串。
+    const fmt = n => '¥' + Number(n || 0).toFixed(2);
+    const $ = id => document.getElementById(id);
+    const historyStack = [];
+    // 页面路由切换后统一回到顶部，方便从新页面开头重新浏览内容。
+    function scrollPageToTop() {
+      try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (error) { window.scrollTo(0, 0); }
+    }
+    // 详情页等二级页面使用 pushView，方便返回时恢复上一个页面和参数。
+    const pushView = (v, id = 0) => { historyStack.push(view + '|' + paramId); view = v; paramId = id; location.hash = '/' + v + (id ? '/' + id : ''); render(); scrollPageToTop(); };
+    // 一级页面直接 go，避免无参数页面残留旧的 paramId。
+    const go = v => { view = v; paramId = 0; location.hash = '/' + v; render(); scrollPageToTop(); };
+    const back = () => { if (historyStack.length > 0) { const prev = historyStack.pop().split('|'); view = prev[0]; paramId = parseInt(prev[1]) || 0; location.hash = '/' + view + (paramId ? '/' + paramId : ''); render(); scrollPageToTop(); } else window.history.back(); };
+    const setCat = c => { cat = c; view = 'category'; render(); scrollPageToTop(); };
+    const lvl = () => ({ id: 'normal', name: '普通用户' });
+    const nextLvl = () => null;
+
+    function badgeHtml() {
+      return `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">普通用户</span>`;
+    }
+
+    // 兼容旧数据结构：历史商品可能还没有库存、上下架状态或农户账号字段。
+    function normalizeProduct(p) {
+      return Object.assign({
+        cat: 'veg',
+        stock: 30,
+        off: false,
+        tags: [],
+        sales: 0,
+        farmer: '待设置',
+        farmerAccount: '',
+        farmerUserId: 0,
+        village: '待设置',
+        harvest: new Date().toISOString().slice(0, 10),
+        dispatchHours: 4,
+        trace: []
+      }, p || {});
+    }
+
+    function cloneProduct(product) {
+      return normalizeProduct(Object.assign({}, product || {}, {
+        tags: (product && product.tags ? product.tags : []).slice(),
+        trace: (product && product.trace ? product.trace : []).map(function (item) { return Object.assign({}, item); })
+      }));
+    }
+
+    function setProds(list) {
+      productsState = (Array.isArray(list) ? list : []).map(normalizeProduct);
+      return productsState;
+    }
+
+    function getProds() {
+      return productsState;
+    }
+
+    async function fetchProducts() {
+      var response = await fetch('/api/products');
+      if (!response.ok) {
+        var errorText = '商品数据加载失败';
+        try {
+          var errorPayload = await response.json();
+          if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      var list = await response.json();
+      productsLoaded = true;
+      return setProds(list);
+    }
+
+    async function saveProductToServer(product, options) {
+      var config = Object.assign({ refresh: true }, options || {});
+      var response = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(product)
+      });
+      if (!response.ok) {
+        var errorText = '商品保存失败';
+        try {
+          var errorPayload = await response.json();
+          if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      var saved = await response.json();
+      if (config.refresh) await fetchProducts();
+      return saved;
+    }
+
+    function setBanners(list) {
+      bannersState = (Array.isArray(list) ? list : []).map(normalizeBanner);
+      if (activeBannerIndex >= bannersState.length) activeBannerIndex = 0;
+      return bannersState;
+    }
+
+    function getBanners() {
+      return bannersState;
+    }
+
+    async function fetchBanners() {
+      var response = await fetch('/api/banners');
+      if (!response.ok) {
+        var errorText = 'Banner 数据加载失败';
+        try {
+          var errorPayload = await response.json();
+          if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      var list = await response.json();
+      return setBanners(list);
+    }
+
+    async function saveBannersToServer(list) {
+      var response = await fetch('/api/banners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify((list || []).map(function (item, index) {
+          return Object.assign({}, normalizeBanner(item, index), { sortOrder: index });
+        }))
+      });
+      if (!response.ok) {
+        var errorText = 'Banner 保存失败';
+        try {
+          var errorPayload = await response.json();
+          if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      var saved = await response.json();
+      return setBanners(saved);
+    }
+
+    function setAnnouncements(list) {
+      announcementsState = (Array.isArray(list) ? list : []).map(normalizeAnnouncement);
+      return announcementsState;
+    }
+
+    function getAnnouncements() {
+      return announcementsState;
+    }
+
+    async function fetchAnnouncements() {
+      var response = await fetch('/api/announcements');
+      if (!response.ok) {
+        var errorText = '公告数据加载失败';
+        try {
+          var errorPayload = await response.json();
+          if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      var list = await response.json();
+      return setAnnouncements(list);
+    }
+
+    async function saveAnnouncementsToServer(list) {
+      var response = await fetch('/api/announcements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify((list || []).map(function (item, index) {
+          return Object.assign({}, normalizeAnnouncement(item, index), { sortOrder: index });
+        }))
+      });
+      if (!response.ok) {
+        var errorText = '公告保存失败';
+        try {
+          var errorPayload = await response.json();
+          if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      var saved = await response.json();
+      return setAnnouncements(saved);
+    }
+
+    function clearBannerAutoRotation() {
+      if (bannerAutoTimer) {
+        clearTimeout(bannerAutoTimer);
+        bannerAutoTimer = null;
+      }
+    }
+
+    function scheduleBannerAutoRotation() {
+      clearBannerAutoRotation();
+      if (view !== 'home' || getBanners().length <= 1) return;
+      bannerAutoTimer = setTimeout(function () {
+        activeBannerIndex = (activeBannerIndex + 1) % getBanners().length;
+        render();
+      }, 4000);
+    }
+
+    function setActiveBanner(index) {
+      var banners = getBanners();
+      if (!banners.length) return;
+      activeBannerIndex = Math.max(0, Math.min(index, banners.length - 1));
+      render();
+    }
+
+    function getImageFromInputAsync(inputId, fallbackImage, folderName) {
+      return new Promise(function (resolve, reject) {
+        getImageFromInput(inputId, fallbackImage, folderName, resolve, reject);
+      });
+    }
+
+    function renderLoadingView(text) {
+      return '<div class="p-4"><div class="bg-white rounded-xl p-6 shadow text-center text-sm text-gray-500">' + (text || '商品数据加载中...') + '</div></div>';
+    }
+
+    function normalizeUserRecord(record) {
+      return Object.assign({
+        id: record && record.id ? Number(record.id) : undefined,
+        username: '',
+        roles: { isFarmer: false, isAdmin: false, farmerName: '' },
+        addresses: [],
+        coupons: [],
+        selectedAddressId: '',
+        selectedCouponId: '',
+        cart: [],
+        orders: [],
+        member: { levelId: 'normal', points: 0, totalSpent: 0 },
+        createdAt: new Date().toLocaleDateString('zh-CN')
+      }, record || {}, {
+        id: record && record.id ? Number(record.id) : undefined,
+        roles: Object.assign({ isFarmer: false, isAdmin: false, farmerName: record && record.username ? record.username : '' }, record && record.roles || {}),
+        addresses: Array.isArray(record && record.addresses) ? record.addresses : [],
+        coupons: Array.isArray(record && record.coupons) ? record.coupons : [],
+        cart: Array.isArray(record && record.cart) ? record.cart : [],
+        orders: Array.isArray(record && record.orders) ? record.orders : [],
+        member: Object.assign({ levelId: 'normal', points: 0, totalSpent: 0 }, record && record.member || {})
+      });
+    }
+
+    function setUsers(list) {
+      usersState = {};
+      (Array.isArray(list) ? list : []).map(normalizeUserRecord).forEach(function (item) {
+        usersState[item.username] = item;
+      });
+      if (user && usersState[user]) {
+        cart = (usersState[user].cart || []).slice();
+        orders = (usersState[user].orders || []).slice();
+        member = Object.assign({ levelId: 'normal', points: 0, totalSpent: 0 }, usersState[user].member || {});
+      }
+      return getAllUsers();
+    }
+
+    function getUserRecord(uname) {
+      var name = uname || user;
+      return name && usersState[name] ? normalizeUserRecord(usersState[name]) : null;
+    }
+
+    async function fetchUsers() {
+      var response = await fetch('/api/users');
+      if (!response.ok) throw new Error('用户数据加载失败');
+      var list = await response.json();
+      return setUsers(list);
+    }
+
+    async function persistUserState(uname, override) {
+      var name = uname || user;
+      if (!name) return null;
+      var base = normalizeUserRecord(Object.assign({}, getUserRecord(name) || { username: name }, override || {}));
+      if (name === user) {
+        base.cart = cart.map(function (item) { return Object.assign({}, item); });
+        base.orders = orders.map(function (item) { return Object.assign({}, item); });
+        base.member = Object.assign({ levelId: 'normal', points: 0, totalSpent: 0 }, member || {});
+      }
+      var response = await fetch('/api/users/' + encodeURIComponent(name) + '/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(base)
+      });
+      if (!response.ok) {
+        var errorText = '用户数据保存失败';
+        try {
+          var errorPayload = await response.json();
+          if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      var saved = normalizeUserRecord(await response.json());
+      usersState[name] = saved;
+      if (name === user) {
+        cart = (saved.cart || []).slice();
+        orders = (saved.orders || []).slice();
+        member = Object.assign({ levelId: 'normal', points: 0, totalSpent: 0 }, saved.member || {});
+      }
+      return saved;
+    }
+
+    // 用户扩展资料统一走服务端 users 表缓存，角色、地址、优惠券都从同一份用户记录读取。
+    function getUserMeta(uname) {
+      var name = uname || user;
+      if (!name) return { roles: { isFarmer: false, isAdmin: false }, addresses: [], coupons: [], createdAt: '' };
+      var record = getUserRecord(name);
+      if (!record) return { roles: { isFarmer: false, isAdmin: false }, addresses: [], coupons: [], createdAt: '' };
+      return {
+        roles: record.roles || { isFarmer: false, isAdmin: false },
+        addresses: record.addresses || [],
+        coupons: record.coupons || [],
+        selectedAddressId: record.selectedAddressId || '',
+        selectedCouponId: record.selectedCouponId || '',
+        createdAt: record.createdAt || ''
+      };
+    }
+
+    async function saveUserMetaAndWait(uname, meta) {
+      var name = uname || user;
+      var existing = normalizeUserRecord(Object.assign({}, getUserRecord(name) || { username: name }, meta || {}));
+      usersState[name] = existing;
+      return persistUserState(name, existing);
+    }
+
+    function saveUserMeta(uname, meta) {
+      saveUserMetaAndWait(uname, meta).catch(function (error) {
+        console.error(error);
+      });
+    }
+
+    var DEFAULT_PRODUCT_IMAGE = 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400';
+
+    function createProductDraft(overrides) {
+      return Object.assign({
+        name: '',
+        price: '',
+        unit: '',
+        cat: 'veg',
+        tags: [],
+        stock: 0,
+        harvest: new Date().toISOString().slice(0, 10),
+        dispatchHours: 4,
+        farmer: '',
+        village: '',
+        img: DEFAULT_PRODUCT_IMAGE
+      }, overrides || {});
+    }
+
+    function normalizeBanner(item, index) {
+      var fallback = BANNERS[index] || BANNERS[0] || { title: '首页Banner', sub: '新鲜农产品直达', img: DEFAULT_PRODUCT_IMAGE };
+      return {
+        id: item && item.id ? Number(item.id) : undefined,
+        title: item && item.title ? item.title : fallback.title,
+        sub: item && item.sub ? item.sub : fallback.sub,
+        img: item && item.img ? item.img : fallback.img,
+        linkType: item && item.linkType ? item.linkType : 'none',
+        externalUrl: item && item.externalUrl ? item.externalUrl : '',
+        productId: Number(item && item.productId || 0),
+        sortOrder: Number(item && item.sortOrder != null ? item.sortOrder : index || 0)
+      };
+    }
+
+    function normalizeAnnouncement(item, index) {
+      var fallback = ANNOUNCEMENTS[index] || ANNOUNCEMENTS[0] || { text: '欢迎来到云田野，今天也有新鲜农产品直达。', active: true };
+      return {
+        id: item && item.id ? Number(item.id) : undefined,
+        text: item && item.text ? item.text : fallback.text,
+        active: item ? item.active !== false : true,
+        linkType: item && item.linkType ? item.linkType : 'none',
+        externalUrl: item && item.externalUrl ? item.externalUrl : '',
+        productId: Number(item && item.productId || 0),
+        sortOrder: Number(item && item.sortOrder != null ? item.sortOrder : index || 0)
+      };
+    }
+
+    function getActiveAnnouncements() {
+      return getAnnouncements().filter(function (item) { return item.active; });
+    }
+
+    function getOperationalLinkLabel(linkType) {
+      if (linkType === 'product') return '内部商品';
+      if (linkType === 'external') return '外部链接';
+      return '无跳转';
+    }
+
+    function renderOperationalLinkFields(prefix, item, kindLabel) {
+      var products = getProds();
+      var linkType = item.linkType || 'none';
+      var h = '<div class="mb-3"><div class="text-sm font-medium text-gray-700 mb-1">' + kindLabel + '跳转方式</div><select id="' + prefix + '-link-type" class="w-full p-2 border rounded-lg text-sm"><option value="none"' + (linkType === 'none' ? ' selected' : '') + '>无跳转</option><option value="product"' + (linkType === 'product' ? ' selected' : '') + '>内部商品</option><option value="external"' + (linkType === 'external' ? ' selected' : '') + '>外部链接</option></select></div>';
+      h += '<div class="mb-3"><div class="text-sm font-medium text-gray-700 mb-1">绑定商品</div><select id="' + prefix + '-product-id" class="w-full p-2 border rounded-lg text-sm"><option value="0">不绑定商品</option>' + products.map(function (product) { return '<option value="' + product.id + '"' + (Number(item.productId || 0) === product.id ? ' selected' : '') + '>' + product.name + '</option>'; }).join('') + '</select></div>';
+      h += '<div class="mb-3"><div class="text-sm font-medium text-gray-700 mb-1">外部链接</div><input id="' + prefix + '-external-url" value="' + (item.externalUrl || '') + '" placeholder="https://example.com" class="w-full p-2 border rounded-lg text-sm"></div>';
+      return h;
+    }
+
+    function readOperationalLinkFields(prefix) {
+      return {
+        linkType: document.getElementById(prefix + '-link-type').value,
+        productId: Number(document.getElementById(prefix + '-product-id').value || 0),
+        externalUrl: document.getElementById(prefix + '-external-url').value.trim()
+      };
+    }
+
+    function validateOperationalLink(linkData, kindLabel) {
+      if (linkData.linkType === 'product' && !(linkData.productId > 0)) return '请为' + kindLabel + '选择绑定商品';
+      if (linkData.linkType === 'external' && !/^https?:\/\//i.test(linkData.externalUrl || '')) return '请为' + kindLabel + '填写有效的外部链接';
+      return '';
+    }
+
+    // Banner 和公告统一走这里处理点击目标，便于后台只维护一种跳转配置结构。
+    function triggerOperationalLink(item) {
+      if (!item || !item.linkType || item.linkType === 'none') return;
+      if (item.linkType === 'product') {
+        if (Number(item.productId || 0) > 0) pushView('product', Number(item.productId));
+        return;
+      }
+      if (item.linkType === 'external' && item.externalUrl) window.open(item.externalUrl, '_blank');
+    }
+
+    function createDefaultCouponTemplates() {
+      return [
+        { templateId: 'welcome10', name: '新人券', type: 'full_reduction', amount: 10, minSpend: 50 },
+        { templateId: 'fresh90', name: '鲜享折扣券', type: 'discount', discountRate: 9.0, minSpend: 0 }
+      ];
+    }
+
+    function buildCouponFromTemplate(template) {
+      return {
+        id: 'coupon_' + template.templateId + '_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+        templateId: template.templateId,
+        name: template.name,
+        type: template.type || 'full_reduction',
+        discountRate: Number(template.discountRate || 0),
+        amount: Number(template.amount || 0),
+        minSpend: Number(template.minSpend || 0),
+        used: false
+      };
+    }
+
+    function setCouponTemplates(list) {
+      couponTemplatesState = (Array.isArray(list) ? list : []).map(normalizeCouponTemplate);
+      return couponTemplatesState;
+    }
+
+    async function fetchCouponTemplates() {
+      var response = await fetch('/api/coupon-templates');
+      if (!response.ok) throw new Error('优惠券模板加载失败');
+      var list = await response.json();
+      return setCouponTemplates(list);
+    }
+
+    async function saveCouponTemplatesToServer(list) {
+      var response = await fetch('/api/coupon-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify((list || []).map(normalizeCouponTemplate))
+      });
+      if (!response.ok) throw new Error('优惠券模板保存失败');
+      var saved = await response.json();
+      return setCouponTemplates(saved);
+    }
+
+    // 优惠券模板统一走服务端表缓存，避免管理端维护结果只停留在浏览器本地。
+    function getCouponTemplates() {
+      return couponTemplatesState;
+    }
+
+    // 新用户默认券直接从可配置模板生成，避免写死演示数据。
+    function createDefaultCoupons() {
+      return getCouponTemplates().map(buildCouponFromTemplate);
+    }
+
+    function getCouponTypeLabel(type) {
+      return type === 'discount' ? '折扣券' : '满减券';
+    }
+
+    function getCouponBenefitText(coupon) {
+      if (!coupon) return '';
+      if (coupon.type === 'discount') return Number(coupon.discountRate || 0).toFixed(1).replace(/\.0$/, '') + '折';
+      return '满' + Number(coupon.minSpend || 0) + '减' + Number(coupon.amount || 0);
+    }
+
+    function calcCouponDiscount(coupon, subtotal) {
+      if (!coupon) return 0;
+      if (coupon.type === 'discount') {
+        var rate = Number(coupon.discountRate || 0);
+        if (rate < 1 || rate > 9.9) return 0;
+        return Number((Number(subtotal || 0) * (10 - rate) / 10).toFixed(2));
+      }
+      return Number(subtotal || 0) >= Number(coupon.minSpend || 0) ? Number(coupon.amount || 0) : 0;
+    }
+
+    function getCouponMetaText(coupon) {
+      return getCouponTypeLabel(coupon.type) + ' · ' + getCouponBenefitText(coupon);
+    }
+
+    function getBuyerUsers() {
+      return getAllUsers().filter(function (u) { return !u.roles.isAdmin; });
+    }
+
+    function getRoleLabelByMeta(meta) {
+      if (meta.roles && meta.roles.isAdmin) return '管理员';
+      if (meta.roles && meta.roles.isFarmer) return '农户';
+      return '普通用户';
+    }
+
+    function getRoleBadgeHtml(meta) {
+      var label = getRoleLabelByMeta(meta);
+      var tone = label === '管理员'
+        ? 'bg-[#E8F5EC] text-[#2D9D4E]'
+        : label === '农户'
+          ? 'bg-[#FCEBD8] text-[#E07B39]'
+          : 'bg-gray-100 text-gray-500';
+      return '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ' + tone + '">' + label + '</span>';
+    }
+
+    function getCategoryMeta(catId) {
+      return CATEGORIES.find(function (item) { return item.id === catId; }) || CATEGORIES[0];
+    }
+
+    function getProductTags(tags) {
+      return (tags || []).filter(function (tag) { return PRODUCT_TAG_OPTIONS.indexOf(tag) > -1; }).slice(0, 2);
+    }
+
+    function renderTagBadge(tag) {
+      var cls = tag === '热销'
+        ? 'bg-[#E74C3C] text-white'
+        : tag === '有机'
+          ? 'bg-[#E8F5EC] text-[#2D9D4E]'
+          : 'bg-[#FCEBD8] text-[#E07B39]';
+      return '<span class="inline-block px-2 py-0.5 rounded text-xs ' + cls + '">' + tag + '</span>';
+    }
+
+    function renderFieldLabel(title, desc) {
+      return '<div class="text-sm font-medium text-gray-700 mb-1">' + title + '</div>' + (desc ? '<div class="text-xs text-gray-400 mb-2">' + desc + '</div>' : '');
+    }
+
+    function toggleFormTag(prefix, tag) {
+      var input = document.getElementById(prefix + '-tags');
+      if (!input) return;
+      var selected = (input.value || '').split(',').filter(Boolean);
+      var exists = selected.indexOf(tag) > -1;
+      if (exists) selected = selected.filter(function (item) { return item !== tag; });
+      else {
+        if (selected.length >= 2) { alert('每个商品最多展示 2 个标签'); return; }
+        selected.push(tag);
+      }
+      input.value = selected.join(',');
+      PRODUCT_TAG_OPTIONS.forEach(function (item) {
+        var button = document.getElementById(prefix + '-tag-' + item);
+        if (!button) return;
+        var active = selected.indexOf(item) > -1;
+        button.className = active
+          ? 'px-3 py-2 rounded-full text-xs bg-[#2D9D4E] text-white'
+          : 'px-3 py-2 rounded-full text-xs bg-gray-100 text-gray-500';
+      });
+    }
+
+    // 文件选择后先在本地预览，保存时再上传到服务端目录并回填访问地址。
+    function previewImageUpload(inputId, previewId) {
+      var input = document.getElementById(inputId);
+      var preview = document.getElementById(previewId);
+      if (!input || !preview || !input.files || !input.files[0] || typeof FileReader === 'undefined') return;
+      var reader = new FileReader();
+      reader.onload = function (event) {
+        preview.src = event.target.result || DEFAULT_PRODUCT_IMAGE;
+      };
+      reader.readAsDataURL(input.files[0]);
+    }
+
+    function uploadImageDataUrl(dataUrl, fileName, folderName, done, fail) {
+      fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataUrl: dataUrl,
+          fileName: fileName || 'image',
+          folder: folderName || 'common'
+        })
+      }).then(function (response) {
+        if (!response.ok) {
+          return response.json().catch(function () {
+            return { message: '图片上传失败' };
+          }).then(function (payload) {
+            throw new Error((payload && payload.message) || '图片上传失败');
+          });
+        }
+        return response.json();
+      }).then(function (payload) {
+        done((payload && payload.url) || fallbackImage || DEFAULT_PRODUCT_IMAGE);
+      }).catch(function (error) {
+        if (fail) fail(error);
+      });
+    }
+
+    function getImageFromInput(inputId, fallbackImage, folderName, done, fail) {
+      var input = document.getElementById(inputId);
+      if (!input || !input.files || !input.files[0] || typeof FileReader === 'undefined') {
+        done(fallbackImage || DEFAULT_PRODUCT_IMAGE);
+        return;
+      }
+      var file = input.files[0];
+      var reader = new FileReader();
+      reader.onload = function (event) {
+        uploadImageDataUrl(event.target.result || '', file.name || 'image', folderName, done, fail);
+      };
+      reader.onerror = function () {
+        if (fail) fail(new Error('图片读取失败'));
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // 商品录入和编辑统一校验，避免后台字段和前台展示继续出现不一致。
+    function validateProductPayload(payload) {
+      if (!payload.name) return '请填写商品名称';
+      if (!(payload.price > 0)) return '售价必须大于 0';
+      if (!payload.unit) return '请填写商品单位';
+      if (!payload.cat) return '请选择商品分类';
+      if (isNaN(payload.stock) || payload.stock < 0) return '库存不能小于 0';
+      if (!payload.harvest) return '请填写采摘日期';
+      if (isNaN(payload.dispatchHours) || payload.dispatchHours <= 0) return '发货时效必须大于 0 小时';
+      if (!payload.village) return '请填写来源产地';
+      if ((payload.tags || []).length > 2) return '每个商品最多展示 2 个标签';
+      return '';
+    }
+
+    function readProductForm(prefix, fallback) {
+      var farmerInput = document.getElementById(prefix + '-farmer');
+      var tagInput = document.getElementById(prefix + '-tags');
+      return {
+        name: document.getElementById(prefix + '-name').value.trim(),
+        price: parseFloat(document.getElementById(prefix + '-price').value),
+        unit: document.getElementById(prefix + '-unit').value.trim(),
+        cat: document.getElementById(prefix + '-cat').value,
+        tags: getProductTags((tagInput ? tagInput.value : '').split(',')),
+        stock: parseInt(document.getElementById(prefix + '-stock').value, 10),
+        harvest: document.getElementById(prefix + '-harvest').value.trim(),
+        dispatchHours: parseInt(document.getElementById(prefix + '-dispatch-hours').value, 10),
+        farmer: farmerInput ? farmerInput.value.trim() : (fallback.farmer || ''),
+        village: document.getElementById(prefix + '-village').value.trim(),
+        img: fallback.img || DEFAULT_PRODUCT_IMAGE
+      };
+    }
+
+    function renderImageUploader(prefix, image) {
+      var previewId = prefix + '-img-preview';
+      var inputId = prefix + '-img';
+      return '<div class="rounded-xl border border-dashed border-gray-200 p-3 mb-2"><div class="text-xs text-gray-500 mb-2">商品图片</div><img id="' + previewId + '" src="' + (image || DEFAULT_PRODUCT_IMAGE) + '" class="w-full h-28 object-cover rounded-lg mb-2"><input id="' + inputId + '" type="file" accept="image/*" onchange="previewImageUpload(\'' + inputId + '\',\'' + previewId + '\')" class="w-full text-sm text-gray-500"></div>';
+    }
+
+    function renderProductFormFields(prefix, product, canEditFarmer) {
+      var h = '';
+      var selectedTags = getProductTags(product.tags || []);
+      h += '<div class="mb-3">' + renderFieldLabel('商品名称') + '<input id="' + prefix + '-name" value="' + (product.name || '') + '" placeholder="请输入商品名称" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('商品分类', '用于前台分类筛选与商品归类') + '<select id="' + prefix + '-cat" class="w-full p-2 border rounded-lg text-sm">' + CATEGORIES.map(function (item) { return '<option value="' + item.id + '"' + (item.id === (product.cat || 'veg') ? ' selected' : '') + '>' + item.icon + ' ' + item.name + '</option>'; }).join('') + '</select></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('商品标签', '最多点亮 2 个标签，会展示在商品大图和商品卡片上') + '<input id="' + prefix + '-tags" type="hidden" value="' + selectedTags.join(',') + '"><div class="flex flex-wrap gap-2">' + PRODUCT_TAG_OPTIONS.map(function (tag) { var active = selectedTags.indexOf(tag) > -1; return '<button type="button" id="' + prefix + '-tag-' + tag + '" onclick="toggleFormTag(\'' + prefix + '\',\'' + tag + '\')" class="' + (active ? 'px-3 py-2 rounded-full text-xs bg-[#2D9D4E] text-white' : 'px-3 py-2 rounded-full text-xs bg-gray-100 text-gray-500') + '">' + tag + '</button>'; }).join('') + '</div></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('售价（元）') + '<input id="' + prefix + '-price" value="' + (product.price || '') + '" placeholder="请输入售价" type="number" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('商品单位') + '<input id="' + prefix + '-unit" value="' + (product.unit || '') + '" placeholder="如：500g / 1盒" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('库存数量') + '<input id="' + prefix + '-stock" value="' + Number(product.stock || 0) + '" placeholder="请输入库存数量" type="number" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('采摘日期') + '<input id="' + prefix + '-harvest" value="' + (product.harvest || '') + '" placeholder="采摘日期" type="date" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('发货时效', '填写多少小时内发货') + '<input id="' + prefix + '-dispatch-hours" value="' + Number(product.dispatchHours || 4) + '" placeholder="多少小时内发货" type="number" class="w-full p-2 border rounded-lg text-sm"></div>';
+      if (canEditFarmer) h += '<div class="mb-3">' + renderFieldLabel('供货人 / 农户名称') + '<input id="' + prefix + '-farmer" value="' + (product.farmer || '') + '" placeholder="请输入供货人名称" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('来源产地') + '<input id="' + prefix + '-village" value="' + (product.village || '') + '" placeholder="请输入来源产地" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += renderImageUploader(prefix, product.img || DEFAULT_PRODUCT_IMAGE);
+      return h;
+    }
+
+    function renderProductEditorCard(product, options) {
+      var tone = options.tone === 'farmer'
+        ? { badge: 'bg-[#FCEBD8] text-[#E07B39]', button: 'bg-[#E07B39]' }
+        : { badge: 'bg-[#E8F5EC] text-[#2D9D4E]', button: 'bg-[#2D9D4E]' };
+      var expanded = !!options.expanded;
+      var category = getCategoryMeta(product.cat || 'veg');
+      var tagHtml = getProductTags(product.tags || []).map(renderTagBadge).join('');
+      return '<div class="bg-white rounded-xl p-4 shadow mb-3"><div class="flex gap-3 items-start"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="flex-1 text-left flex gap-3 items-start"><img src="' + (product.img || DEFAULT_PRODUCT_IMAGE) + '" class="w-16 h-16 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm">' + product.name + '</div><div class="text-xs text-gray-500 mt-1">' + category.icon + ' ' + category.name + ' · 来源：' + product.village + ' · 库存：' + product.stock + '</div><div class="text-xs text-gray-500 mt-1">采摘：' + product.harvest + ' · ' + Number(product.dispatchHours || 4) + ' 小时内发货</div>' + (tagHtml ? '<div class="flex flex-wrap gap-2 mt-2">' + tagHtml + '</div>' : '') + '<div class="text-xs text-gray-400 mt-2">' + (expanded ? '点击收起编辑内容' : '点击展开填写与上传内容') + '</div></div></button><div class="flex flex-col gap-2 items-end"><button onclick="toggleProd(' + product.id + ')" class="text-xs px-2 py-1 rounded-full h-fit ' + tone.badge + '">' + (product.off ? '已下架' : '在售') + '</button><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="text-xs px-3 py-1 rounded-full border border-gray-200 text-gray-500">' + (expanded ? '收起编辑' : '展开编辑') + '</button></div></div><div class="' + (expanded ? 'mt-3 pt-3 border-t border-gray-100' : 'hidden') + '">' + renderProductFormFields(options.prefix, product, options.canEditFarmer) + '<button onclick="' + options.saveAction + '" class="w-full mt-2 ' + tone.button + ' text-white py-2 rounded-lg text-sm">' + options.saveText + '</button></div></div>';
+    }
+
+    function validateAddressPayload(payload) {
+      if (!payload.name) return '请填写收货人姓名';
+      if (!payload.phone || payload.phone.length < 6) return '请填写正确的联系电话';
+      if (!payload.full) return '请填写完整地址';
+      return '';
+    }
+
+    function toggleProductEditorState(source, id, force) {
+      var store = source === 'farmer' ? farmerProductExpandState : adminProductExpandState;
+      store[id] = typeof force === 'boolean' ? force : !store[id];
+      if (source === 'farmer') showFarmerPanel();
+      else renderAdminPd();
+    }
+
+    function showCouponTypeFieldsByValue(type) {
+      var discountBlock = document.getElementById('coupon-discount-fields');
+      var fullReductionBlock = document.getElementById('coupon-full-reduction-fields');
+      if (discountBlock) discountBlock.classList.toggle('hidden', type !== 'discount');
+      if (fullReductionBlock) fullReductionBlock.classList.toggle('hidden', type === 'discount');
+    }
+
+    function syncCouponTypeFields() {
+      var typeInput = document.getElementById('coupon-template-type');
+      showCouponTypeFieldsByValue(typeInput ? typeInput.value : 'full_reduction');
+    }
+
+    function buildCouponTemplateFromForm() {
+      var type = document.getElementById('coupon-template-type').value;
+      var name = document.getElementById('coupon-template-name').value.trim();
+      var template = {
+        templateId: 'tpl_' + Date.now(),
+        name: name,
+        type: type
+      };
+      if (!name) { alert('请填写优惠券名称'); return null; }
+      if (type === 'discount') {
+        template.discountRate = Number(document.getElementById('coupon-template-discount').value || 0);
+        template.amount = 0;
+        template.minSpend = 0;
+        if (template.discountRate < 1 || template.discountRate > 9.9) { alert('折扣券请填写 1 到 9.9 之间的折扣'); return null; }
+      } else {
+        template.minSpend = Number(document.getElementById('coupon-template-min').value || 0);
+        template.amount = Number(document.getElementById('coupon-template-amount').value || 0);
+        template.discountRate = 0;
+        if (!(template.minSpend > 0)) { alert('请填写满减门槛'); return null; }
+        if (!(template.amount > 0)) { alert('请填写减免金额'); return null; }
+      }
+      return template;
+    }
+
+    function upsertCouponTemplate(template) {
+      var templates = getCouponTemplates().filter(function (item) { return item.templateId !== template.templateId; });
+      templates.unshift(template);
+      return saveCouponTemplatesToServer(templates).then(function () {
+        return template;
+      });
+    }
+
+    function saveCouponTemplateFromForm() {
+      var template = buildCouponTemplateFromForm();
+      if (!template) return;
+      upsertCouponTemplate(template).then(function () {
+        renderAdminCoupon();
+        alert('优惠券模板已保存');
+      }).catch(function (error) {
+        alert(error.message || '优惠券模板保存失败');
+      });
+    }
+
+    function openCouponPickerFromForm() {
+      var template = buildCouponTemplateFromForm();
+      if (!template) return;
+      upsertCouponTemplate(template).then(function () {
+        openCouponUserPicker(template.templateId);
+      }).catch(function (error) {
+        alert(error.message || '优惠券模板保存失败');
+      });
+    }
+
+    function issueCouponToAllFromForm() {
+      var template = buildCouponTemplateFromForm();
+      if (!template) return;
+      upsertCouponTemplate(template).then(function () {
+        issueCouponTemplateToAll(template.templateId);
+      }).catch(function (error) {
+        alert(error.message || '优惠券模板保存失败');
+      });
+    }
+
+    function openCouponUserPicker(templateId) {
+      couponRecipientState = { templateId: templateId, keyword: '', roleFilter: 'all', selectedUsers: {} };
+      renderAdminCoupon();
+    }
+
+    function closeCouponUserPicker() {
+      couponRecipientState = { templateId: '', keyword: '', roleFilter: 'all', selectedUsers: {} };
+      renderAdminCoupon();
+    }
+
+    function setCouponRecipientKeyword(value) {
+      couponRecipientState.keyword = value;
+      renderAdminCoupon();
+    }
+
+    function setCouponRecipientRoleFilter(value) {
+      couponRecipientState.roleFilter = value;
+      renderAdminCoupon();
+    }
+
+    function toggleCouponRecipient(username) {
+      couponRecipientState.selectedUsers[username] = !couponRecipientState.selectedUsers[username];
+      renderAdminCoupon();
+    }
+
+    function getFilteredCouponRecipients() {
+      var keyword = (couponRecipientState.keyword || '').toLowerCase();
+      var roleFilter = couponRecipientState.roleFilter || 'all';
+      return getBuyerUsers().filter(function (u) {
+        var roleText = getRoleLabelByMeta({ roles: u.roles }).toLowerCase();
+        var usernameMatched = !keyword || u.username.toLowerCase().indexOf(keyword) > -1 || roleText.indexOf(keyword) > -1;
+        var roleMatched = roleFilter === 'all'
+          || (roleFilter === 'farmer' && u.roles.isFarmer)
+          || (roleFilter === 'normal' && !u.roles.isFarmer && !u.roles.isAdmin);
+        return usernameMatched && roleMatched;
+      });
+    }
+
+    async function issueCouponTemplateToUsers(templateId, usernames) {
+      var template = getCouponTemplates().find(function (item) { return item.templateId === templateId; });
+      if (!template) { alert('未找到优惠券模板'); return false; }
+      if (!usernames.length) { alert('请至少选择一个用户'); return false; }
+      for (var index = 0; index < usernames.length; index++) {
+        var username = usernames[index];
+        var meta = getUserMeta(username);
+        meta.coupons = meta.coupons || [];
+        meta.coupons.push(buildCouponFromTemplate(template));
+        await saveUserMetaAndWait(username, meta);
+      }
+      await fetchUsers();
+      alert('优惠券已发放给 ' + usernames.length + ' 位用户');
+      return true;
+    }
+
+    function confirmSelectedCouponRecipients() {
+      var selectedUsers = Object.keys(couponRecipientState.selectedUsers).filter(function (username) { return couponRecipientState.selectedUsers[username]; });
+      issueCouponTemplateToUsers(couponRecipientState.templateId, selectedUsers).then(function (ok) {
+        if (ok) closeCouponUserPicker();
+      }).catch(function (error) {
+        alert(error.message || '优惠券发放失败');
+      });
+    }
+
+    function issueCouponTemplateToAll(templateId) {
+      var usernames = getBuyerUsers().map(function (u) { return u.username; });
+      issueCouponTemplateToUsers(templateId, usernames).then(function (ok) {
+        if (ok) renderAdminCoupon();
+      }).catch(function (error) {
+        alert(error.message || '优惠券发放失败');
+      });
+    }
+
+    async function saveBanner(index) {
+      var banners = getBanners().slice();
+      var current = banners[index];
+      if (!current) return;
+      current.title = document.getElementById('banner-' + index + '-title').value.trim();
+      current.sub = document.getElementById('banner-' + index + '-sub').value.trim();
+      var linkData = readOperationalLinkFields('banner-' + index);
+      current.linkType = linkData.linkType;
+      current.productId = linkData.productId;
+      current.externalUrl = linkData.externalUrl;
+      if (!current.title || !current.sub) { alert('请填写 Banner 标题和副标题'); return; }
+      var linkError = validateOperationalLink(linkData, 'Banner');
+      if (linkError) { alert(linkError); return; }
+      try {
+        current.img = await getImageFromInputAsync('banner-' + index + '-img', current.img, 'banners');
+        await saveBannersToServer(banners);
+        renderAdminBanner();
+        if (view === 'home') render();
+        alert('Banner 已更新');
+      } catch (error) {
+        alert(error.message || 'Banner 保存失败');
+      }
+    }
+
+    async function addBanner() {
+      var banners = getBanners().slice();
+      banners.push(normalizeBanner({
+        title: '新活动 Banner',
+        sub: '请填写副标题',
+        img: DEFAULT_PRODUCT_IMAGE
+      }, banners.length));
+      try {
+        await saveBannersToServer(banners);
+        renderAdminBanner();
+      } catch (error) {
+        alert(error.message || 'Banner 新增失败');
+      }
+    }
+
+    async function moveBanner(index, delta) {
+      var banners = getBanners().slice();
+      var target = index + delta;
+      if (target < 0 || target >= banners.length) return;
+      var temp = banners[index];
+      banners[index] = banners[target];
+      banners[target] = temp;
+      try {
+        await saveBannersToServer(banners);
+        renderAdminBanner();
+        if (view === 'home') render();
+      } catch (error) {
+        alert(error.message || 'Banner 排序失败');
+      }
+    }
+
+    async function removeBanner(index) {
+      var banners = getBanners().slice();
+      if (banners.length <= 1) { alert('至少保留 1 个 Banner'); return; }
+      banners.splice(index, 1);
+      try {
+        await saveBannersToServer(banners);
+        renderAdminBanner();
+        if (view === 'home') render();
+      } catch (error) {
+        alert(error.message || 'Banner 删除失败');
+      }
+    }
+
+    async function saveAnnouncement(index) {
+      var list = getAnnouncements().slice();
+      var current = list[index];
+      if (!current) return;
+      current.text = document.getElementById('announcement-' + index + '-text').value.trim();
+      current.active = !!document.getElementById('announcement-' + index + '-active').checked;
+      var linkData = readOperationalLinkFields('announcement-' + index);
+      current.linkType = linkData.linkType;
+      current.productId = linkData.productId;
+      current.externalUrl = linkData.externalUrl;
+      if (!current.text) { alert('请填写公告内容'); return; }
+      var linkError = validateOperationalLink(linkData, '公告');
+      if (linkError) { alert(linkError); return; }
+      try {
+        await saveAnnouncementsToServer(list);
+        renderAdminBanner();
+        if (view === 'home') render();
+        alert('公告已更新');
+      } catch (error) {
+        alert(error.message || '公告保存失败');
+      }
+    }
+
+    async function addAnnouncement() {
+      var list = getAnnouncements().slice();
+      list.push(normalizeAnnouncement({ text: '请输入公告内容', active: true }, list.length));
+      try {
+        await saveAnnouncementsToServer(list);
+        renderAdminBanner();
+      } catch (error) {
+        alert(error.message || '公告新增失败');
+      }
+    }
+
+    async function moveAnnouncement(index, delta) {
+      var list = getAnnouncements().slice();
+      var target = index + delta;
+      if (target < 0 || target >= list.length) return;
+      var temp = list[index];
+      list[index] = list[target];
+      list[target] = temp;
+      try {
+        await saveAnnouncementsToServer(list);
+        renderAdminBanner();
+        if (view === 'home') render();
+      } catch (error) {
+        alert(error.message || '公告排序失败');
+      }
+    }
+
+    async function removeAnnouncement(index) {
+      var list = getAnnouncements().slice();
+      list.splice(index, 1);
+      try {
+        await saveAnnouncementsToServer(list);
+        renderAdminBanner();
+        if (view === 'home') render();
+      } catch (error) {
+        alert(error.message || '公告删除失败');
+      }
+    }
+
+    function getSelectedAddress(meta) {
+      var addressId = meta.selectedAddressId || '';
+      return (meta.addresses || []).find(function (item) { return item.id === addressId; }) || meta.addresses[0] || null;
+    }
+
+    function getSelectedCoupon(meta, subtotal) {
+      var couponId = meta.selectedCouponId || '';
+      var coupon = (meta.coupons || []).find(function (item) { return item.id === couponId && !item.used; }) || null;
+      if (!coupon) return null;
+      return calcCouponDiscount(coupon, subtotal) > 0 ? coupon : null;
+    }
+
+    function saveData() {
+      if (!user) return;
+      persistUserState(user).catch(function (error) {
+        console.error(error);
+      });
+    }
+    function loadData() {
+      const u = localStorage.getItem('cs_user');
+      if (u) {
+        user = u;
+        var record = getUserRecord(u);
+        if (record) {
+          cart = record.cart || [];
+          orders = record.orders || [];
+          member = record.member || { levelId: 'normal', points: 0, totalSpent: 0 };
+        }
+        updateCartBadge();
+      }
+    }
+    function updateCartBadge() {
+      const b = $('cart-badge');
+      if (b) { b.textContent = cart.reduce((s, i) => s + i.qty, 0); b.classList.toggle('hidden', cart.length === 0); }
+    }
+    // 当前版本只保留累计消费字段，供订单统计和个人中心展示复用。
+    function calcLevel() { return 'normal'; }
+    function addPoints(amount) {
+      member.totalSpent = Number(member.totalSpent || 0) + Number(amount || 0);
+    }
+
+    // === RENDER ===
+    function render() {
+      const app = $('app');
+      clearBannerAutoRotation();
+      $('nav').style.display = ['home', 'category', 'cart', 'profile', 'orders'].includes(view) ? 'flex' : 'none';
+      updateCartBadge();
+      switch (view) {
+        case 'home': app.innerHTML = home(); break;
+        case 'category': app.innerHTML = category(); break;
+        case 'cart': app.innerHTML = cartPage(); break;
+        case 'profile': app.innerHTML = profile(); break;
+        case 'product': app.innerHTML = product(paramId); break;
+        case 'orders': app.innerHTML = ordersPage(); break;
+        case 'orderDetail': app.innerHTML = orderDetail(paramId); break;
+        case 'member': app.innerHTML = memberCenter(); break;
+        case 'address': app.innerHTML = addressPage(); break;
+        case 'coupon': app.innerHTML = couponPage(); break;
+        case 'trace': app.innerHTML = tracePage(paramId); break;
+        case 'login': app.innerHTML = loginPage(); break;
+        case 'register': app.innerHTML = registerPage(); break;
+        default: app.innerHTML = home();
+      }
+      if (view === 'home') scheduleBannerAutoRotation();
+      try { lucide.createIcons(); } catch (e) { }
+    }
+
+    function home() {
+      // 首页商品列表直接读取实时商品数据，避免和管理端/农户端编辑结果脱节。
+      var prods = getProds().filter(function (p) { return !p.off; });
+      var banners = getBanners();
+      var bannerIndex = banners.length ? activeBannerIndex % banners.length : 0;
+      var heroBanner = banners[bannerIndex] || normalizeBanner({}, 0);
+      var announcements = getActiveAnnouncements();
+      return `<div class="p-4">
+${!user ? `<div class="bg-gradient-to-r from-[#2D9D4E] to-[#1E7A3A] rounded-xl p-4 mb-4 text-white" onclick="go('register')">
+<div class="font-bold">🌾 新人专属礼包</div>
+<div class="text-sm opacity-90 mt-1">注册即送新人优惠券，首单更划算</div>
+<button class="mt-2 bg-white text-[#2D9D4E] text-xs px-4 py-1 rounded-full font-medium">立即领取</button>
+</div>`: ''}
+<div class="bg-white rounded-xl overflow-hidden shadow mb-4">
+<img src="${heroBanner.img}" class="w-full h-40 object-cover" onclick="triggerOperationalLink(getBanners()[${bannerIndex}])">
+<div class="p-3"><div class="font-bold text-[#2D9D4E]">${heroBanner.title}</div><div class="text-sm text-gray-500">${heroBanner.sub}</div></div>
+${banners.length > 1 ? `<div class="flex items-center justify-center gap-2 pb-3">${banners.map(function (_, index) { return `<button onclick="setActiveBanner(${index})" class="w-2.5 h-2.5 rounded-full ${index === bannerIndex ? 'bg-[#2D9D4E]' : 'bg-gray-200'}"></button>`; }).join('')}</div>` : ''}
+</div>
+${announcements.length ? `<div class="bg-[#FFF7ED] rounded-xl p-3 mb-4 shadow"><div class="text-sm font-medium text-[#E07B39] mb-2">📢 今日公告</div><div class="space-y-2">${announcements.map(function (item, index) { return `<button onclick="triggerOperationalLink(getActiveAnnouncements()[${index}])" class="w-full text-left text-xs text-gray-600 leading-5 ${item.linkType !== 'none' ? 'hover:text-[#E07B39]' : ''}">• ${item.text}${item.linkType !== 'none' ? ' · ' + getOperationalLinkLabel(item.linkType) : ''}</button>`; }).join('')}</div></div>` : ''}
+<div class="bg-white rounded-xl p-4 shadow mb-4">
+<div class="grid grid-cols-5 gap-2">
+${CATEGORIES.map(c => `<button onclick="setCat('${c.id}')" class="flex flex-col items-center p-2"><span class="text-2xl">${c.icon}</span><span class="text-xs mt-1">${c.name}</span></button>`).join('')}
+</div></div>
+<div class="font-bold text-lg mb-3">🌿 全部商品</div>
+<div class="grid grid-cols-2 gap-3">
+${prods.map(p => card(p)).join('')}
+</div></div>`;
+    }
+
+    function card(p) {
+      var category = getCategoryMeta(p.cat || 'veg');
+      const tags = getProductTags(p.tags || []).map(renderTagBadge).join('');
+      return `<div class="bg-white rounded-xl shadow overflow-hidden" onclick="pushView('product',${p.id})">
+<img src="${p.img}" class="w-full aspect-square object-cover">
+<div class="p-3"><div class="text-xs text-gray-500">${category.icon} ${category.name} · ${p.unit}</div>
+<div class="font-medium text-sm my-1 line-clamp-2">${p.name}</div>
+<div class="flex items-center gap-1"><span class="text-[#2D9D4E] font-bold">${fmt(p.price)}</span><span class="text-gray-400 text-xs line-through">${fmt(p.orig)}</span></div>
+<div class="flex items-center justify-between mt-1">
+<span class="text-[10px] text-gray-400">已售${p.sales} · 库存${p.stock}</span>
+${tags}
+</div></div></div>`;
+    }
+
+    function category() {
+      const prods = getProds().filter(function (p) { return !p.off; });
+      const f = cat ? prods.filter(p => p.cat === cat) : prods;
+      const n = CATEGORIES.find(c => c.id === cat)?.name || '全部分类';
+      return `<div class="p-4">
+<div class="font-bold text-lg mb-3">${n}</div>
+<div class="flex gap-2 mb-4 overflow-x-auto pb-2">
+<button onclick="setCat('')" class="px-3 py-1 rounded-full text-sm shrink-0 ${!cat ? 'bg-[#2D9D4E] text-white' : 'bg-gray-100'}">全部</button>
+${CATEGORIES.map(c => `<button onclick="setCat('${c.id}')" class="px-3 py-1 rounded-full text-sm shrink-0 ${cat === c.id ? 'bg-[#2D9D4E] text-white' : 'bg-gray-100'}">${c.icon} ${c.name}</button>`).join('')}
+</div>
+<div class="grid grid-cols-2 gap-3">
+${f.map(p => card(p)).join('')}
+</div></div>`;
+    }
+
+    function product(id) {
+      const p = getProds().find(x => x.id === id);
+      if (!p) return '<div class="p-4 text-center">商品不存在</div>';
+      const price = p.price;
+      var category = getCategoryMeta(p.cat || 'veg');
+      return `<div class="p-4">
+<a onclick="back()" class="flex items-center gap-1 text-sm text-gray-500 mb-3"><i data-lucide="arrow-left" class="w-4 h-4"></i>返回</a>
+<img src="${p.img}" class="w-full rounded-xl mb-4">
+<div class="flex items-center gap-2 mb-1">
+${getProductTags(p.tags || []).map(renderTagBadge).join('')}
+</div>
+<div class="font-bold text-xl mb-1">${p.name}</div>
+<div class="text-sm text-gray-500 mb-2">${category.icon} ${category.name} · ${p.unit} · 已售${p.sales} · 库存${p.stock}</div>
+<div class="flex items-baseline gap-2 mb-4">
+<span class="text-[#2D9D4E] font-bold text-3xl">${fmt(price)}</span>
+<span class="text-gray-400 line-through">${fmt(p.orig)}</span>
+</div>
+${p.farmer ? `<div class="bg-[#E8F5EC] rounded-xl p-3 mb-4">
+<div class="flex items-center gap-2">
+<span class="text-2xl">👨‍🌾</span>
+<div><div class="font-medium text-sm">${p.farmer}</div><div class="text-xs text-gray-500">${p.village} · 种植人</div></div>
+<button onclick="pushView('trace',${p.id})" class="ml-auto flex items-center gap-1 text-xs text-[#2D9D4E]">溯源<i data-lucide="chevron-right" class="w-3 h-3"></i></button>
+</div></div>`: ''}
+<div class="bg-white rounded-xl p-4 mb-4">
+<div class="font-medium mb-2">📦 配送信息</div>
+<div class="text-sm text-gray-500">采摘日期: ${p.harvest}</div>
+<div class="text-sm text-gray-500">${p.dispatchHours || 4}小时内发货</div>
+</div>
+<div class="flex gap-3">
+<button onclick="addToCart(${p.id})" class="flex-1 border-2 border-[#2D9D4E] text-[#2D9D4E] py-3 rounded-xl font-medium btn">加入购物车</button>
+<button onclick="addToCart(${p.id});go('cart')" class="flex-1 bg-[#E07B39] text-white py-3 rounded-xl font-medium btn">立即购买</button>
+</div></div>`;
+    }
+
+    function cartPage() {
+      if (!user) return `<div class="p-4 text-center"><div class="text-5xl mb-4">🛒</div><div class="mb-4">登录后查看购物车</div><button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">登录</button></div>`;
+      if (cart.length === 0) return `<div class="p-4 text-center"><div class="text-5xl mb-4">🛒</div><div class="mb-4 text-gray-500">购物车是空的</div><button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">去逛逛</button></div>`;
+      // 购物车页兼任结算确认页：这里集中展示地址和优惠券选择结果。
+      var meta = getUserMeta();
+      var address = getSelectedAddress(meta);
+      const t = cart.reduce((s, i) => s + i.price * i.qty, 0);
+      const delFee = 5;
+      var coupon = getSelectedCoupon(meta, t);
+      var discount = calcCouponDiscount(coupon, t);
+      const total = Math.max(0, t + delFee - discount);
+      return `<div class="p-4">
+<div class="font-bold text-lg mb-4">购物车 (${cart.length}件)</div>
+<div class="space-y-3 mb-4">${cart.map(i => `<div class="bg-white rounded-xl p-3 flex gap-3">
+<img src="${i.img}" class="w-16 h-16 rounded-lg object-cover">
+<div class="flex-1"><div class="font-medium text-sm line-clamp-1">${i.name}</div><div class="text-xs text-gray-500">${i.unit}</div>
+<div class="flex items-center justify-between mt-2">
+<span class="text-[#2D9D4E] font-bold">${fmt(i.price)}</span>
+<div class="flex items-center gap-2">
+<button onclick="upd(${i.id},-1)" class="w-7 h-7 bg-gray-100 rounded-full flex items-center justify-center btn">-</button>
+<span class="text-sm w-5 text-center">${i.qty}</span>
+<button onclick="upd(${i.id},1)" class="w-7 h-7 bg-[#2D9D4E] text-white rounded-full flex items-center justify-center btn">+</button>
+</div></div></div></div>`).join('')}</div>
+<div class="bg-white rounded-xl p-4 mb-20">
+<div class="flex justify-between items-center text-sm mb-1"><span class="text-gray-500">收货地址</span><button onclick="go('address')" class="text-[#2D9D4E]">${address ? '去修改' : '去添加'}</button></div>
+<div class="text-xs text-gray-500 mb-3">${address ? address.name + ' · ' + address.phone + ' · ' + address.full : '暂无收货地址，请先添加'}</div>
+<div class="flex justify-between items-center text-sm mb-2"><span class="text-gray-500">优惠券</span><button onclick="go('coupon')" class="text-[#2D9D4E]">${coupon ? coupon.name : '去选择'}</button></div>
+${coupon ? `<div class="text-xs text-[#E07B39] mb-2">${getCouponMetaText(coupon)}</div>` : ''}
+<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">商品金额</span><span>${fmt(t)}</span></div>
+<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">配送费</span><span class="text-gray-500">${fmt(delFee)}</span></div>
+<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">优惠抵扣</span><span class="${discount > 0 ? 'text-[#E07B39]' : 'text-gray-400'}">${discount > 0 ? '-' + fmt(discount) : '未使用'}</span></div>
+<div class="flex justify-between font-bold text-lg pt-2 border-t"><span>合计</span><span class="text-[#2D9D4E]">${fmt(total)}</span></div>
+<button onclick="doCheckout()" class="w-full mt-4 bg-[#2D9D4E] text-white py-3 rounded-xl font-medium btn">提交订单</button></div></div>`;
+    }
+
+    function memberCenter() {
+      return `<div class="p-4">
+<div class="flex items-center gap-3 mb-4">
+<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+<div class="font-bold text-lg">功能说明</div>
+</div>
+<div class="bg-white rounded-xl p-4 mb-4">
+<div class="font-bold mb-3">当前说明</div>
+<div class="text-sm text-gray-500 leading-6">当前版本聚焦商品购买、地址、优惠券、角色权限和库存管理能力，页面说明会随功能迭代同步更新。</div>
+</div></div>`;
+    }
+
+    function ordersPage() {
+      if (!user) return `<div class="p-4 text-center"><div class="text-4xl mb-4">📋</div><button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">登录</button></div>`;
+      if (orders.length === 0) return `<div class="p-4 text-center"><div class="text-5xl mb-4">📦</div><div class="text-gray-500 mb-4">暂无订单</div><button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">去逛逛</button></div>`;
+      const statusMap = { pending: '待付款', paid: '待发货', shipped: '待收货', done: '已完成', cancelled: '已取消' };
+      const statusColor = { pending: 'text-[#E07B39]', paid: 'text-[#2D9D4E]', shipped: 'text-[#6B7C6B]', done: 'text-gray-400', cancelled: 'text-gray-400' };
+      return `<div class="p-4">
+<div class="flex items-center gap-3 mb-4">
+<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+<div class="font-bold text-lg">我的订单</div>
+</div>
+<div class="space-y-3">
+${orders.map((o, i) => {
+        const p = o.items[0]; return `<div class="bg-white rounded-xl p-3" onclick="pushView('orderDetail',${i})">
+<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">订单号: ${o.id}</span><span class="${statusColor[o.status] || ''}">${statusMap[o.status] || o.status}</span></div>
+<div class="flex gap-3"><img src="${p.img}" class="w-14 h-14 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm line-clamp-1">${p.name}${o.items.length > 1 ? `等${o.items.length}件` : ''}</div><div class="text-xs text-gray-500 mt-1">${o.items.length}件 · 实付<span class="text-[#2D9D4E] font-bold">${fmt(o.total)}</span></div></div></div>
+<div class="text-xs text-gray-400 mt-2">${new Date(o.time).toLocaleDateString('zh-CN')}</div></div>`;
+      }).join('')}
+</div></div>`;
+    }
+
+    function orderDetail(idx) {
+      const o = orders[idx];
+      if (!o) return '<div class="p-4">订单不存在</div>';
+      var addrText = o.address ? (o.address.name + ' · ' + o.address.phone + ' · ' + o.address.full) : '暂无地址信息';
+      const statusMap = { pending: '待付款', paid: '待发货', shipped: '待收货', done: '已完成', cancelled: '已取消' };
+      return `<div class="p-4">
+<div class="flex items-center gap-3 mb-4">
+<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+<div class="font-bold text-lg">订单详情</div>
+</div>
+<div class="bg-white rounded-xl p-4 mb-4">
+<div class="font-medium mb-2">订单状态</div>
+<div class="text-[#2D9D4E] font-bold">${statusMap[o.status] || o.status}</div>
+<div class="text-sm text-gray-500 mt-1">订单号: ${o.id}</div>
+<div class="text-sm text-gray-500">下单时间: ${new Date(o.time).toLocaleString('zh-CN')}</div>
+</div>
+<div class="bg-white rounded-xl p-4 mb-4">
+<div class="font-medium mb-2">商品清单</div>
+${o.items.map(i => `<div class="flex gap-3 py-2 border-b last:border-0">
+<img src="${i.img}" class="w-12 h-12 rounded-lg object-cover">
+<div class="flex-1"><div class="text-sm">${i.name}</div><div class="text-xs text-gray-500">${i.unit} × ${i.qty}</div></div>
+<div class="text-sm font-bold">${fmt(i.price * i.qty)}</div>
+</div>`).join('')}
+<div class="flex justify-between font-bold mt-3 pt-3 border-t"><span>实付金额</span><span class="text-[#2D9D4E]">${fmt(o.total)}</span></div>
+</div>
+${o.status === 'shipped' ? `<div class="bg-[#E8F5EC] rounded-xl p-4 mb-4">
+<div class="font-medium text-[#2D9D4E] mb-2">📍 物流信息</div>
+<div class="text-sm text-gray-600">配送员小陈 · 预计今日14:00-18:00送达</div>
+</div>`: ''}
+<div class="bg-white rounded-xl p-4 mb-4">
+<div class="font-medium mb-2">收货地址</div>
+<div class="text-sm text-gray-500">${addrText}</div>
+</div>
+${o.status === 'pending' ? `<button onclick="payOrder(${idx})" class="w-full bg-[#2D9D4E] text-white py-3 rounded-xl font-medium btn">去支付</button>
+<button onclick="cancelOrder(${idx})" class="w-full mt-2 py-3 border border-gray-200 rounded-xl text-gray-500 btn">取消订单</button>` : ''}
+${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full bg-[#2D9D4E] text-white py-3 rounded-xl font-medium btn">确认收货</button>` : ''}
+</div>`;
+    }
+
+    function tracePage(id) {
+      const p = getProds().find(x => x.id === id);
+      if (!p) return '<div class="p-4">商品不存在</div>';
+      return `<div class="p-4">
+<div class="flex items-center gap-3 mb-4">
+<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+<div class="font-bold text-lg">溯源档案</div>
+</div>
+<div class="bg-gradient-to-r from-[#E8F5EC] to-[#F5F0E8] rounded-xl p-4 mb-4">
+<div class="flex items-center gap-3">
+<img src="${p.img}" class="w-12 h-12 rounded-lg object-cover">
+<div class="flex-1"><div class="font-bold">${p.name}</div><div class="text-xs text-gray-500">只展示来源信息，不展示物流节点</div></div>
+</div>
+</div>
+<div class="bg-white rounded-xl p-4 space-y-3">
+<div><div class="text-sm text-gray-500 mb-1">来源产地</div><div class="font-medium">${p.village}</div></div>
+<div><div class="text-sm text-gray-500 mb-1">种植 / 供货人</div><div class="font-medium">${p.farmer}</div></div>
+<div><div class="text-sm text-gray-500 mb-1">采摘日期</div><div class="font-medium">${p.harvest}</div></div>
+<div><div class="text-sm text-gray-500 mb-1">发货时效</div><div class="font-medium">${p.dispatchHours || 4}小时内发货</div></div>
+</div></div>`;
+    }
+
+    function loginPage() {
+      return `<div class="p-4 max-w-sm mx-auto">
+<div class="font-bold text-2xl mb-6 text-center">🌾 云田野</div>
+<div class="text-center text-gray-500 text-sm mb-6">登录后管理订单、地址和优惠券</div>
+<input id="lu" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3">
+<input id="lp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4">
+<button onclick="doLogin()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">登录</button>
+<div class="text-center mt-4 text-sm text-gray-500">没有账号? <button onclick="go('register')" class="text-[#2D9D4E] font-medium">立即注册</button></div></div>`;
+    }
+
+    function registerPage() {
+      return `<div class="p-4 max-w-sm mx-auto">
+<div class="font-bold text-2xl mb-6 text-center">🌾 加入云田野</div>
+<div class="text-center text-gray-500 text-sm mb-6">注册后即可下单、配置地址与使用优惠券</div>
+<input id="ru" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3">
+<input id="rp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4">
+<button onclick="doRegister()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">注册并登录</button>
+<div class="text-center mt-4 text-sm text-gray-500">已有账号? <button onclick="go('login')" class="text-[#2D9D4E] font-medium">立即登录</button></div></div>`;
+    }
+
+    // === ACTIONS ===
+    async function doLogin() {
+      const u = $('lu').value.trim(), p = $('lp').value;
+      if (!u || !p) { alert('请填写用户名和密码'); return; }
+      try {
+        var response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: u, password: p })
+        });
+        if (!response.ok) {
+          var errorPayload = await response.json().catch(function () { return { message: '登录失败' }; });
+          alert((errorPayload && errorPayload.message) || '登录失败');
+          return;
+        }
+        var loginUser = normalizeUserRecord(await response.json());
+        usersState[loginUser.username] = loginUser;
+        user = loginUser.username;
+        cart = loginUser.cart || [];
+        orders = loginUser.orders || [];
+        member = loginUser.member || { levelId: 'normal', points: 0, totalSpent: 0 };
+        localStorage.setItem('cs_user', user);
+        await fetchUsers();
+        go('home');
+      } catch (error) {
+        alert(error.message || '登录失败');
+      }
+    }
+
+    async function doRegister() {
+      const u = $('ru').value.trim(), p = $('rp').value;
+      if (!u || !p) { alert('请填写用户名和密码'); return; }
+      if (u.length < 3) { alert('用户名至少3个字符'); return; }
+      try {
+        var response = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: u, password: p })
+        });
+        if (!response.ok) {
+          var errorPayload = await response.json().catch(function () { return { message: '注册失败' }; });
+          alert((errorPayload && errorPayload.message) || '注册失败');
+          return;
+        }
+        var createdUser = normalizeUserRecord(await response.json());
+        usersState[createdUser.username] = createdUser;
+        user = createdUser.username;
+        cart = createdUser.cart || [];
+        orders = createdUser.orders || [];
+        member = createdUser.member || { levelId: 'normal', points: 0, totalSpent: 0 };
+        localStorage.setItem('cs_user', user);
+        await fetchUsers();
+        alert('注册成功！已发放新人优惠券');
+        go('home');
+      } catch (error) {
+        alert(error.message || '注册失败');
+      }
+    }
+
+    function profile() {
+      if (!user) return '<div class="p-4 text-center"><div class="text-5xl mb-4">👤</div><div class="mb-4">登录后查看个人信息</div><button onclick="go(\'login\')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">登录</button></div>';
+      var role = getUserRole();
+      var farmerBtn = role.isFarmer ? '<button onclick="go(\'farmer\')" class="w-full p-4 bg-[#FCEBD8] text-[#E07B39] font-medium rounded-xl mb-3">👨🌾 进入农户端</button>' : '';
+      var adminBtn = role.isAdmin ? '<button onclick="go(\'admin\')" class="w-full p-4 bg-[#E8F5EC] text-[#2D9D4E] font-medium rounded-xl mb-3">🔧 进入管理端</button>' : '';
+      var meta = getUserMeta();
+      var address = getSelectedAddress(meta);
+      var availableCoupon = (meta.coupons || []).filter(function (item) { return !item.used; }).length;
+      var orderCount = orders ? orders.length : 0;
+      var h = '<div class="p-4">';
+      h += '<div class="bg-white rounded-xl p-4 mb-4"><div class="flex items-center gap-3 mb-3"><div class="w-14 h-14 rounded-full bg-[#E8F5EC] flex items-center justify-center text-2xl">🌾</div><div class="flex-1"><div class="flex items-center gap-2 flex-wrap"><div class="font-bold text-lg">' + user + '</div>' + getRoleBadgeHtml({ roles: role }) + '</div><div class="text-xs text-gray-400 mt-1">注册时间：' + (meta.createdAt || '待记录') + '</div></div></div><div class="bg-[#F5F0E8] rounded-lg p-3"><div class="flex justify-between text-xs mb-1"><span class="text-gray-500">累计消费</span><span>¥' + Number(member.totalSpent || 0).toFixed(2) + '</span></div><div class="text-xs text-gray-500 mt-2">当前版本已开放商品购买、地址、优惠券、角色权限和库存管理能力</div></div></div>';
+      h += '<div class="bg-white rounded-xl divide-y mb-4"><button onclick="go(\'orders\')" class="w-full p-4 flex justify-between"><span>我的订单</span><span class="text-gray-400">' + orderCount + '笔 ›</span></button><button onclick="go(\'address\')" class="w-full p-4 flex justify-between"><span>收货地址</span><span class="text-gray-400">' + (address ? address.name + ' ›' : '去添加 ›') + '</span></button><button onclick="go(\'coupon\')" class="w-full p-4 flex justify-between"><span>优惠券</span><span class="text-gray-400">' + availableCoupon + '张可用 ›</span></button></div>';
+      h += farmerBtn;
+      h += adminBtn;
+      h += '<button onclick="logout()" class="w-full p-3 bg-gray-100 rounded-xl text-gray-500">退出登录</button></div>';
+      return h;
+    }
+
+    // 买家地址管理改成表单录入，保证录入校验和默认地址选择都留在同一页完成。
+    function addressPage() {
+      if (!user) return '<div class="p-4 text-center">请先登录</div>';
+      var meta = getUserMeta();
+      var list = meta.addresses || [];
+      return `<div class="p-4">
+<div class="flex items-center gap-3 mb-4"><button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button><div class="font-bold text-lg">收货地址</div></div>
+<div class="space-y-3 mb-4">${list.length ? list.map(function (item) { return `<button onclick="setDefaultAddress('${item.id}')" class="w-full text-left bg-white rounded-xl p-4 border ${meta.selectedAddressId === item.id ? 'border-[#2D9D4E]' : 'border-transparent'}"><div class="flex justify-between"><div class="font-medium">${item.name} ${item.phone}</div><div class="text-xs ${meta.selectedAddressId === item.id ? 'text-[#2D9D4E]' : 'text-gray-400'}">${meta.selectedAddressId === item.id ? '默认地址' : '设为默认'}</div></div><div class="text-sm text-gray-500 mt-2">${item.full}</div></button>`; }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400">暂无地址，请先添加</div>'}</div>
+<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-3">新增地址</div><input id="address-name" placeholder="收货人姓名" class="w-full p-2 border rounded-lg mb-2 text-sm"><input id="address-phone" placeholder="联系电话" class="w-full p-2 border rounded-lg mb-2 text-sm"><textarea id="address-full" placeholder="详细地址" class="w-full p-2 border rounded-lg mb-3 text-sm h-24 resize-none"></textarea><button onclick="addAddress()" class="w-full bg-[#2D9D4E] text-white py-3 rounded-xl font-medium">保存地址</button></div></div>`;
+    }
+
+    function couponPage() {
+      if (!user) return '<div class="p-4 text-center">请先登录</div>';
+      var meta = getUserMeta();
+      var list = meta.coupons || [];
+      return `<div class="p-4">
+<div class="flex items-center gap-3 mb-4"><button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button><div class="font-bold text-lg">优惠券</div></div>
+<div class="text-xs text-gray-500 mb-3">优惠券由后台配置后自动发放，结算时可直接选择。</div><div class="space-y-3">${list.length ? list.map(function (item) { return `<button onclick="selectCoupon('${item.id}')" class="w-full text-left rounded-xl p-4 ${item.used ? 'bg-gray-100 text-gray-400' : 'bg-white'} border ${meta.selectedCouponId === item.id ? 'border-[#E07B39]' : 'border-transparent'}"><div class="flex justify-between"><div class="font-bold text-lg">${item.name}</div><div class="text-sm">${item.used ? '已使用' : getCouponBenefitText(item)}</div></div><div class="text-xs mt-2">${item.used ? '该券已失效' : (meta.selectedCouponId === item.id ? '当前已选中 · ' + getCouponTypeLabel(item.type) : '点击即可设为本次结算优惠券')}</div></button>`; }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400">暂无优惠券</div>'}</div></div>`;
+    }
+
+    function addAddress() {
+      if (!user) return;
+      var payload = {
+        name: document.getElementById('address-name').value.trim(),
+        phone: document.getElementById('address-phone').value.trim(),
+        full: document.getElementById('address-full').value.trim()
+      };
+      var error = validateAddressPayload(payload);
+      if (error) { alert(error); return; }
+      var meta = getUserMeta();
+      var item = { id: 'addr_' + Date.now(), name: payload.name, phone: payload.phone, full: payload.full };
+      meta.addresses.push(item);
+      if (!meta.selectedAddressId) meta.selectedAddressId = item.id;
+      saveUserMeta(user, meta);
+      render();
+    }
+
+    function setDefaultAddress(id) {
+      var meta = getUserMeta();
+      meta.selectedAddressId = id;
+      saveUserMeta(user, meta);
+      render();
+    }
+
+    function selectCoupon(id) {
+      var meta = getUserMeta();
+      if (meta.selectedCouponId === id) meta.selectedCouponId = '';
+      else meta.selectedCouponId = id;
+      saveUserMeta(user, meta);
+      render();
+    }
+    function logout() { user = null; cart = []; orders = []; member = { levelId: 'normal', points: 0, totalSpent: 0 }; localStorage.removeItem('cs_user'); updateCartBadge(); go('home'); }
+
+    function addToCart(id) {
+      // 加购前先校验实时库存，避免买家端继续把缺货商品加进购物车。
+      const p = getProds().find(x => x.id === id);
+      if (!p) return;
+      const i = cart.find(x => x.id === id);
+      if (p.stock <= 0) { alert('当前库存不足'); return; }
+      if (i) {
+        if (i.qty >= p.stock) { alert('已达到可购买上限'); return; }
+        i.qty++;
+      }
+      else cart.push({ id, name: p.name, price: p.price, unit: p.unit, img: p.img, qty: 1 });
+      saveData();
+      updateCartBadge();
+      alert('已加入购物车');
+    }
+
+    function upd(id, d) {
+      const i = cart.find(x => x.id === id);
+      const p = getProds().find(x => x.id === id);
+      if (i) {
+        if (d > 0 && p && i.qty >= p.stock) { alert('库存不足'); return; }
+        i.qty += d;
+        if (i.qty <= 0) { cart = cart.filter(x => x.id !== id); }
+        saveData(); updateCartBadge(); render();
+      }
+    }
+
+    async function doCheckout() {
+      if (!user) return;
+      var meta = getUserMeta();
+      var address = getSelectedAddress(meta);
+      if (!address) { alert('请先配置收货地址'); go('address'); return; }
+      var ps = getProds().map(cloneProduct);
+      for (var idx = 0; idx < cart.length; idx++) {
+        var item = cart[idx];
+        var prod = ps.find(function (p) { return p.id === item.id; });
+        if (!prod || prod.stock < item.qty) { alert(item.name + ' 库存不足，请修改购物车后再结算'); return; }
+      }
+      const t = cart.reduce((s, i) => s + i.price * i.qty, 0);
+      var coupon = getSelectedCoupon(meta, t);
+      var discount = calcCouponDiscount(coupon, t);
+      const total = Math.max(0, t + 5 - discount);
+      const order = { id: 'ORD' + Date.now(), items: cart.map(i => ({ ...i })), total, status: 'paid', time: Date.now(), address: address, coupon: coupon ? (coupon.name + '（' + getCouponBenefitText(coupon) + '）') : '' };
+      orders.unshift(order);
+      addPoints(t);
+      // 订单成功后统一扣减库存、累计销量，并把已选优惠券标记成已使用。
+      cart.forEach(function (item) {
+        var prod = ps.find(function (p) { return p.id === item.id; });
+        if (prod) {
+          prod.stock = Math.max(0, prod.stock - item.qty);
+          prod.sales = (prod.sales || 0) + item.qty;
+        }
+      });
+      try {
+        var changedProducts = ps.filter(function (prod) {
+          return cart.some(function (item) { return item.id === prod.id; });
+        });
+        for (var pIndex = 0; pIndex < changedProducts.length; pIndex++) {
+          await saveProductToServer(changedProducts[pIndex], { refresh: false });
+        }
+        await fetchProducts();
+      } catch (error) {
+        alert(error.message || '库存同步失败，请稍后重试');
+        return;
+      }
+      if (coupon) {
+        meta.coupons = meta.coupons.map(function (item) { return item.id === coupon.id ? Object.assign({}, item, { used: true }) : item; });
+        meta.selectedCouponId = '';
+        saveUserMeta(user, meta);
+      }
+      cart = [];
+      saveData();
+      updateCartBadge();
+      alert('订单提交成功！');
+      go('orders');
+    }
+
+    function payOrder(idx) {
+      orders[idx].status = 'shipped';
+      saveData();
+      alert('支付成功，商品已发货！');
+      render();
+    }
+
+    function cancelOrder(idx) {
+      if (!confirm('确定要取消订单吗?')) return;
+      orders[idx].status = 'cancelled';
+      saveData();
+      go('orders');
+    }
+
+    function confirmOrder(idx) {
+      orders[idx].status = 'done';
+      saveData();
+      alert('已确认收货!');
+      render();
+    }
+
+    function applyRouteFromHash() {
+      var hash = location.hash.slice(1) || '/';
+      var parts = hash.split('/').filter(Boolean);
+      view = parts[0] || 'home';
+      paramId = parseInt(parts[1]) || 0;
+    }
+
+    function handleRouteChange() {
+      applyRouteFromHash();
+      var role = getUserRole();
+      if (view === 'admin') {
+        if (role.isAdmin) { showAdminPanel(); }
+        else { go('login'); }
+        return;
+      }
+      if (view === 'farmer') {
+        if (role.isFarmer) { showFarmerPanel(); }
+        else if (!user) { go('login'); }
+        else { alert('您尚未获得农户权限'); go('profile'); }
+        return;
+      }
+      if (view !== 'admin' && view !== 'farmer') {
+        document.getElementById('admin-panel') && document.getElementById('admin-panel').classList.add('hidden');
+        document.getElementById('farmer-panel') && document.getElementById('farmer-panel').classList.add('hidden');
+      }
+      render();
+    }
+
+    // 初始化先用本地默认数据首屏渲染，避免任一接口慢响应时页面长期停在加载态。
+    async function initApp() {
+      loadData();
+      if (!location.hash) location.hash = '/home';
+      setProds(PRODUCTS);
+      setBanners(BANNERS);
+      setAnnouncements(ANNOUNCEMENTS);
+      setCouponTemplates(createDefaultCouponTemplates());
+      handleRouteChange();
+      try {
+        await Promise.all([fetchProducts(), fetchBanners(), fetchAnnouncements(), fetchUsers(), fetchCouponTemplates()]);
+        handleRouteChange();
+      } catch (error) {
+        console.error(error);
+        handleRouteChange();
+        alert(error.message || '部分数据加载失败，当前先展示默认内容，请确认后端服务已启动');
+      }
+    }
+
+    initApp();
+    // 某些浏览器在直接刷新 hash 路由页时会晚一点恢复地址状态，这里补一次兜底渲染，避免首屏空白。
+    setTimeout(handleRouteChange, 0);
+    window.addEventListener('load', function () {
+      handleRouteChange();
+    });
+
+    // 手机硬件返回键：统一通过 hash 路由切换普通端、管理端和农户端。
+    window.addEventListener('hashchange', function () {
+      handleRouteChange();
+    });
+
+    // ===== 权限体系 =====
+    function getUserRole() {
+      if (!user) return { isFarmer: false, isAdmin: false, farmerName: '' };
+      var meta = getUserMeta(user);
+      return Object.assign({ isFarmer: false, isAdmin: false, farmerName: user }, meta.roles || {});
+    }
+    function getAllUsers() {
+      return Object.keys(usersState).map(function (uname) {
+        var record = normalizeUserRecord(usersState[uname]);
+        return { id: record.id, username: uname, roles: record.roles || { isFarmer: false, isAdmin: false }, createdAt: record.createdAt || '' };
+      });
+    }
+    async function updateUserRole(uname, roleType) {
+      try {
+        var response = await fetch('/api/users/' + encodeURIComponent(uname) + '/role', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roleType: roleType })
+        });
+        if (!response.ok) throw new Error('权限保存失败');
+        var saved = normalizeUserRecord(await response.json());
+        usersState[uname] = saved;
+        if (user === uname) {
+          cart = saved.cart || [];
+          orders = saved.orders || [];
+          member = saved.member || member;
+        }
+        renderAdminAuth();
+      } catch (error) {
+        alert(error.message || '权限保存失败');
+      }
+    }
+
+    // 管理端需要看到所有用户的订单，而不是当前登录账号自己的 orders。
+    function getAllOrders() {
+      var all = [];
+      getAllUsers().forEach(function (u) {
+        var record = getUserRecord(u.username);
+        (record && record.orders || []).forEach(function (o) { all.push(Object.assign({ owner: u.username }, o)); });
+      });
+      return all.sort(function (a, b) { return (b.time || 0) - (a.time || 0); });
+    }
+
+    async function updOrder(owner, id, status) {
+      var record = getUserRecord(owner);
+      if (!record) return;
+      record.orders = (record.orders || []).map(function (item) {
+        return item.id === id ? Object.assign({}, item, { status: status }) : item;
+      });
+      try {
+        await persistUserState(owner, record);
+      } catch (error) {
+        alert(error.message || '订单状态保存失败');
+      }
+      renderAdminOd();
+      renderAdminDb();
+    }
+
+    // ===== 管理端 Tab 切换 =====
+    var currentAdminTab = 'db';
+    function switchAdminTab(tab) {
+      currentAdminTab = tab;
+      scrollPageToTop();
+      ['db', 'pd', 'od', 'coupon', 'banner', 'auth'].forEach(function (t) {
+        var el = document.getElementById('atab-' + t);
+        if (el) { el.classList.toggle('border-[#2D9D4E]', t === tab); el.classList.toggle('text-[#2D9D4E]', t === tab); el.classList.toggle('border-transparent', t !== tab); el.classList.toggle('text-gray-500', t !== tab); }
+      });
+      ['db', 'pd', 'od', 'coupon', 'banner', 'auth'].forEach(function (id) {
+        var el = document.getElementById('admin-' + id);
+        if (el) el.classList.toggle('hidden', id !== tab);
+      });
+      if (tab === 'db') renderAdminDb();
+      else if (tab === 'pd') renderAdminPd();
+      else if (tab === 'od') renderAdminOd();
+      else if (tab === 'coupon') renderAdminCoupon();
+      else if (tab === 'banner') renderAdminBanner();
+      else if (tab === 'auth') renderAdminAuth();
+    }
+    function renderAdminDb() {
+      var today = new Date().toDateString();
+      var allOrders = getAllOrders();
+      var todays = allOrders.filter(function (o) { return new Date(o.time).toDateString() === today; }).length;
+      var gmv = allOrders.reduce(function (s, o) { return s + (o.total || 0); }, 0);
+      var us = getAllUsers().length + 1;
+      var prods = getProds();
+      var pend = allOrders.filter(function (o) { return o.status === "paid" || o.status === "pending"; });
+      var h = '<div class="grid grid-cols-2 gap-3 mb-4">';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#2D9D4E]">' + todays + '</div><div class="text-xs text-gray-500 mt-1">今日订单</div></div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#E07B39]">¥' + gmv.toFixed(0) + '</div><div class="text-xs text-gray-500 mt-1">累计GMV</div></div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#2D9D4E]">' + us + '</div><div class="text-xs text-gray-500 mt-1">用户数</div></div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#6B7C6B]">' + prods.filter(function (p) { return !p.off; }).length + '</div><div class="text-xs text-gray-500 mt-1">在售商品</div></div>';
+      h += '</div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-2">待处理订单 (' + pend.length + ')</div>';
+      if (pend.length === 0) h += '<div class="text-center py-3 text-gray-400 text-sm">暂无待处理订单 ✓</div>';
+      else h += pend.map(function (o) { return '<div class="flex justify-between text-sm py-2 border-b last:border-0"><span>' + o.id + ' · ' + o.owner + '</span><span class="text-[#2D9D4E]">' + (o.status === 'pending' ? '待付款' : '待发货') + '</span></div>'; }).join('');
+      h += '</div>';
+      document.getElementById('admin-db').innerHTML = h;
+    }
+    function renderAdminPd() {
+      var prods = getProds();
+      var h = '<div class="flex justify-between items-center mb-3"><div class="font-bold">商品列表</div><button onclick="showAddProdForm()" class="bg-[#2D9D4E] text-white text-xs px-3 py-1 rounded-full">+ 新增</button></div>';
+      h += '<div id="add-prod-form" class="hidden bg-white rounded-xl p-4 shadow mb-3">' + renderProductFormFields('new', createProductDraft({ farmer: '待设置' }), true) + '<div class="flex gap-2 mt-3"><button onclick="saveNewProduct()" class="flex-1 bg-[#2D9D4E] text-white py-2 rounded-lg text-sm">保存</button><button onclick="showAddProdForm()" class="flex-1 border py-2 rounded-lg text-sm">取消</button></div></div>';
+      h += prods.map(function (p) {
+        return renderProductEditorCard(p, {
+          prefix: 'admin-prod-' + p.id,
+          saveAction: 'saveExistingProduct(' + p.id + ',\'admin\')',
+          saveText: '保存商品信息',
+          canEditFarmer: true,
+          tone: 'admin',
+          source: 'admin',
+          expanded: !!adminProductExpandState[p.id]
+        });
+      }).join('');
+      document.getElementById('admin-pd').innerHTML = h;
+    }
+    function renderAdminOd() {
+      var allOrders = getAllOrders();
+      if (!allOrders.length) { document.getElementById('admin-od').innerHTML = "<div class='text-center py-8 text-gray-400'>暂无订单</div>"; return; }
+      var h = '<div class="font-bold mb-3">订单管理</div>';
+      h += allOrders.map(function (o) { return '<div class="bg-white rounded-xl p-3 shadow mb-2"><div class="flex justify-between mb-1"><span class="text-xs text-gray-500">' + o.id + ' · ' + o.owner + '</span><select onchange="updOrder(\'' + o.owner + '\',\'' + o.id + '\',this.value)" class="text-xs p-1 border rounded"><option value="paid" ' + (o.status === 'paid' ? 'selected' : '') + '>待发货</option><option value="shipped" ' + (o.status === 'shipped' ? 'selected' : '') + '>待收货</option><option value="done" ' + (o.status === 'done' ? 'selected' : '') + '>已完成</option><option value="cancelled" ' + (o.status === 'cancelled' ? 'selected' : '') + '>已取消</option></select></div><div class="text-sm">' + o.items.map(function (i) { return i.name + '×' + i.qty; }).join(", ") + '</div><div class="text-right font-bold text-[#2D9D4E] mt-1">¥' + o.total.toFixed(2) + '</div></div>'; }).join('');
+      document.getElementById('admin-od').innerHTML = h;
+    }
+    function renderAdminAuth() {
+      var users = getAllUsers().filter(function (u) { return u.username !== 'admin'; });
+      var h = '<div class="font-bold mb-3">🔐 权限管理</div><div class="text-xs text-gray-500 mb-4">新注册用户默认都是普通用户；管理员可在这里改成农户或管理员</div>';
+      h += users.length ? users.map(function (u) {
+        var roleText = u.roles.isAdmin ? '管理员' : (u.roles.isFarmer ? '农户' : '普通用户');
+        return '<div class="bg-white rounded-xl p-3 shadow mb-2"><div class="flex justify-between items-start mb-3"><div><div class="font-medium text-sm">' + u.username + '</div><div class="text-xs text-gray-500">' + (u.createdAt || '未知注册时间') + '</div></div><span class="text-xs px-2 py-1 rounded-full ' + (u.roles.isAdmin ? 'bg-[#E8F5EC] text-[#2D9D4E]' : u.roles.isFarmer ? 'bg-[#FCEBD8] text-[#E07B39]' : 'bg-gray-100 text-gray-500') + '">' + roleText + '</span></div><div class="grid grid-cols-3 gap-2"><button onclick="updateUserRole(\'' + u.username + '\',\'normal\')" class="py-2 rounded-lg text-xs bg-gray-100">普通</button><button onclick="updateUserRole(\'' + u.username + '\',\'farmer\')" class="py-2 rounded-lg text-xs bg-[#FCEBD8] text-[#E07B39]">农户</button><button onclick="updateUserRole(\'' + u.username + '\',\'admin\')" class="py-2 rounded-lg text-xs bg-[#E8F5EC] text-[#2D9D4E]">管理员</button></div></div>';
+      }).join('') : '<div class="text-center py-8 text-gray-400 bg-white rounded-xl shadow">暂无注册用户</div>';
+      document.getElementById('admin-auth').innerHTML = h;
+    }
+    function deleteCouponTemplate(templateId) {
+      var templates = getCouponTemplates().filter(function (item) { return item.templateId !== templateId; });
+      saveCouponTemplatesToServer(templates).then(function () {
+        renderAdminCoupon();
+      }).catch(function (error) {
+        alert(error.message || '优惠券模板删除失败');
+      });
+    }
+    function renderAdminCoupon() {
+      var templates = getCouponTemplates();
+      var filteredUsers = getFilteredCouponRecipients();
+      var currentTemplate = couponRecipientState.templateId ? templates.find(function (item) { return item.templateId === couponRecipientState.templateId; }) : null;
+      var h = '<div class="space-y-4">';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-center justify-between mb-3"><div class="font-bold">🎟 优惠券维护</div><div class="text-xs text-gray-400">支持折扣券与满减券</div></div><input id="coupon-template-name" placeholder="优惠券名称" class="w-full p-2 border rounded-lg mb-2 text-sm"><select id="coupon-template-type" onchange="syncCouponTypeFields()" class="w-full p-2 border rounded-lg mb-2 text-sm"><option value="full_reduction">满减券</option><option value="discount">折扣券</option></select><div id="coupon-full-reduction-fields" class="grid grid-cols-2 gap-2 mb-2"><input id="coupon-template-min" placeholder="满多少" type="number" class="w-full p-2 border rounded-lg text-sm"><input id="coupon-template-amount" placeholder="减多少" type="number" class="w-full p-2 border rounded-lg text-sm"></div><div id="coupon-discount-fields" class="hidden mb-2"><input id="coupon-template-discount" placeholder="折扣（1-9.9，如 8.5）" type="number" step="0.1" class="w-full p-2 border rounded-lg text-sm"></div><div class="grid grid-cols-3 gap-2"><button onclick="saveCouponTemplateFromForm()" class="py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">保存模板</button><button onclick="openCouponPickerFromForm()" class="py-2 rounded-lg border border-[#E07B39] text-[#E07B39] text-sm">选择用户发放</button><button onclick="issueCouponToAllFromForm()" class="py-2 rounded-lg bg-[#E07B39] text-white text-sm">全员发放</button></div></div>';
+      h += '<div><div class="font-bold mb-3">已配置优惠券</div>' + (templates.length ? templates.map(function (item) {
+        return '<div class="bg-white rounded-xl p-4 shadow mb-3"><div class="flex items-start justify-between gap-3"><div><div class="font-medium">' + item.name + '</div><div class="text-xs text-gray-500 mt-1">' + getCouponMetaText(item) + '</div></div><span class="text-xs px-2 py-1 rounded-full bg-[#F9F7F3] text-gray-500">' + getCouponTypeLabel(item.type) + '</span></div><div class="grid grid-cols-3 gap-2 mt-3"><button onclick="openCouponUserPicker(\'' + item.templateId + '\')" class="py-2 rounded-lg border border-[#2D9D4E] text-[#2D9D4E] text-xs">选择用户发放</button><button onclick="issueCouponTemplateToAll(\'' + item.templateId + '\')" class="py-2 rounded-lg bg-[#E07B39] text-white text-xs">全员发放</button><button onclick="deleteCouponTemplate(\'' + item.templateId + '\')" class="py-2 rounded-lg bg-gray-100 text-gray-500 text-xs">删除</button></div></div>';
+      }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400 shadow">暂无优惠券模板</div>') + '</div>';
+      if (currentTemplate) {
+        h += '<div class="fixed inset-0 bg-black/30 z-50 flex items-end sm:items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-md p-4"><div class="flex items-center justify-between mb-3"><div><div class="font-bold">发放优惠券</div><div class="text-xs text-gray-500 mt-1">' + currentTemplate.name + ' · ' + getCouponBenefitText(currentTemplate) + '</div></div><button onclick="closeCouponUserPicker()" class="text-gray-400 text-sm">关闭</button></div><div class="grid grid-cols-[1fr,110px] gap-2 mb-3"><input value="' + (couponRecipientState.keyword || '') + '" oninput="setCouponRecipientKeyword(this.value)" placeholder="搜索用户名" class="w-full p-2 border rounded-lg text-sm"><select onchange="setCouponRecipientRoleFilter(this.value)" class="w-full p-2 border rounded-lg text-sm"><option value="all"' + (couponRecipientState.roleFilter === 'all' ? ' selected' : '') + '>全部用户</option><option value="normal"' + (couponRecipientState.roleFilter === 'normal' ? ' selected' : '') + '>普通用户</option><option value="farmer"' + (couponRecipientState.roleFilter === 'farmer' ? ' selected' : '') + '>农户</option></select></div><div class="max-h-64 overflow-y-auto space-y-2 mb-3">' + (filteredUsers.length ? filteredUsers.map(function (u) { return '<label class="flex items-center justify-between bg-[#F9F7F3] rounded-lg px-3 py-2 text-sm"><div><div class="font-medium">' + u.username + '</div><div class="text-xs text-gray-500 mt-1">' + getRoleLabelByMeta({ roles: u.roles }) + '</div></div><input type="checkbox" ' + (couponRecipientState.selectedUsers[u.username] ? 'checked' : '') + ' onchange="toggleCouponRecipient(\'' + u.username + '\')"></label>'; }).join('') : '<div class="text-sm text-gray-400 text-center py-6">没有匹配到用户</div>') + '</div><button onclick="confirmSelectedCouponRecipients()" class="w-full py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">确认发放</button></div></div>';
+      }
+      h += '</div>';
+      document.getElementById('admin-coupon').innerHTML = h;
+      syncCouponTypeFields();
+    }
+    function renderAdminBanner() {
+      var banners = getBanners();
+      var announcements = getAnnouncements();
+      var h = '<div class="space-y-4"><div class="bg-white rounded-xl p-4 shadow"><div class="flex items-center justify-between mb-2"><div class="font-bold">🖼 首页运营位维护</div><button onclick="addBanner()" class="text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">+ 新增 Banner</button></div><div class="text-sm text-gray-500 leading-6">建议上传尺寸：1125 × 450 px。支持多图轮播、上下排序、删除与新增，首页会按顺序轮播展示。</div></div>';
+      h += banners.map(function (banner, index) {
+        return '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-center justify-between mb-3"><div><div class="font-medium">Banner ' + (index + 1) + '</div><div class="text-xs text-gray-500 mt-1">首页轮播第 ' + (index + 1) + ' 张</div></div><div class="flex gap-2"><button onclick="moveBanner(' + index + ',-1)" class="px-3 py-1 rounded-full bg-gray-100 text-xs text-gray-500">上移</button><button onclick="moveBanner(' + index + ',1)" class="px-3 py-1 rounded-full bg-gray-100 text-xs text-gray-500">下移</button><button onclick="removeBanner(' + index + ')" class="px-3 py-1 rounded-full bg-red-50 text-xs text-red-500">删除</button></div></div><div class="mb-3"><div class="text-sm font-medium text-gray-700 mb-1">标题</div><input id="banner-' + index + '-title" value="' + banner.title + '" class="w-full p-2 border rounded-lg text-sm"></div><div class="mb-3"><div class="text-sm font-medium text-gray-700 mb-1">副标题</div><input id="banner-' + index + '-sub" value="' + banner.sub + '" class="w-full p-2 border rounded-lg text-sm"></div><div class="mb-3"><div class="text-xs text-gray-500">当前跳转：' + getOperationalLinkLabel(banner.linkType) + '</div></div>' + renderOperationalLinkFields('banner-' + index, banner, 'Banner') + renderImageUploader('banner-' + index, banner.img) + '<button onclick="saveBanner(' + index + ')" class="w-full bg-[#2D9D4E] text-white py-2 rounded-lg text-sm">保存 Banner</button></div>';
+      }).join('');
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-center justify-between mb-3"><div class="font-bold">📢 公告管理</div><button onclick="addAnnouncement()" class="text-xs px-3 py-2 rounded-full bg-[#E07B39] text-white">+ 新增公告</button></div><div class="space-y-3">' + (announcements.length ? announcements.map(function (item, index) {
+        return '<div class="rounded-xl bg-[#F9F7F3] p-3"><div class="flex items-center justify-between mb-2"><div class="font-medium text-sm">公告 ' + (index + 1) + '</div><div class="flex gap-2"><button onclick="moveAnnouncement(' + index + ',-1)" class="px-3 py-1 rounded-full bg-white text-xs text-gray-500">上移</button><button onclick="moveAnnouncement(' + index + ',1)" class="px-3 py-1 rounded-full bg-white text-xs text-gray-500">下移</button><button onclick="removeAnnouncement(' + index + ')" class="px-3 py-1 rounded-full bg-red-50 text-xs text-red-500">删除</button></div></div><textarea id="announcement-' + index + '-text" class="w-full p-2 border rounded-lg text-sm h-20 resize-none mb-2">' + item.text + '</textarea><label class="flex items-center gap-2 text-sm text-gray-500 mb-3"><input id="announcement-' + index + '-active" type="checkbox" ' + (item.active ? 'checked' : '') + '>首页展示</label><div class="mb-3"><div class="text-xs text-gray-500">当前跳转：' + getOperationalLinkLabel(item.linkType) + '</div></div>' + renderOperationalLinkFields('announcement-' + index, item, '公告') + '<button onclick="saveAnnouncement(' + index + ')" class="w-full bg-[#E07B39] text-white py-2 rounded-lg text-sm">保存公告</button></div>';
+      }).join('') : '<div class="text-sm text-gray-400">暂无公告，先新增一条吧</div>') + '</div></div>';
+      h += '</div>';
+      document.getElementById('admin-banner').innerHTML = h;
+    }
+    function showAddProdForm() { document.getElementById('add-prod-form').classList.toggle('hidden'); }
+    async function toggleProd(id) {
+      var ps = getProds();
+      var p = ps.find(function (x) { return x.id === id; });
+      if (!p) return;
+      try {
+        await saveProductToServer(Object.assign({}, cloneProduct(p), { off: !p.off }));
+        renderAdminPd();
+        renderAdminDb();
+      } catch (error) {
+        alert(error.message || '商品状态更新失败');
+      }
+    }
+    function adjustStock(id, delta) {
+      var ps = getProds();
+      var p = ps.find(function (x) { return x.id === id; });
+      if (!p) return;
+      saveProductToServer(Object.assign({}, cloneProduct(p), { stock: Math.max(0, (p.stock || 0) + delta) }))
+        .then(function () {
+          if (!document.getElementById('admin-panel').classList.contains('hidden')) { renderAdminPd(); renderAdminDb(); }
+          if (!document.getElementById('farmer-panel').classList.contains('hidden')) showFarmerPanel();
+        })
+        .catch(function (error) {
+          alert(error.message || '库存更新失败');
+        });
+    }
+    // 库存支持手填数字，适合快速盘点后一次性修正。
+    function saveStockValue(id, val) {
+      var ps = getProds();
+      var p = ps.find(function (x) { return x.id === id; });
+      if (!p) return;
+      saveProductToServer(Object.assign({}, cloneProduct(p), { stock: Math.max(0, parseInt(val || '0')) }))
+        .then(function () {
+          if (!document.getElementById('admin-panel').classList.contains('hidden')) { renderAdminPd(); renderAdminDb(); }
+          if (!document.getElementById('farmer-panel').classList.contains('hidden')) showFarmerPanel();
+        })
+        .catch(function (error) {
+          alert(error.message || '库存更新失败');
+        });
+    }
+    async function saveExistingProduct(id, source) {
+      var ps = getProds();
+      var p = ps.find(function (item) { return item.id === id; });
+      if (!p) return;
+      var prefix = (source === 'farmer' ? 'farmer-prod-' : 'admin-prod-') + id;
+      var role = getUserRole();
+      var draft = readProductForm(prefix, p);
+      if (source === 'farmer') draft.farmer = role.farmerName || user;
+      var error = validateProductPayload(draft);
+      if (error) { alert(error); return; }
+      try {
+        var img = await getImageFromInputAsync(prefix + '-img', p.img || DEFAULT_PRODUCT_IMAGE, 'products');
+        var payload = Object.assign({}, cloneProduct(p), {
+          name: draft.name,
+          price: draft.price,
+          orig: draft.price,
+          unit: draft.unit,
+          cat: draft.cat,
+          tags: draft.tags,
+          stock: draft.stock,
+          farmer: source === 'farmer' ? (role.farmerName || user) : (draft.farmer || '待设置'),
+          farmerAccount: source === 'farmer' ? user : (p.farmerAccount || ''),
+          farmerUserId: source === 'farmer' ? Number((getUserRecord(user) && getUserRecord(user).id) || 0) : Number(p.farmerUserId || 0),
+          village: draft.village,
+          harvest: draft.harvest,
+          dispatchHours: draft.dispatchHours,
+          img: img
+        });
+        await saveProductToServer(payload);
+        if (source === 'farmer') farmerProductExpandState[id] = false;
+        else adminProductExpandState[id] = false;
+        if (source === 'farmer') showFarmerPanel();
+        else { renderAdminPd(); renderAdminDb(); }
+        alert('商品信息已保存');
+      } catch (saveError) {
+        alert(saveError.message || '商品保存失败');
+      }
+    }
+    async function saveNewProduct() {
+      var draft = readProductForm('new', createProductDraft({ farmer: '待设置' }));
+      draft.farmer = draft.farmer || '待设置';
+      var error = validateProductPayload(draft);
+      if (error) { alert(error); return; }
+      try {
+        var img = await getImageFromInputAsync('new-img', DEFAULT_PRODUCT_IMAGE, 'products');
+        await saveProductToServer(normalizeProduct({ name: draft.name, price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, img: img, tags: draft.tags, sales: 0, farmer: draft.farmer, farmerAccount: '', farmerUserId: 0, village: draft.village, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }));
+        renderAdminPd();
+        renderAdminDb();
+        alert('商品已添加');
+      } catch (saveError) {
+        alert(saveError.message || '商品添加失败');
+      }
+    }
+
+    // ===== 农户端 =====
+    function getFarmerProducts() {
+      var currentUser = getUserRecord(user);
+      var userId = Number(currentUser && currentUser.id || 0);
+      return getProds().filter(function (p) { return Number(p.farmerUserId || 0) === userId || p.farmerAccount === user; });
+    }
+    async function saveFarmerProduct() {
+      var role = getUserRole();
+      var draft = readProductForm('farmer-new', createProductDraft({ farmer: role.farmerName || user }));
+      draft.farmer = role.farmerName || user;
+      var error = validateProductPayload(draft);
+      if (error) { alert(error); return; }
+      try {
+        var img = await getImageFromInputAsync('farmer-new-img', DEFAULT_PRODUCT_IMAGE, 'products');
+        await saveProductToServer(normalizeProduct({ name: draft.name, price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, img: img, tags: draft.tags, sales: 0, farmer: role.farmerName || user, farmerAccount: user, farmerUserId: Number((getUserRecord(user) && getUserRecord(user).id) || 0), village: draft.village, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }));
+        showFarmerPanel();
+      } catch (saveError) {
+        alert(saveError.message || '商品上架失败');
+      }
+    }
+    function showFarmerPanel() {
+      document.getElementById('farmer-panel').classList.remove('hidden');
+      document.getElementById('admin-panel').classList.add('hidden');
+      document.getElementById('nav').style.display = 'none';
+      document.getElementById('app').innerHTML = '';
+      var role = getUserRole();
+      var myProds = getFarmerProducts();
+      var h = '<div class="space-y-4">';
+      h += '<div class="bg-[#FCEBD8] rounded-xl p-3"><div class="font-medium text-sm text-[#E07B39]">🌿 农户可上架自己商品，并维护库存与来源信息</div></div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-3">新增商品</div>' + renderProductFormFields('farmer-new', createProductDraft({ farmer: role.farmerName || user }), false) + '<button onclick="saveFarmerProduct()" class="w-full bg-[#E07B39] text-white py-2 rounded-lg text-sm">上架商品</button></div>';
+      h += '<div class="font-bold text-sm">我的商品</div>';
+      h += myProds.length ? myProds.map(function (p) {
+        return renderProductEditorCard(p, {
+          prefix: 'farmer-prod-' + p.id,
+          saveAction: 'saveExistingProduct(' + p.id + ',\'farmer\')',
+          saveText: '保存商品信息',
+          canEditFarmer: false,
+          tone: 'farmer',
+          source: 'farmer',
+          expanded: !!farmerProductExpandState[p.id]
+        });
+      }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400">暂无商品，先上架一个吧</div>';
+      h += '</div>';
+      document.getElementById('farmer-content').innerHTML = h;
+    }
+    function farmerBack() { document.getElementById('farmer-panel').classList.add('hidden'); document.getElementById('nav').style.display = 'flex'; go('profile'); }
+    // ===== 管理端入口/退出 =====
+    function showAdminPanel() {
+      document.getElementById('admin-panel').classList.remove('hidden');
+      document.getElementById('farmer-panel').classList.add('hidden');
+      document.getElementById('nav').style.display = 'none';
+      document.getElementById('app').innerHTML = '';
+      switchAdminTab(currentAdminTab || 'db');
+    }
+    function adminBack() { document.getElementById('admin-panel').classList.add('hidden'); document.getElementById('nav').style.display = 'flex'; go('profile'); }
+    // ===== 修改 doLogin admin 分支 =====
+
+  </script>
+
+  <div id="admin-panel" class="hidden">
+    <div class="bg-[#2D9D4E] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+      <div class="font-bold">🌱 云田野 管理端</div>
+      <div class="flex gap-2"><button onclick="adminBack()" class="text-xs bg-white/20 px-3 py-1 rounded-full">←
+          返回</button><button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded-full">退出</button></div>
+    </div>
+    <div class="grid grid-cols-6 border-b border-gray-200 bg-white">
+      <button onclick="switchAdminTab('db')" id="atab-db"
+        class="py-3 text-xs font-medium border-b-2 border-[#2D9D4E] text-[#2D9D4E]">📊 数据</button>
+      <button onclick="switchAdminTab('pd')" id="atab-pd"
+        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">📦 商品</button>
+      <button onclick="switchAdminTab('od')" id="atab-od"
+        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">📋 订单</button>
+      <button onclick="switchAdminTab('coupon')" id="atab-coupon"
+        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🎟 优惠券</button>
+      <button onclick="switchAdminTab('banner')" id="atab-banner"
+        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🖼 Banner</button>
+      <button onclick="switchAdminTab('auth')" id="atab-auth"
+        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🔐 权限</button>
+    </div>
+    <div id="admin-db" class="p-4"></div>
+    <div id="admin-pd" class="hidden p-4"></div>
+    <div id="admin-od" class="hidden p-4"></div>
+    <div id="admin-coupon" class="hidden p-4"></div>
+    <div id="admin-banner" class="hidden p-4"></div>
+    <div id="admin-auth" class="hidden p-4"></div>
+  </div>
+  <div id="farmer-panel" class="hidden">
+    <div class="bg-[#E07B39] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+      <div class="font-bold">👨🌾 农户端</div>
+      <div class="flex gap-2"><button onclick="farmerBack()" class="text-xs bg-white/20 px-3 py-1 rounded-full">←
+          返回</button></div>
+    </div>
+    <div id="farmer-content" class="p-4"></div>
+  </div>
+
+</body>
+
+</html>
