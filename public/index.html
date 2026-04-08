@@ -352,7 +352,8 @@
         id: category && category.id ? String(category.id) : buildCategoryId(category.name, index),
         name: category && category.name ? String(category.name).trim() : '未命名分类',
         icon: category && category.icon ? String(category.icon).trim() : '🧺',
-        sortOrder: Number(category && category.sortOrder != null ? category.sortOrder : index || 0)
+        sortOrder: Number(category && category.sortOrder != null ? category.sortOrder : index || 0),
+        showOnHome: !(category && category.showOnHome === false) && String(category && category.showOnHome || '') !== '0'
       };
     }
 
@@ -371,6 +372,10 @@
 
     function getCategories() {
       return categoriesState.length ? categoriesState : createDefaultCategories();
+    }
+
+    function getHomeCategories() {
+      return getCategories().filter(function (item) { return item.showOnHome !== false; });
     }
 
     function getDefaultCategory() {
@@ -2178,28 +2183,20 @@
     function home() {
       // 首页商品列表直接读取实时商品数据，避免和管理端/农户端编辑结果脱节。
       var prods = getProds().filter(function (p) { return !p.off; });
-      var categories = getCategories();
+      var homeCategories = getHomeCategories();
       var banners = getBanners();
       var bannerIndex = banners.length ? activeBannerIndex % banners.length : 0;
       var heroBanner = banners[bannerIndex] || normalizeBanner({}, 0);
       var announcements = getActiveAnnouncements();
       return `<div class="p-4">
-${!user ? `<div class="bg-gradient-to-r from-[#2D9D4E] to-[#1E7A3A] rounded-xl p-4 mb-4 text-white" onclick="go('register')">
-<div class="font-bold">🌾 新人专属礼包</div>
-<div class="text-sm opacity-90 mt-1">注册即送新人优惠券，首单更划算</div>
-<button class="mt-2 bg-white text-[#2D9D4E] text-xs px-4 py-1 rounded-full font-medium">立即领取</button>
-</div>`: ''}
 <div class="bg-white rounded-xl overflow-hidden shadow mb-4">
 <img src="${heroBanner.img}" class="w-full h-40 object-cover" onclick="triggerOperationalLink(getBanners()[${bannerIndex}])">
 <div class="p-3"><div class="font-bold text-[#2D9D4E]">${heroBanner.title}</div><div class="text-sm text-gray-500">${heroBanner.sub}</div></div>
 ${banners.length > 1 ? `<div class="flex items-center justify-center gap-2 pb-3">${banners.map(function (_, index) { return `<button onclick="setActiveBanner(${index})" class="w-2.5 h-2.5 rounded-full ${index === bannerIndex ? 'bg-[#2D9D4E]' : 'bg-gray-200'}"></button>`; }).join('')}</div>` : ''}
 </div>
 ${announcements.length ? `<div class="bg-[#FFF7ED] rounded-xl p-3 mb-4 shadow"><div class="text-sm font-medium text-[#E07B39] mb-2">📢 今日公告</div><div class="space-y-2">${announcements.map(function (item, index) { return `<button onclick="triggerOperationalLink(getActiveAnnouncements()[${index}])" class="w-full text-left text-xs text-gray-600 leading-5 ${item.linkType !== 'none' ? 'hover:text-[#E07B39]' : ''}">• ${item.text}${item.linkType !== 'none' ? ' · ' + getOperationalLinkLabel(item.linkType) : ''}</button>`; }).join('')}</div></div>` : ''}
-<div class="bg-white rounded-xl p-4 shadow mb-4">
-<div class="grid grid-cols-5 gap-2">
-${categories.map(c => `<button onclick="setCat('${c.id}')" class="flex flex-col items-center p-2 gap-1">${renderCategoryIcon(c, 'w-10 h-10 rounded-2xl object-cover bg-[#F9F7F3] p-1')}<span class="text-xs text-center leading-4">${c.name}</span></button>`).join('')}
-</div></div>
 <div class="font-bold text-lg mb-3">🌿 全部商品</div>
+${homeCategories.length ? `<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="flex gap-2 overflow-x-auto pb-1">${homeCategories.map(function (c) { return `<button onclick="setCat('${c.id}')" class="shrink-0 flex flex-col items-center justify-start gap-1.5 text-center rounded-2xl bg-[#F9F7F3] px-2 py-2" style="width:calc((100% - 1.5rem) / 4);min-width:calc((100% - 1.5rem) / 4)">${renderCategoryIcon(c, 'w-8 h-8 rounded-xl object-cover bg-white p-1')}<span class="text-[11px] leading-4 text-gray-600 break-words">${c.name}</span></button>`; }).join('')}</div></div>` : ''}
 <div class="grid grid-cols-2 gap-3">
 ${prods.map(p => card(p)).join('')}
 </div></div>`;
@@ -2219,19 +2216,34 @@ ${tags}
 </div></div></div>`;
     }
 
+    function renderCategoryNavButton(category, active) {
+      var iconClassName = active
+        ? 'w-8 h-8 rounded-xl object-cover bg-white/15 p-1'
+        : 'w-8 h-8 rounded-xl object-cover bg-[#F9F7F3] p-1';
+      return `<button onclick="setCat('${category.id}')" class="w-full rounded-2xl px-3 py-3 text-left transition ${active ? 'bg-[#2D9D4E] text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'}"><div class="flex items-center gap-2">${renderCategoryIcon(category, iconClassName)}<div class="min-w-0 flex-1"><div class="text-sm font-medium leading-5">${category.name}</div></div></div></button>`;
+    }
+
+    function renderCategoryListCard(product) {
+      var category = getCategoryMeta(product.cat || getDefaultCategoryId());
+      var tags = getProductTags(product.tags || []).map(renderTagBadge).join('');
+      return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden" onclick="pushView('product',${product.id})"><div class="flex gap-3 p-3"><img src="${product.img}" class="w-24 h-24 rounded-2xl object-cover shrink-0"><div class="min-w-0 flex-1"><div class="text-xs text-gray-500">${renderCategoryInline(category, product.unit, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div><div class="font-medium text-sm mt-1 line-clamp-2">${product.name}</div><div class="flex items-center gap-2 mt-2"><span class="text-[#2D9D4E] font-bold">${fmt(product.price)}</span><span class="text-gray-400 text-xs line-through">${fmt(product.orig)}</span></div><div class="text-xs text-gray-400 mt-2">已售${product.sales} · 库存${product.stock}</div>${tags ? '<div class="flex flex-wrap gap-2 mt-2">' + tags + '</div>' : ''}</div></div></div>`;
+    }
+
     function category() {
       const prods = getProds().filter(function (p) { return !p.off; });
       const categories = getCategories();
       const f = cat ? prods.filter(p => p.cat === cat) : prods;
       const n = (categories.find(function (item) { return item.id === cat; }) || {}).name || '全部分类';
       return `<div class="p-4">
-<div class="font-bold text-lg mb-3">${n}</div>
-<div class="flex gap-2 mb-4 overflow-x-auto pb-2">
-<button onclick="setCat('')" class="px-3 py-1 rounded-full text-sm shrink-0 ${!cat ? 'bg-[#2D9D4E] text-white' : 'bg-gray-100'}">全部</button>
-${categories.map(c => `<button onclick="setCat('${c.id}')" class="px-3 py-1 rounded-full text-sm shrink-0 inline-flex items-center gap-1 ${cat === c.id ? 'bg-[#2D9D4E] text-white' : 'bg-gray-100'}">${renderCategoryIcon(c, 'w-4 h-4 rounded-full object-cover text-base')}${c.name}</button>`).join('')}
+<div class="mb-4"><div class="font-bold text-lg">${n}</div><div class="text-xs text-gray-500 mt-1">${f.length ? '当前分类共 ' + f.length + ' 件在售商品' : '当前分类暂无在售商品'}</div></div>
+<div class="flex gap-3 items-start">
+<div class="w-24 shrink-0 space-y-2 sticky top-4">
+<button onclick="setCat('')" class="w-full rounded-2xl px-3 py-3 text-left transition ${!cat ? 'bg-[#2D9D4E] text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'}"><div class="text-sm font-medium">全部</div><div class="text-[11px] mt-1 ${!cat ? 'text-white/80' : 'text-gray-400'}">查看所有商品</div></button>
+${categories.map(c => renderCategoryNavButton(c, cat === c.id)).join('')}
 </div>
-<div class="grid grid-cols-2 gap-3">
-${f.map(p => card(p)).join('')}
+<div class="min-w-0 flex-1">
+${f.length ? `<div class="space-y-3">${f.map(p => renderCategoryListCard(p)).join('')}</div>` : '<div class="bg-white rounded-2xl shadow-sm p-6 text-sm text-gray-400">这个分类暂时还没有上架商品，先去看看其他分类吧。</div>'}
+</div>
 </div></div>`;
     }
 
@@ -3168,7 +3180,8 @@ ${renderAddressCreateCard('receiver')}</div>`;
         id: '',
         name: '',
         icon: '🧺',
-        sortOrder: getCategories().length
+        sortOrder: getCategories().length,
+        showOnHome: true
       }, overrides || {});
     }
 
@@ -3199,6 +3212,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
     function renderCategoryEditorFields(prefix, category) {
       return '<input id="' + prefix + '-id" type="hidden" value="' + (category.id || '') + '">'
         + '<div class="mb-3">' + renderFieldLabel('分类名称', '首页、分类页和商品录入都会展示这个名称') + '<input id="' + prefix + '-name" value="' + (category.name || '') + '" placeholder="请输入分类名称" class="w-full p-2 border rounded-lg text-sm"></div>'
+        + '<label class="flex items-center gap-2 text-sm text-gray-600 mb-3"><input id="' + prefix + '-show-on-home" type="checkbox" ' + (category.showOnHome !== false ? 'checked' : '') + '>展示在首页分类区</label>'
         + renderCategoryIconUploader(prefix, category);
     }
 
@@ -3217,7 +3231,8 @@ ${renderAddressCreateCard('receiver')}</div>`;
         id: base.id || (document.getElementById(prefix + '-id') || {}).value || '',
         name: ((document.getElementById(prefix + '-name') || {}).value || '').trim(),
         icon: base.icon || '🧺',
-        sortOrder: Number(base.sortOrder || 0)
+        sortOrder: Number(base.sortOrder || 0),
+        showOnHome: !!((document.getElementById(prefix + '-show-on-home') || {}).checked)
       }, Number(base.sortOrder || 0));
     }
 
@@ -3340,7 +3355,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
       h += categories.length ? categories.map(function (item, index) {
         var expanded = currentCategoryEditId === item.id;
         var usageCount = getCategoryUsageCount(item.id);
-        return '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-start justify-between gap-3"><div class="flex items-center gap-3"><div class="w-12 h-12 rounded-2xl bg-[#F9F7F3] flex items-center justify-center overflow-hidden">' + renderCategoryIcon(item, 'w-12 h-12 rounded-2xl object-cover text-2xl') + '</div><div><div class="font-medium text-sm">' + item.name + '</div><div class="text-xs text-gray-500 mt-1">分类 ID：' + item.id + '</div><div class="text-xs text-gray-400 mt-1">已绑定商品：' + usageCount + ' 个</div></div></div><div class="flex flex-col gap-2 items-end"><div class="flex gap-2"><button onclick="moveCategory(' + index + ',-1)" class="px-3 py-1 rounded-full bg-gray-100 text-xs text-gray-500">上移</button><button onclick="moveCategory(' + index + ',1)" class="px-3 py-1 rounded-full bg-gray-100 text-xs text-gray-500">下移</button></div><div class="flex gap-2"><button onclick="' + (expanded ? 'closeCategoryEditor()' : 'openCategoryEditor(\'' + item.id + '\')') + '" class="px-3 py-1 rounded-full border border-gray-200 text-xs text-gray-500">' + (expanded ? '收起' : '修改') + '</button><button onclick="deleteCategory(\'' + item.id + '\')" class="px-3 py-1 rounded-full bg-red-50 text-xs text-red-500">删除</button></div></div></div>' + (expanded ? '<div class="mt-4 pt-4 border-t border-gray-100">' + renderCategoryEditorFields('category-' + item.id, item) + '<div class="grid grid-cols-2 gap-2"><button onclick="saveExistingCategory(\'' + item.id + '\')" class="py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">保存分类</button><button onclick="closeCategoryEditor()" class="py-2 rounded-lg border text-sm">取消</button></div></div>' : '') + '</div>';
+        return '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-start justify-between gap-3"><div class="flex items-center gap-3"><div class="w-12 h-12 rounded-2xl bg-[#F9F7F3] flex items-center justify-center overflow-hidden">' + renderCategoryIcon(item, 'w-12 h-12 rounded-2xl object-cover text-2xl') + '</div><div><div class="font-medium text-sm">' + item.name + '</div><div class="text-xs text-gray-500 mt-1">分类 ID：' + item.id + '</div><div class="text-xs text-gray-400 mt-1">已绑定商品：' + usageCount + ' 个</div><div class="text-xs mt-1 ' + (item.showOnHome !== false ? 'text-[#2D9D4E]' : 'text-gray-400') + '">首页展示：' + (item.showOnHome !== false ? '是' : '否') + '</div></div></div><div class="flex flex-col gap-2 items-end"><div class="flex gap-2"><button onclick="moveCategory(' + index + ',-1)" class="px-3 py-1 rounded-full bg-gray-100 text-xs text-gray-500">上移</button><button onclick="moveCategory(' + index + ',1)" class="px-3 py-1 rounded-full bg-gray-100 text-xs text-gray-500">下移</button></div><div class="flex gap-2"><button onclick="' + (expanded ? 'closeCategoryEditor()' : 'openCategoryEditor(\'' + item.id + '\')') + '" class="px-3 py-1 rounded-full border border-gray-200 text-xs text-gray-500">' + (expanded ? '收起' : '修改') + '</button><button onclick="deleteCategory(\'' + item.id + '\')" class="px-3 py-1 rounded-full bg-red-50 text-xs text-red-500">删除</button></div></div></div>' + (expanded ? '<div class="mt-4 pt-4 border-t border-gray-100">' + renderCategoryEditorFields('category-' + item.id, item) + '<div class="grid grid-cols-2 gap-2"><button onclick="saveExistingCategory(\'' + item.id + '\')" class="py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">保存分类</button><button onclick="closeCategoryEditor()" class="py-2 rounded-lg border text-sm">取消</button></div></div>' : '') + '</div>';
       }).join('') : '<div class="bg-white rounded-xl p-4 shadow text-sm text-gray-400">暂无分类，先新增一个吧</div>';
       h += '</div>';
       document.getElementById('admin-category').innerHTML = h;
@@ -3443,7 +3458,15 @@ ${renderAddressCreateCard('receiver')}</div>`;
       scrollPageToTop();
       ['db', 'refund', 'pd', 'od', 'category', 'coupon', 'banner', 'auth', 'ship'].forEach(function (t) {
         var el = document.getElementById('atab-' + t);
-        if (el) { el.classList.toggle('border-[#2D9D4E]', t === tab); el.classList.toggle('text-[#2D9D4E]', t === tab); el.classList.toggle('border-transparent', t !== tab); el.classList.toggle('text-gray-500', t !== tab); }
+        if (el) {
+          el.classList.toggle('bg-[#E8F5EC]', t === tab);
+          el.classList.toggle('text-[#2D9D4E]', t === tab);
+          el.classList.toggle('border-[#D8EBD8]', t === tab);
+          el.classList.toggle('shadow-sm', t === tab);
+          el.classList.toggle('bg-transparent', t !== tab);
+          el.classList.toggle('text-gray-500', t !== tab);
+          el.classList.toggle('border-transparent', t !== tab);
+        }
       });
       ['db', 'refund', 'pd', 'od', 'category', 'coupon', 'banner', 'auth', 'ship'].forEach(function (id) {
         var el = document.getElementById('admin-' + id);
@@ -3991,35 +4014,39 @@ ${renderAddressCreateCard('receiver')}</div>`;
       <div class="flex gap-2"><button onclick="adminBack()" class="text-xs bg-white/20 px-3 py-1 rounded-full">←
           返回</button><button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded-full">退出</button></div>
     </div>
-    <div class="grid grid-cols-9 border-b border-gray-200 bg-white">
-      <button onclick="switchAdminTab('db')" id="atab-db"
-        class="py-3 text-xs font-medium border-b-2 border-[#2D9D4E] text-[#2D9D4E]">📊 数据</button>
-      <button onclick="switchAdminTab('refund')" id="atab-refund"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">💸 退款</button>
-      <button onclick="switchAdminTab('pd')" id="atab-pd"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">📦 商品</button>
-      <button onclick="switchAdminTab('od')" id="atab-od"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">📋 订单</button>
-      <button onclick="switchAdminTab('category')" id="atab-category"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🏷 分类</button>
-      <button onclick="switchAdminTab('ship')" id="atab-ship"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🚚 发货</button>
-      <button onclick="switchAdminTab('coupon')" id="atab-coupon"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🎟 优惠券</button>
-      <button onclick="switchAdminTab('banner')" id="atab-banner"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🖼 Banner</button>
-      <button onclick="switchAdminTab('auth')" id="atab-auth"
-        class="py-3 text-xs font-medium border-b-2 border-transparent text-gray-500">🔐 权限</button>
+    <div class="flex items-start min-h-[calc(100vh-56px)]">
+      <div class="w-24 shrink-0 bg-[#F8F5EF] border-r border-[#E9E1D4] p-2 space-y-2 sticky top-[56px] self-start">
+        <button onclick="switchAdminTab('db')" id="atab-db"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border bg-[#E8F5EC] text-[#2D9D4E] border-[#D8EBD8] shadow-sm">📊<div class="mt-1">数据</div></button>
+        <button onclick="switchAdminTab('refund')" id="atab-refund"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">💸<div class="mt-1">退款</div></button>
+        <button onclick="switchAdminTab('pd')" id="atab-pd"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">📦<div class="mt-1">商品</div></button>
+        <button onclick="switchAdminTab('od')" id="atab-od"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">📋<div class="mt-1">订单</div></button>
+        <button onclick="switchAdminTab('category')" id="atab-category"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🏷<div class="mt-1">分类</div></button>
+        <button onclick="switchAdminTab('ship')" id="atab-ship"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🚚<div class="mt-1">发货</div></button>
+        <button onclick="switchAdminTab('coupon')" id="atab-coupon"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🎟<div class="mt-1">优惠券</div></button>
+        <button onclick="switchAdminTab('banner')" id="atab-banner"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🖼<div class="mt-1">Banner</div></button>
+        <button onclick="switchAdminTab('auth')" id="atab-auth"
+          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🔐<div class="mt-1">权限</div></button>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div id="admin-db" class="p-4"></div>
+        <div id="admin-refund" class="hidden p-4"></div>
+        <div id="admin-pd" class="hidden p-4"></div>
+        <div id="admin-od" class="hidden p-4"></div>
+        <div id="admin-category" class="hidden p-4"></div>
+        <div id="admin-ship" class="hidden p-4"></div>
+        <div id="admin-coupon" class="hidden p-4"></div>
+        <div id="admin-banner" class="hidden p-4"></div>
+        <div id="admin-auth" class="hidden p-4"></div>
+      </div>
     </div>
-    <div id="admin-db" class="p-4"></div>
-    <div id="admin-refund" class="hidden p-4"></div>
-    <div id="admin-pd" class="hidden p-4"></div>
-    <div id="admin-od" class="hidden p-4"></div>
-    <div id="admin-category" class="hidden p-4"></div>
-    <div id="admin-ship" class="hidden p-4"></div>
-    <div id="admin-coupon" class="hidden p-4"></div>
-    <div id="admin-banner" class="hidden p-4"></div>
-    <div id="admin-auth" class="hidden p-4"></div>
   </div>
   <div id="farmer-panel" class="hidden">
     <div class="bg-[#E07B39] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">

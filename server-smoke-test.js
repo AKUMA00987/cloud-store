@@ -135,7 +135,7 @@ async function main() {
   assert(couponTemplateSaveResult[0].name === '联调模板券', '优惠券模板保存后应返回最新内容');
 
   const updatedCategories = originalCategories.map(function (item, index) {
-    return Object.assign({}, item, index === 0 ? { name: '联调分类', icon: item.icon || '🧺' } : {});
+    return Object.assign({}, item, index === 0 ? { name: '联调分类', icon: item.icon || '🧺', showOnHome: false } : {});
   });
   const categorySaveResult = await requestJson('/api/categories', {
     method: 'POST',
@@ -143,6 +143,7 @@ async function main() {
     body: JSON.stringify(updatedCategories)
   });
   assert(categorySaveResult[0].name === '联调分类', '商品分类保存后应返回最新名称');
+  assert(categorySaveResult[0].showOnHome === false, '商品分类保存后应返回首页展示开关');
 
   const updatedBanners = originalBanners.map(function (item, index) {
     return Object.assign({}, item, {

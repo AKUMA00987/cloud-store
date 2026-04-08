@@ -1179,7 +1179,8 @@ function normalizeCategory(item, index) {
     id: category && category.id ? String(category.id) : buildCategoryId(category.name, index),
     name: category && category.name ? String(category.name).trim() : '未命名分类',
     icon: category && category.icon ? String(category.icon).trim() : '🧺',
-    sortOrder: Number(category && category.sortOrder != null ? category.sortOrder : index || 0)
+    sortOrder: Number(category && category.sortOrder != null ? category.sortOrder : index || 0),
+    showOnHome: !(category && category.showOnHome === false) && String(category && category.showOnHome || '') !== '0'
   };
 }
 
@@ -1188,7 +1189,8 @@ function hydrateCategory(row) {
     id: row.id,
     name: row.name,
     icon: row.icon,
-    sortOrder: row.sortOrder
+    sortOrder: row.sortOrder,
+    showOnHome: !!Number(row.showOnHome != null ? row.showOnHome : 1)
   }, row.sortOrder);
 }
 
@@ -1198,7 +1200,8 @@ function toDbCategory(item, index) {
     id: category.id,
     name: category.name,
     icon: category.icon,
-    sortOrder: category.sortOrder
+    sortOrder: category.sortOrder,
+    showOnHome: category.showOnHome ? 1 : 0
   };
 }
 
@@ -1779,8 +1782,8 @@ async function saveCategoryList(list) {
   for (let index = 0; index < list.length; index++) {
     const item = toDbCategory(list[index], index);
     await run(
-      'INSERT INTO categories (id, name, icon, sortOrder) VALUES (?, ?, ?, ?)',
-      [item.id, item.name, item.icon, index]
+      'INSERT INTO categories (id, name, icon, sortOrder, showOnHome) VALUES (?, ?, ?, ?, ?)',
+      [item.id, item.name, item.icon, index, item.showOnHome]
     );
   }
 }
@@ -1895,7 +1898,8 @@ async function initDatabase() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
       icon TEXT NOT NULL DEFAULT '',
-      sortOrder INTEGER NOT NULL DEFAULT 0
+      sortOrder INTEGER NOT NULL DEFAULT 0,
+      showOnHome INTEGER NOT NULL DEFAULT 1
     )
   `);
   await run(`
@@ -2129,7 +2133,8 @@ async function initDatabase() {
   var categoryDefinitions = {
     name: "TEXT NOT NULL DEFAULT ''",
     icon: "TEXT NOT NULL DEFAULT ''",
-    sortOrder: 'INTEGER NOT NULL DEFAULT 0'
+    sortOrder: 'INTEGER NOT NULL DEFAULT 0',
+    showOnHome: 'INTEGER NOT NULL DEFAULT 1'
   };
   for (const key of Object.keys(categoryDefinitions)) {
     if (!categoryExisting[key]) await run('ALTER TABLE categories ADD COLUMN ' + key + ' ' + categoryDefinitions[key]);
