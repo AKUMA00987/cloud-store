@@ -46,6 +46,35 @@ function all(sql, params) {
   });
 }
 
+function execSql(sql) {
+  return new Promise(function (resolve, reject) {
+    db.exec(sql, function (error) {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+async function withImmediateTransaction(asyncFn) {
+  let committed = false;
+  await execSql('BEGIN IMMEDIATE');
+  try {
+    const result = await asyncFn();
+    await execSql('COMMIT');
+    committed = true;
+    return result;
+  } catch (error) {
+    if (!committed) {
+      try {
+        await execSql('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('ROLLBACK 失败', rollbackError);
+      }
+    }
+    throw error;
+  }
+}
+
 // [SERVER_PARSE_HELPERS] JSON 字段、图片上传和默认种子数据读取都依赖这组基础工具。
 function parseJsonArray(value) {
   if (!value) return [];
@@ -75,6 +104,14 @@ function containsTextFilter(source, keyword) {
   const target = normalizeTextFilter(keyword).toLowerCase();
   if (!target) return true;
   return String(source || '').toLowerCase().indexOf(target) >= 0;
+}
+
+function tokenizeSearchKeyword(value) {
+  return normalizeTextFilter(value)
+    .toLowerCase()
+    .split(/\s+/)
+    .map(function (item) { return item.trim(); })
+    .filter(Boolean);
 }
 
 function exactTextFilter(source, keyword) {
@@ -324,7 +361,11 @@ function normalizeOrderRecord(order) {
     address: {},
     coupon: '',
     couponId: '',
-    trackingNo: ''
+    trackingNo: '',
+    reserveExpiresAt: 0,
+    inventoryReleased: false,
+    inventoryReleasedAt: 0,
+    cancelReason: ''
   }, order || {}, {
     id: order && order.id ? String(order.id) : '',
     owner: order && (order.owner || order.username) ? String(order.owner || order.username) : '',
@@ -339,7 +380,11 @@ function normalizeOrderRecord(order) {
     address: order && order.address && typeof order.address === 'object' && !Array.isArray(order.address) ? order.address : {},
     coupon: order && order.coupon ? String(order.coupon) : '',
     couponId: order && order.couponId ? String(order.couponId) : '',
-    trackingNo: order && order.trackingNo ? String(order.trackingNo) : ''
+    trackingNo: order && order.trackingNo ? String(order.trackingNo) : '',
+    reserveExpiresAt: Number(order && order.reserveExpiresAt || 0),
+    inventoryReleased: !!(order && order.inventoryReleased),
+    inventoryReleasedAt: Number(order && order.inventoryReleasedAt || 0),
+    cancelReason: order && order.cancelReason ? String(order.cancelReason) : ''
   });
 }
 
@@ -473,22 +518,179 @@ function buildOrderMap(orders) {
   }, {});
 }
 
+function buildVariantId(value, index) {
+  const seed = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return seed ? ('variant_' + seed + '_' + Number(index || 0)) : ('variant_' + Number(index || 0));
+}
+
+function buildUnitId(value, index) {
+  const seed = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return seed ? ('unit_' + seed + '_' + Number(index || 0)) : ('unit_' + Number(index || 0));
+}
+
+function normalizeVariantUnits(variant, index, product) {
+  const payload = variant || {};
+  const baseProduct = product || {};
+  const rawList = Array.isArray(payload.units) ? payload.units : [];
+  const fallbackLabel = String(payload.unit || payload.label || baseProduct.unit || '').trim() || (index === 0 ? '默认单位' : ('单位' + (index + 1)));
+  const fallbackStock = Math.max(0, Number(payload.stock != null ? payload.stock : 0));
+  const fallbackPrice = Number(payload.price != null ? payload.price : (index === 0 ? Number(baseProduct.price || 0) : 0));
+  const sourceList = rawList.length ? rawList : [{
+    id: payload.defaultUnitId || buildUnitId(fallbackLabel || 'default', 0),
+    label: fallbackLabel,
+    price: fallbackPrice,
+    stock: fallbackStock,
+    sortOrder: 0,
+    isDefault: true
+  }];
+  const normalized = sourceList.map(function (item, unitIndex) {
+    const unit = item || {};
+    const label = String(unit.label || '').trim() || (unitIndex === 0 ? fallbackLabel : ('单位' + (unitIndex + 1)));
+    return {
+      id: String(unit.id || buildUnitId(label, unitIndex)),
+      label: label,
+      price: Number(unit.price != null ? unit.price : (unitIndex === 0 ? fallbackPrice : fallbackPrice)),
+      stock: Math.max(0, Number(unit.stock != null ? unit.stock : (unitIndex === 0 ? fallbackStock : 0))),
+      sortOrder: Number(unit.sortOrder != null ? unit.sortOrder : unitIndex),
+      isDefault: !!unit.isDefault
+    };
+  }).sort(function (a, b) {
+    if (Number(b.isDefault) !== Number(a.isDefault)) return Number(b.isDefault) - Number(a.isDefault);
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return String(a.id).localeCompare(String(b.id), 'zh-CN');
+  }).map(function (item, unitIndex) {
+    return Object.assign({}, item, {
+      sortOrder: Number(item.sortOrder != null ? item.sortOrder : unitIndex)
+    });
+  });
+  if (!normalized.some(function (item) { return item.isDefault; })) {
+    normalized[0] = Object.assign({}, normalized[0], { isDefault: true });
+  } else {
+    let defaultAssigned = false;
+    for (let unitIndex = 0; unitIndex < normalized.length; unitIndex++) {
+      const shouldKeepDefault = !!normalized[unitIndex].isDefault && !defaultAssigned;
+      normalized[unitIndex] = Object.assign({}, normalized[unitIndex], { isDefault: shouldKeepDefault });
+      if (shouldKeepDefault) defaultAssigned = true;
+    }
+  }
+  return normalized;
+}
+
+function getDefaultUnitForVariant(variant, product) {
+  const units = normalizeVariantUnits(variant, Number(variant && variant.sortOrder || 0), product);
+  return units.find(function (item) { return item.isDefault; }) || units[0] || null;
+}
+
+function getVariantUnitById(variant, unitId, product) {
+  const units = normalizeVariantUnits(variant, Number(variant && variant.sortOrder || 0), product);
+  const targetId = String(unitId || '').trim();
+  if (!targetId) return getDefaultUnitForVariant(variant, product);
+  return units.find(function (item) {
+    return String(item.id || '') === targetId;
+  }) || null;
+}
+
+function resolveVariantUnitForItem(variant, item, product) {
+  const normalizedVariant = variant || {};
+  const payload = item || {};
+  const direct = getVariantUnitById(normalizedVariant, payload.unitId, product);
+  if (direct) return direct;
+  const targetLabel = String(payload.unitLabel || payload.unit || '').trim();
+  if (!targetLabel) return getDefaultUnitForVariant(normalizedVariant, product);
+  return normalizeVariantUnits(normalizedVariant, Number(normalizedVariant.sortOrder || 0), product).find(function (entry) {
+    return String(entry.label || '') === targetLabel;
+  }) || getDefaultUnitForVariant(normalizedVariant, product);
+}
+
+function normalizeProductVariants(product) {
+  const payload = product || {};
+  const rawList = Array.isArray(payload.variants) ? payload.variants : [];
+  const fallbackLabel = String(payload.unit || '').trim() || '默认规格';
+  const fallbackPrice = Number(payload.price || 0);
+  const fallbackStock = Math.max(0, Number(payload.stock || 0));
+  const sourceList = rawList.length ? rawList : [{
+    id: payload.defaultVariantId || buildVariantId(fallbackLabel || 'default', 0),
+    label: fallbackLabel,
+    price: fallbackPrice,
+    stock: fallbackStock,
+    sortOrder: 0,
+    isDefault: true
+  }];
+  const normalized = sourceList.map(function (item, index) {
+    const variant = item || {};
+    const label = String(variant.label || '').trim() || (index === 0 ? fallbackLabel : ('规格' + (index + 1)));
+    const units = normalizeVariantUnits(variant, index, payload);
+    const defaultUnit = units.find(function (entry) { return entry && entry.isDefault; }) || units[0] || null;
+    return {
+      id: String(variant.id || buildVariantId(label, index)),
+      label: label,
+      price: Number(defaultUnit && defaultUnit.price != null ? defaultUnit.price : (variant.price != null ? variant.price : (index === 0 ? fallbackPrice : 0))),
+      units: units,
+      stock: units.reduce(function (sum, unit) {
+        return sum + Math.max(0, Number(unit && unit.stock || 0));
+      }, 0),
+      sortOrder: Number(variant.sortOrder != null ? variant.sortOrder : index),
+      isDefault: !!variant.isDefault
+    };
+  }).sort(function (a, b) {
+    if (Number(b.isDefault) !== Number(a.isDefault)) return Number(b.isDefault) - Number(a.isDefault);
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return String(a.id).localeCompare(String(b.id), 'zh-CN');
+  }).map(function (item, index) {
+    return Object.assign({}, item, {
+      sortOrder: Number(item.sortOrder != null ? item.sortOrder : index)
+    });
+  });
+  if (!normalized.some(function (item) { return item.isDefault; })) {
+    normalized[0] = Object.assign({}, normalized[0], { isDefault: true });
+  } else {
+    let defaultAssigned = false;
+    for (let index = 0; index < normalized.length; index++) {
+      const shouldKeepDefault = !!normalized[index].isDefault && !defaultAssigned;
+      normalized[index] = Object.assign({}, normalized[index], { isDefault: shouldKeepDefault });
+      if (shouldKeepDefault) defaultAssigned = true;
+    }
+  }
+  return normalized;
+}
+
+function getDefaultVariant(product) {
+  const variants = normalizeProductVariants(product);
+  return variants.find(function (item) { return item.isDefault; }) || variants[0];
+}
+
 function normalizeOrderItem(item, index) {
   return Object.assign({
     id: 0,
     productId: 0,
     name: '',
+    variantId: '',
+    variantLabel: '',
+    unitId: '',
+    unitLabel: '',
     unit: '',
     price: 0,
     qty: 0,
     img: '',
     shippingAddressId: '',
     shippingAddressSnapshot: {}
-  }, item || {}, {
+    }, item || {}, {
     id: item && item.id ? Number(item.id) : index + 1,
-    productId: Number(item && item.id || item && item.productId || 0),
+    productId: Number(item && (item.productId != null ? item.productId : item.id) || 0),
     name: item && item.name ? String(item.name) : '',
-    unit: item && item.unit ? String(item.unit) : '',
+    variantId: item && item.variantId ? String(item.variantId) : '',
+    variantLabel: item && (item.variantLabel || item.unitLabel || item.unit) ? String(item.variantLabel || item.unitLabel || item.unit) : '',
+    unitId: item && item.unitId ? String(item.unitId) : '',
+    unitLabel: item && (item.unitLabel || item.unit || item.variantLabel) ? String(item.unitLabel || item.unit || item.variantLabel) : '',
+    unit: item && (item.unit || item.unitLabel || item.variantLabel) ? String(item.unit || item.unitLabel || item.variantLabel) : '',
     price: Number(item && item.price || 0),
     qty: Number(item && item.qty || 0),
     img: item && item.img ? String(item.img) : '',
@@ -503,6 +705,10 @@ function hydrateOrderRows(orderRow, itemRows) {
       id: itemRow.productId,
       productId: itemRow.productId,
       name: itemRow.name,
+      variantId: itemRow.variantId,
+      variantLabel: itemRow.variantLabel,
+      unitId: itemRow.unitId,
+      unitLabel: itemRow.unitLabel,
       unit: itemRow.unit,
       price: itemRow.price,
       qty: itemRow.qty,
@@ -534,7 +740,11 @@ function hydrateOrderRows(orderRow, itemRows) {
     },
     coupon: orderRow.couponText,
     couponId: orderRow.couponId,
-    trackingNo: orderRow.trackingNo
+    trackingNo: orderRow.trackingNo,
+    reserveExpiresAt: orderRow.reserveExpiresAt,
+    inventoryReleased: !!orderRow.inventoryReleased,
+    inventoryReleasedAt: orderRow.inventoryReleasedAt,
+    cancelReason: orderRow.cancelReason
   });
 }
 
@@ -580,7 +790,7 @@ async function syncUserOrderRelations(username, orders) {
     const order = normalizeOrderRecord(orderList[orderIndex]);
     const relationOrderId = username + ':' + order.id;
     await run(
-      'INSERT INTO orders (id, sourceId, username, status, total, subtotal, deliveryFee, discount, couponText, couponId, receiverName, receiverPhone, receiverFull, trackingNo, ownerDeleted, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO orders (id, sourceId, username, status, total, subtotal, deliveryFee, discount, couponText, couponId, receiverName, receiverPhone, receiverFull, trackingNo, ownerDeleted, createdAt, reserveExpiresAt, inventoryReleased, inventoryReleasedAt, cancelReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         relationOrderId,
         order.id,
@@ -597,17 +807,25 @@ async function syncUserOrderRelations(username, orders) {
         order.address && order.address.full ? order.address.full : '',
         order.trackingNo || '',
         0,
-        order.time
+        order.time,
+        Number(order.reserveExpiresAt || 0),
+        order.inventoryReleased ? 1 : 0,
+        Number(order.inventoryReleasedAt || 0),
+        order.cancelReason || ''
       ]
     );
     for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
       const item = normalizeOrderItem(order.items[itemIndex], itemIndex);
       await run(
-        'INSERT INTO order_items (orderId, productId, name, unit, price, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO order_items (orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           relationOrderId,
           item.productId,
           item.name,
+          item.variantId,
+          item.variantLabel,
+          item.unitId,
+          item.unitLabel,
           item.unit,
           item.price,
           item.qty,
@@ -657,6 +875,414 @@ async function listAllOrderSnapshots() {
       ownerDeleted: row.ownerDeleted || !activeUsers[row.username]
     }), itemsByOrderId[row.id] || []);
   });
+}
+
+function buildOrderRelationId(username, sourceOrderId) {
+  return String(username || '').trim() + ':' + String(sourceOrderId || '').trim();
+}
+
+function buildPaymentTransactionId(username, sourceOrderId) {
+  return buildOrderRelationId(username, sourceOrderId);
+}
+
+function getReserveExpiresAt(createdAt) {
+  return Number(createdAt || Date.now()) + 600000;
+}
+
+function getVariantById(product, variantId) {
+  const normalizedProduct = normalizeProduct(product);
+  const targetId = String(variantId || '').trim();
+  if (!targetId) return getDefaultVariant(normalizedProduct);
+  return (normalizedProduct.variants || []).find(function (item) {
+    return String(item.id || '') === targetId;
+  }) || null;
+}
+
+function cloneVariantTree(product) {
+  const normalizedProduct = normalizeProduct(product);
+  return normalizeProductVariants(normalizedProduct).map(function (variant, index) {
+    return Object.assign({}, variant, {
+      units: normalizeVariantUnits(variant, index, normalizedProduct).map(function (unit) {
+        return Object.assign({}, unit);
+      })
+    });
+  });
+}
+
+function applyVariantUnitInventoryDelta(product, item, deltaQty, options) {
+  const normalizedProduct = normalizeProduct(product);
+  const payload = normalizeOrderItem(item, 0);
+  const config = Object.assign({ allowCreateVariant: false, allowCreateUnit: false }, options || {});
+  const nextVariants = cloneVariantTree(normalizedProduct);
+  const fallbackVariantLabel = String(payload.variantLabel || payload.unitLabel || payload.unit || '').trim() || '默认规格';
+  const fallbackUnitLabel = String(payload.unitLabel || payload.unit || payload.variantLabel || '').trim() || fallbackVariantLabel || '默认单位';
+  let targetVariant = nextVariants.find(function (variant) {
+    return String(variant.id || '') === String(payload.variantId || '');
+  }) || null;
+  if (!targetVariant && config.allowCreateVariant) {
+    targetVariant = {
+      id: String(payload.variantId || buildVariantId(fallbackVariantLabel, nextVariants.length)),
+      label: fallbackVariantLabel,
+      price: Number(payload.price || 0),
+      units: [],
+      stock: 0,
+      sortOrder: nextVariants.length,
+      isDefault: nextVariants.length === 0
+    };
+    nextVariants.push(targetVariant);
+  }
+  if (!targetVariant) return { matched: false, variants: normalizeProductVariants(Object.assign({}, normalizedProduct, { variants: nextVariants })) };
+  let targetUnit = null;
+  if (String(payload.unitId || '').trim()) {
+    targetUnit = targetVariant.units.find(function (unit) {
+      return String(unit.id || '') === String(payload.unitId || '');
+    }) || null;
+  }
+  if (!targetUnit && fallbackUnitLabel) {
+    targetUnit = targetVariant.units.find(function (unit) {
+      return String(unit.label || '') === fallbackUnitLabel;
+    }) || null;
+  }
+  if (!targetUnit && config.allowCreateUnit) {
+    targetUnit = {
+      id: String(payload.unitId || buildUnitId(fallbackUnitLabel, targetVariant.units.length)),
+      label: fallbackUnitLabel,
+      price: Number(payload.price || targetVariant.price || 0),
+      stock: 0,
+      sortOrder: targetVariant.units.length,
+      isDefault: targetVariant.units.length === 0
+    };
+    targetVariant.units.push(targetUnit);
+  }
+  if (!targetUnit) return { matched: false, variants: normalizeProductVariants(Object.assign({}, normalizedProduct, { variants: nextVariants })) };
+  targetUnit.stock = Math.max(0, Number(targetUnit.stock || 0) + Number(deltaQty || 0));
+  targetVariant.units = normalizeVariantUnits(targetVariant, Number(targetVariant.sortOrder || 0), normalizedProduct);
+  targetVariant.stock = targetVariant.units.reduce(function (sum, unit) {
+    return sum + Math.max(0, Number(unit && unit.stock || 0));
+  }, 0);
+  return {
+    matched: true,
+    variant: targetVariant,
+    unit: targetUnit,
+    variants: normalizeProductVariants(Object.assign({}, normalizedProduct, { variants: nextVariants }))
+  };
+}
+
+async function getOrderSnapshotByRelationId(relationOrderId) {
+  const row = await get('SELECT * FROM orders WHERE id = ?', [relationOrderId]);
+  if (!row) return null;
+  const itemRows = await all('SELECT * FROM order_items WHERE orderId = ? ORDER BY sortOrder ASC, id ASC', [relationOrderId]);
+  return hydrateOrderRows(row, itemRows);
+}
+
+async function getOrderSnapshotByOwner(ownerUsername, sourceOrderId) {
+  const relationOrderId = buildOrderRelationId(ownerUsername, sourceOrderId);
+  return getOrderSnapshotByRelationId(relationOrderId);
+}
+
+async function saveProductMutationWithAudit(previousProduct, nextProduct, auditMeta, timestamp) {
+  const previous = normalizeProduct(previousProduct);
+  const next = normalizeProduct(nextProduct);
+  const item = toDbProduct(next);
+  const audit = normalizeAuditMeta(auditMeta, {
+    actionType: 'manual_adjust',
+    operatorUsername: next.farmerAccount || previous.farmerAccount || '',
+    operatorRole: next.farmerAccount || previous.farmerAccount ? 'farmer' : 'admin',
+    note: '商品库存或销量发生变更'
+  });
+  await run(
+    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
+    [
+      item.name,
+      item.price,
+      item.orig,
+      item.unit,
+      item.cat,
+      item.tags,
+      item.stock,
+      item.sales,
+      item.harvest,
+      item.dispatchHours,
+      item.farmer,
+      item.farmerAccount,
+      item.farmerUserId,
+      item.village,
+      item.shippingAddressId,
+      item.shippingAddressSnapshot,
+      item.img,
+      item.off,
+      item.trace,
+      item.variantsJson,
+      item.id
+    ]
+  );
+  const deltaStock = next.stock - previous.stock;
+  const deltaSales = next.sales - previous.sales;
+  if (deltaStock !== 0 || deltaSales !== 0) {
+    await run(
+      'INSERT INTO inventory_logs (productId, productName, operatorUsername, operatorRole, actionType, deltaStock, deltaSales, beforeStock, afterStock, beforeSales, afterSales, orderId, note, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        next.id,
+        next.name,
+        audit.operatorUsername,
+        audit.operatorRole,
+        audit.actionType,
+        deltaStock,
+        deltaSales,
+        previous.stock,
+        next.stock,
+        previous.sales,
+        next.sales,
+        audit.orderId,
+        audit.note,
+        Number(timestamp || Date.now())
+      ]
+    );
+  }
+  return next;
+}
+
+function normalizePreparePaymentPayload(payload) {
+  const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  return {
+    username: String(source.username || '').trim(),
+    items: Array.isArray(source.items) ? source.items.map(function (item, index) {
+      return normalizeOrderItem(item, index);
+    }) : [],
+    address: source.address && typeof source.address === 'object' && !Array.isArray(source.address) ? Object.assign({}, source.address) : {},
+    subtotal: Number(source.subtotal || 0),
+    deliveryFee: Math.max(0, Number(source.deliveryFee || 0)),
+    discount: Math.max(0, Number(source.discount || 0)),
+    total: Math.max(0, Number(source.total || 0)),
+    couponId: String(source.couponId || '').trim(),
+    couponText: String(source.couponText || source.coupon || '').trim()
+  };
+}
+
+async function createPendingOrderFromCheckout(username, payload) {
+  const ownerUsername = String(username || '').trim();
+  const request = normalizePreparePaymentPayload(payload);
+  if (!ownerUsername) throw new Error('用户未登录，无法创建待支付订单');
+  if (request.username && request.username !== ownerUsername) throw new Error('订单归属用户不匹配');
+  if (!request.items.length) throw new Error('订单商品为空，无法继续支付');
+  if (!request.address || !String(request.address.name || '').trim() || !String(request.address.phone || '').trim() || !String(request.address.full || '').trim()) {
+    throw new Error('请先选择完整的收货地址');
+  }
+  const owner = await getUserByUsername(ownerUsername);
+  if (!owner) throw new Error('用户不存在，无法创建待支付订单');
+  return withImmediateTransaction(async function () {
+    const now = Date.now();
+    const sourceOrderId = 'ORD' + now + Math.floor(Math.random() * 1000);
+    const relationOrderId = buildOrderRelationId(ownerUsername, sourceOrderId);
+    const orderItems = [];
+    let subtotal = 0;
+    for (let index = 0; index < request.items.length; index++) {
+      const requestItem = normalizeOrderItem(request.items[index], index);
+      if (!(Number(requestItem.productId || 0) > 0) || !(Number(requestItem.qty || 0) > 0)) {
+        throw new Error('订单商品参数不完整');
+      }
+      const productRow = await get('SELECT * FROM products WHERE id = ?', [requestItem.productId]);
+      if (!productRow) throw new Error((requestItem.name || '商品') + ' 已不存在，请返回购物车重新确认');
+      const product = hydrateProduct(productRow);
+      if (product.off) throw new Error(product.name + ' 已下架，请返回购物车重新确认');
+      const variant = getVariantById(product, requestItem.variantId);
+      if (!variant) throw new Error(product.name + ' 规格不存在，请返回购物车重新确认');
+      const unit = resolveVariantUnitForItem(variant, requestItem, product);
+      if (!unit) throw new Error(product.name + ' 单位不存在，请返回购物车重新确认');
+      if (Number(unit.stock || 0) < Number(requestItem.qty || 0)) {
+        throw new Error(product.name + '（' + variant.label + ' / ' + unit.label + '）库存不足，请修改购物车后再结算');
+      }
+      const shippingAddressSnapshot = requestItem.shippingAddressSnapshot && requestItem.shippingAddressSnapshot.full
+        ? Object.assign({}, requestItem.shippingAddressSnapshot)
+        : (product.shippingAddressSnapshot && product.shippingAddressSnapshot.full ? Object.assign({}, product.shippingAddressSnapshot) : {});
+      const shippingAddressId = String(requestItem.shippingAddressId || product.shippingAddressId || shippingAddressSnapshot.id || '').trim();
+      if (!shippingAddressId || !shippingAddressSnapshot.full) {
+        throw new Error(product.name + ' 暂未配置发货地址，暂时无法下单');
+      }
+      const inventoryMutation = applyVariantUnitInventoryDelta(product, Object.assign({}, requestItem, {
+        variantId: variant.id,
+        variantLabel: variant.label,
+        unitId: unit.id,
+        unitLabel: unit.label
+      }), -Number(requestItem.qty || 0));
+      if (!inventoryMutation.matched) {
+        throw new Error(product.name + ' 单位不存在，请返回购物车重新确认');
+      }
+      await saveProductMutationWithAudit(product, Object.assign({}, product, { variants: inventoryMutation.variants }), {
+        actionType: 'order_reserve',
+        operatorUsername: ownerUsername,
+        operatorRole: 'buyer',
+        orderId: sourceOrderId,
+        note: '确认订单进入支付后预占库存'
+      }, now);
+      const orderItem = normalizeOrderItem({
+        id: product.id,
+        productId: product.id,
+        name: product.name,
+        variantId: variant.id,
+        variantLabel: variant.label,
+        unitId: unit.id,
+        unitLabel: unit.label,
+        unit: unit.label,
+        price: Number(unit.price || 0),
+        qty: Number(requestItem.qty || 0),
+        img: product.img,
+        shippingAddressId: shippingAddressId,
+        shippingAddressSnapshot: shippingAddressSnapshot
+      }, index);
+      subtotal += Number(orderItem.price || 0) * Number(orderItem.qty || 0);
+      orderItems.push(orderItem);
+    }
+    const reserveExpiresAt = getReserveExpiresAt(now);
+    const deliveryFee = Math.max(0, Number(request.deliveryFee || 0));
+    const discount = Math.max(0, Number(request.discount || 0));
+    const total = Math.max(0, subtotal + deliveryFee - discount);
+    await run(
+      'INSERT INTO orders (id, sourceId, username, status, total, subtotal, deliveryFee, discount, couponText, couponId, receiverName, receiverPhone, receiverFull, trackingNo, ownerDeleted, createdAt, reserveExpiresAt, inventoryReleased, inventoryReleasedAt, cancelReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        relationOrderId,
+        sourceOrderId,
+        ownerUsername,
+        'pending',
+        total,
+        subtotal,
+        deliveryFee,
+        discount,
+        request.couponText,
+        request.couponId,
+        String(request.address.name || '').trim(),
+        String(request.address.phone || '').trim(),
+        String(request.address.full || '').trim(),
+        '',
+        0,
+        now,
+        reserveExpiresAt,
+        0,
+        0,
+        ''
+      ]
+    );
+    for (let index = 0; index < orderItems.length; index++) {
+      const item = orderItems[index];
+      await run(
+        'INSERT INTO order_items (orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          relationOrderId,
+          item.productId,
+          item.name,
+          item.variantId,
+          item.variantLabel,
+          item.unitId,
+          item.unitLabel,
+          item.unit,
+          item.price,
+          item.qty,
+          item.img,
+          item.shippingAddressId,
+          item.shippingAddressSnapshot && item.shippingAddressSnapshot.name ? item.shippingAddressSnapshot.name : '',
+          item.shippingAddressSnapshot && item.shippingAddressSnapshot.phone ? item.shippingAddressSnapshot.phone : '',
+          item.shippingAddressSnapshot && item.shippingAddressSnapshot.full ? item.shippingAddressSnapshot.full : '',
+          index
+        ]
+      );
+    }
+    await run(
+      'INSERT OR REPLACE INTO payment_transactions (id, username, orderId, amount, status, channel, couponId, couponText, receiverName, receiverPhone, receiverFull, createdAt, paidAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        buildPaymentTransactionId(ownerUsername, sourceOrderId),
+        ownerUsername,
+        sourceOrderId,
+        total,
+        'pending',
+        'mock_h5',
+        request.couponId,
+        request.couponText,
+        String(request.address.name || '').trim(),
+        String(request.address.phone || '').trim(),
+        String(request.address.full || '').trim(),
+        now,
+        0
+      ]
+    );
+    return normalizeOrderRecord({
+      id: sourceOrderId,
+      owner: ownerUsername,
+      items: orderItems,
+      subtotal: subtotal,
+      deliveryFee: deliveryFee,
+      discount: discount,
+      total: total,
+      status: 'pending',
+      time: now,
+      address: Object.assign({}, request.address),
+      coupon: request.couponText,
+      couponId: request.couponId,
+      trackingNo: '',
+      reserveExpiresAt: reserveExpiresAt,
+      inventoryReleased: false,
+      inventoryReleasedAt: 0,
+      cancelReason: ''
+    });
+  });
+}
+
+async function releaseReservedInventoryForOrder(order, reason, actorMeta) {
+  const normalizedOrder = normalizeOrderRecord(order);
+  if (!normalizedOrder.id || !normalizedOrder.owner) throw new Error('订单不存在，无法释放库存');
+  if (normalizedOrder.inventoryReleased) throw new Error('该订单库存已释放，不能重复处理');
+  const now = Date.now();
+  const releaseReason = String(reason || '').trim() || 'buyer_pending_cancel';
+  const relationOrderId = buildOrderRelationId(normalizedOrder.owner, normalizedOrder.id);
+  const actionType = releaseReason === 'timeout_release' ? 'order_release_timeout' : 'order_release_cancel';
+  const note = releaseReason === 'timeout_release' ? '待支付订单超时后释放预占库存' : '待支付订单取消后释放预占库存';
+  for (let index = 0; index < normalizedOrder.items.length; index++) {
+    const item = normalizeOrderItem(normalizedOrder.items[index], index);
+    const productRow = await get('SELECT * FROM products WHERE id = ?', [item.productId]);
+    if (!productRow) throw new Error(item.name + ' 已不存在，无法释放库存');
+    const product = hydrateProduct(productRow);
+    const inventoryMutation = applyVariantUnitInventoryDelta(product, item, Number(item.qty || 0), {
+      allowCreateVariant: true,
+      allowCreateUnit: true
+    });
+    await saveProductMutationWithAudit(product, Object.assign({}, product, { variants: inventoryMutation.variants }), {
+      actionType: actionType,
+      operatorUsername: actorMeta && actorMeta.operatorUsername ? actorMeta.operatorUsername : normalizedOrder.owner,
+      operatorRole: actorMeta && actorMeta.operatorRole ? actorMeta.operatorRole : 'system',
+      orderId: normalizedOrder.id,
+      note: note
+    }, now);
+  }
+  await run(
+    'UPDATE orders SET status = ?, inventoryReleased = 1, inventoryReleasedAt = ?, cancelReason = ? WHERE id = ?',
+    ['cancelled', now, releaseReason, relationOrderId]
+  );
+  await run(
+    'UPDATE payment_transactions SET status = ?, paidAt = CASE WHEN status = ? THEN paidAt ELSE 0 END WHERE id = ?',
+    [releaseReason === 'timeout_release' ? 'expired' : 'cancelled', 'paid', buildPaymentTransactionId(normalizedOrder.owner, normalizedOrder.id)]
+  );
+  return getOrderSnapshotByRelationId(relationOrderId);
+}
+
+async function cleanupExpiredPendingOrders(now) {
+  const cutoff = Number(now || Date.now());
+  const expiredRows = await all(
+    "SELECT * FROM orders WHERE status = 'pending' AND reserveExpiresAt > 0 AND reserveExpiresAt <= ? AND inventoryReleased = 0 ORDER BY createdAt ASC, id ASC",
+    [cutoff]
+  );
+  if (!expiredRows.length) return 0;
+  await withImmediateTransaction(async function () {
+    for (let index = 0; index < expiredRows.length; index++) {
+      const row = expiredRows[index];
+      const itemRows = await all('SELECT * FROM order_items WHERE orderId = ? ORDER BY sortOrder ASC, id ASC', [row.id]);
+      const order = hydrateOrderRows(row, itemRows);
+      if (order.inventoryReleased || order.status !== 'pending' || (order.reserveExpiresAt && order.reserveExpiresAt > cutoff)) continue;
+      await releaseReservedInventoryForOrder(order, 'timeout_release', {
+        operatorUsername: 'system',
+        operatorRole: 'system'
+      });
+    }
+  });
+  return expiredRows.length;
 }
 
 async function getRefundRequestById(refundId) {
@@ -791,6 +1417,42 @@ async function listInventoryLogs(filters) {
     });
 }
 
+async function searchBuyerVisibleProducts(keyword) {
+  await seedProductsIfNeeded();
+  const categoryList = await getCategoryList();
+  const categoryNameById = categoryList.reduce(function (result, item) {
+    result[String(item.id || '')] = String(item.name || '');
+    return result;
+  }, {});
+  const tokens = tokenizeSearchKeyword(keyword);
+  const rows = await all('SELECT * FROM products WHERE off = 0 ORDER BY sales DESC, id DESC');
+  const hydrated = rows.map(hydrateProduct);
+  if (!tokens.length) return hydrated;
+  return hydrated
+    .map(function (item) {
+      const haystacks = [
+        item.name,
+        item.farmer,
+        item.village,
+        categoryNameById[String(item.cat || '')] || '',
+        Array.isArray(item.tags) ? item.tags.join(' ') : ''
+      ].join(' ').toLowerCase();
+      const matchCount = tokens.reduce(function (count, token) {
+        return count + (haystacks.indexOf(token) >= 0 ? 1 : 0);
+      }, 0);
+      return { item: item, matchCount: matchCount };
+    })
+    .filter(function (entry) {
+      return entry.matchCount > 0;
+    })
+    .sort(function (a, b) {
+      if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+      if (Number(b.item.sales || 0) !== Number(a.item.sales || 0)) return Number(b.item.sales || 0) - Number(a.item.sales || 0);
+      return Number(b.item.id || 0) - Number(a.item.id || 0);
+    })
+    .map(function (entry) { return entry.item; });
+}
+
 async function getActiveRefundRequestByOrder(ownerUsername, orderId) {
   const row = await get(
     "SELECT * FROM refund_requests WHERE ownerUsername = ? AND orderId = ? AND status = 'pending' ORDER BY requestedAt DESC, id DESC LIMIT 1",
@@ -859,8 +1521,12 @@ function normalizeCartItem(item, index) {
   return {
     productId: Number(item && item.id || item && item.productId || 0),
     name: item && item.name ? String(item.name) : '',
+    variantId: item && item.variantId ? String(item.variantId) : '',
+    variantLabel: item && (item.variantLabel || item.unit) ? String(item.variantLabel || item.unit) : '',
+    unitId: item && item.unitId ? String(item.unitId) : '',
+    unitLabel: item && (item.unitLabel || item.unit || item.variantLabel) ? String(item.unitLabel || item.unit || item.variantLabel) : '',
     price: Number(item && item.price || 0),
-    unit: item && item.unit ? String(item.unit) : '',
+    unit: item && (item.unit || item.unitLabel || item.variantLabel) ? String(item.unit || item.unitLabel || item.variantLabel) : '',
     img: item && item.img ? String(item.img) : '',
     qty: Number(item && item.qty || 0),
     sortOrder: Number(item && item.sortOrder != null ? item.sortOrder : index || 0)
@@ -871,6 +1537,10 @@ function hydrateCartItem(row) {
   return {
     id: row.productId,
     name: row.name,
+    variantId: row.variantId || '',
+    variantLabel: row.variantLabel || row.unit || '',
+    unitId: row.unitId || '',
+    unitLabel: row.unitLabel || row.unit || row.variantLabel || '',
     price: row.price,
     unit: row.unit,
     img: row.img,
@@ -884,8 +1554,8 @@ async function syncUserCartRelations(username, cart) {
   for (let index = 0; index < cartList.length; index++) {
     const item = normalizeCartItem(cartList[index], index);
     await run(
-      'INSERT INTO cart_items (username, productId, name, price, unit, img, qty, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [username, item.productId, item.name, item.price, item.unit, item.img, item.qty, index]
+      'INSERT INTO cart_items (username, productId, name, variantId, variantLabel, unitId, unitLabel, price, unit, img, qty, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [username, item.productId, item.name, item.variantId, item.variantLabel, item.unitId, item.unitLabel, item.price, item.unit, item.img, item.qty, index]
     );
   }
 }
@@ -1013,7 +1683,9 @@ async function syncOrderDerivedRelations(username, previousOrders, nextOrders, a
     const wasPaid = previousOrder ? isPaidOrderStatus(previousOrder.status) : false;
     const nowPaid = isPaidOrderStatus(currentOrder.status);
     const previousAftersaleType = previousOrder ? getAftersaleTypeByStatus(previousOrder.status) : '';
-    const currentAftersaleType = getAftersaleTypeByStatus(currentOrder.status);
+    const currentAftersaleType = ['buyer_pending_cancel', 'timeout_release'].indexOf(String(currentOrder.cancelReason || '')) >= 0
+      ? ''
+      : getAftersaleTypeByStatus(currentOrder.status);
     if (nowPaid && !wasPaid) {
       await insertPaymentTransaction(username, currentOrder, {
         channel: auditMeta && auditMeta.channel ? auditMeta.channel : 'mock_h5',
@@ -1050,7 +1722,7 @@ async function backfillOrderDerivedRelations() {
           note: '从历史订单回填支付流水'
         });
       }
-      if (getAftersaleTypeByStatus(order.status)) {
+      if (getAftersaleTypeByStatus(order.status) && ['buyer_pending_cancel', 'timeout_release'].indexOf(String(order.cancelReason || '')) < 0) {
         await insertAftersaleRecord(user.username, order, {
           createdAt: order.time || Date.now(),
           operatorUsername: user.username,
@@ -1077,7 +1749,7 @@ async function hydrateUserWithRelations(row) {
 }
 
 function normalizeProduct(product) {
-  return Object.assign({
+  const normalized = Object.assign({
     cat: 'veg',
     tags: [],
     stock: 30,
@@ -1095,9 +1767,7 @@ function normalizeProduct(product) {
     trace: []
   }, product || {}, {
     id: product && product.id ? Number(product.id) : undefined,
-    price: Number(product && product.price || 0),
     orig: Number(product && (product.orig != null ? product.orig : product.price) || 0),
-    stock: Number(product && product.stock || 0),
     sales: Number(product && product.sales || 0),
     dispatchHours: Number(product && product.dispatchHours || 4),
     off: !!(product && product.off),
@@ -1106,6 +1776,20 @@ function normalizeProduct(product) {
     shippingAddressSnapshot: product && product.shippingAddressSnapshot && typeof product.shippingAddressSnapshot === 'object' && !Array.isArray(product.shippingAddressSnapshot) ? product.shippingAddressSnapshot : {},
     trace: Array.isArray(product && product.trace) ? product.trace : []
   });
+  normalized.variants = normalizeProductVariants(Object.assign({}, normalized, {
+    variants: product && Array.isArray(product.variants) ? product.variants : normalized.variants
+  }));
+  const defaultVariant = getDefaultVariant(normalized);
+  const defaultUnit = defaultVariant ? getDefaultUnitForVariant(defaultVariant, normalized) : null;
+  normalized.price = Number(defaultUnit && defaultUnit.price || defaultVariant && defaultVariant.price || 0);
+  normalized.orig = normalized.price;
+  normalized.unit = defaultUnit && defaultUnit.label ? String(defaultUnit.label) : '';
+  normalized.stock = normalized.variants.reduce(function (sum, item) {
+    return sum + Math.max(0, Number(item && item.stock || 0));
+  }, 0);
+  normalized.defaultVariantId = defaultVariant && defaultVariant.id ? String(defaultVariant.id) : '';
+  normalized.defaultUnitId = defaultUnit && defaultUnit.id ? String(defaultUnit.id) : '';
+  return normalized;
 }
 
 function hydrateProduct(row) {
@@ -1129,7 +1813,8 @@ function hydrateProduct(row) {
     shippingAddressSnapshot: parseJsonObject(row.shippingAddressSnapshot, {}),
     img: row.img,
     off: !!row.off,
-    trace: parseJsonArray(row.trace)
+    trace: parseJsonArray(row.trace),
+    variants: parseJsonArray(row.variantsJson)
   });
 }
 
@@ -1155,7 +1840,8 @@ function toDbProduct(product) {
     shippingAddressSnapshot: JSON.stringify(item.shippingAddressSnapshot || {}),
     img: item.img || '',
     off: item.off ? 1 : 0,
-    trace: JSON.stringify(item.trace || [])
+    trace: JSON.stringify(item.trace || []),
+    variantsJson: JSON.stringify(item.variants || [])
   };
 }
 
@@ -1317,7 +2003,7 @@ async function insertProduct(product) {
     note: '新商品创建并初始化库存'
   });
   const result = await run(
-    'INSERT INTO products (id, name, price, orig, unit, cat, tags, stock, sales, harvest, dispatchHours, farmer, farmerAccount, farmerUserId, village, shippingAddressId, shippingAddressSnapshot, img, off, "trace") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO products (id, name, price, orig, unit, cat, tags, stock, sales, harvest, dispatchHours, farmer, farmerAccount, farmerUserId, village, shippingAddressId, shippingAddressSnapshot, img, off, "trace", variantsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       item.id || null,
       item.name,
@@ -1338,7 +2024,8 @@ async function insertProduct(product) {
       item.shippingAddressSnapshot,
       item.img,
       item.off,
-      item.trace
+      item.trace,
+      item.variantsJson
     ]
   );
   await run(
@@ -1368,7 +2055,7 @@ async function updateProduct(product) {
   const existingRow = await get('SELECT * FROM products WHERE id = ?', [item.id]);
   const previous = existingRow ? hydrateProduct(existingRow) : null;
   const result = await run(
-    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, img = ?, off = ?, "trace" = ? WHERE id = ?',
+    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
     [
       item.name,
       item.price,
@@ -1389,6 +2076,7 @@ async function updateProduct(product) {
       item.img,
       item.off,
       item.trace,
+      item.variantsJson,
       item.id
     ]
   );
@@ -1484,6 +2172,62 @@ async function updateUser(record) {
   await syncUserCartRelations(user.username, JSON.parse(user.cart));
   await syncUserCouponRelations(user.username, JSON.parse(user.coupons));
   return result.changes;
+}
+
+async function finalizePendingOrderPayment(ownerUsername, sourceOrderId) {
+  const owner = String(ownerUsername || '').trim();
+  const orderId = String(sourceOrderId || '').trim();
+  if (!owner || !orderId) throw new Error('待支付订单参数不完整');
+  await cleanupExpiredPendingOrders(Date.now());
+  return withImmediateTransaction(async function () {
+    const relationOrderId = buildOrderRelationId(owner, orderId);
+    const order = await getOrderSnapshotByRelationId(relationOrderId);
+    if (!order) throw new Error('订单不存在');
+    const now = Date.now();
+    if (order.status !== 'pending' || order.inventoryReleased) {
+      throw new Error('订单已超时取消，不能继续支付');
+    }
+    if (Number(order.reserveExpiresAt || 0) > 0 && Number(order.reserveExpiresAt || 0) <= now) {
+      throw new Error('订单已超时取消，不能继续支付');
+    }
+    for (let index = 0; index < order.items.length; index++) {
+      const item = normalizeOrderItem(order.items[index], index);
+      const productRow = await get('SELECT * FROM products WHERE id = ?', [item.productId]);
+      if (!productRow) throw new Error(item.name + ' 已不存在，无法完成支付');
+      const product = hydrateProduct(productRow);
+      await saveProductMutationWithAudit(product, Object.assign({}, product, {
+        sales: Number(product.sales || 0) + Number(item.qty || 0)
+      }), {
+        actionType: 'order_sale',
+        operatorUsername: owner,
+        operatorRole: 'buyer',
+        orderId: order.id,
+        note: '待支付订单支付完成后确认销量'
+      }, now);
+    }
+    await run('UPDATE orders SET status = ?, cancelReason = ? WHERE id = ?', ['paid', '', relationOrderId]);
+    await run('UPDATE payment_transactions SET status = ?, paidAt = ? WHERE id = ?', ['paid', now, buildPaymentTransactionId(owner, orderId)]);
+    return getOrderSnapshotByRelationId(relationOrderId);
+  });
+}
+
+async function cancelPendingOrder(ownerUsername, sourceOrderId) {
+  const owner = String(ownerUsername || '').trim();
+  const orderId = String(sourceOrderId || '').trim();
+  if (!owner || !orderId) throw new Error('待支付订单参数不完整');
+  await cleanupExpiredPendingOrders(Date.now());
+  return withImmediateTransaction(async function () {
+    const relationOrderId = buildOrderRelationId(owner, orderId);
+    const order = await getOrderSnapshotByRelationId(relationOrderId);
+    if (!order) throw new Error('订单不存在');
+    if (order.status !== 'pending' || order.inventoryReleased) {
+      throw new Error('当前订单不能重复取消');
+    }
+    return releaseReservedInventoryForOrder(order, 'buyer_pending_cancel', {
+      operatorUsername: owner,
+      operatorRole: 'buyer'
+    });
+  });
 }
 
 async function applyOrderSnapshotStatus(username, sourceOrderId, status, trackingNo, options) {
@@ -1627,8 +2371,12 @@ async function restoreInventoryByRefund(refund, actorUsername) {
     const row = await get('SELECT * FROM products WHERE id = ?', [item.productId]);
     if (!row) throw new Error(item.name + ' 已不存在，无法完成退款回库');
     const product = hydrateProduct(row);
+    const inventoryMutation = applyVariantUnitInventoryDelta(product, item, Number(item.qty || 0), {
+      allowCreateVariant: true,
+      allowCreateUnit: true
+    });
     await updateProduct(Object.assign({}, product, {
-      stock: Number(product.stock || 0) + Number(item.qty || 0),
+      variants: inventoryMutation.variants,
       sales: Math.max(0, Number(product.sales || 0) - Number(item.qty || 0)),
       _audit: {
         operatorUsername: actorUsername,
@@ -1862,7 +2610,8 @@ async function initDatabase() {
       shippingAddressSnapshot TEXT NOT NULL DEFAULT '{}',
       img TEXT NOT NULL DEFAULT '',
       off INTEGER NOT NULL DEFAULT 0,
-      "trace" TEXT NOT NULL DEFAULT '[]'
+      "trace" TEXT NOT NULL DEFAULT '[]',
+      variantsJson TEXT NOT NULL DEFAULT '[]'
     )
   `);
   await run(`
@@ -1954,7 +2703,11 @@ async function initDatabase() {
       receiverFull TEXT NOT NULL DEFAULT '',
       trackingNo TEXT NOT NULL DEFAULT '',
       ownerDeleted INTEGER NOT NULL DEFAULT 0,
-      createdAt INTEGER NOT NULL DEFAULT 0
+      createdAt INTEGER NOT NULL DEFAULT 0,
+      reserveExpiresAt INTEGER NOT NULL DEFAULT 0,
+      inventoryReleased INTEGER NOT NULL DEFAULT 0,
+      inventoryReleasedAt INTEGER NOT NULL DEFAULT 0,
+      cancelReason TEXT NOT NULL DEFAULT ''
     )
   `);
   await run(`
@@ -1963,6 +2716,10 @@ async function initDatabase() {
       orderId TEXT NOT NULL,
       productId INTEGER NOT NULL DEFAULT 0,
       name TEXT NOT NULL DEFAULT '',
+      variantId TEXT NOT NULL DEFAULT '',
+      variantLabel TEXT NOT NULL DEFAULT '',
+      unitId TEXT NOT NULL DEFAULT '',
+      unitLabel TEXT NOT NULL DEFAULT '',
       unit TEXT NOT NULL DEFAULT '',
       price REAL NOT NULL DEFAULT 0,
       qty INTEGER NOT NULL DEFAULT 0,
@@ -1980,6 +2737,10 @@ async function initDatabase() {
       username TEXT NOT NULL,
       productId INTEGER NOT NULL DEFAULT 0,
       name TEXT NOT NULL DEFAULT '',
+      variantId TEXT NOT NULL DEFAULT '',
+      variantLabel TEXT NOT NULL DEFAULT '',
+      unitId TEXT NOT NULL DEFAULT '',
+      unitLabel TEXT NOT NULL DEFAULT '',
       price REAL NOT NULL DEFAULT 0,
       unit TEXT NOT NULL DEFAULT '',
       img TEXT NOT NULL DEFAULT '',
@@ -2092,7 +2853,8 @@ async function initDatabase() {
     shippingAddressSnapshot: "TEXT NOT NULL DEFAULT '{}'",
     img: "TEXT NOT NULL DEFAULT ''",
     off: 'INTEGER NOT NULL DEFAULT 0',
-    trace: "TEXT NOT NULL DEFAULT '[]'"
+    trace: "TEXT NOT NULL DEFAULT '[]'",
+    variantsJson: "TEXT NOT NULL DEFAULT '[]'"
   };
   const columns = await all('PRAGMA table_info(products)');
   const existingColumns = columns.reduce(function (result, item) {
@@ -2184,10 +2946,42 @@ async function initDatabase() {
   var orderDefinitions = {
     sourceId: "TEXT NOT NULL DEFAULT ''",
     trackingNo: "TEXT NOT NULL DEFAULT ''",
-    ownerDeleted: 'INTEGER NOT NULL DEFAULT 0'
+    ownerDeleted: 'INTEGER NOT NULL DEFAULT 0',
+    reserveExpiresAt: 'INTEGER NOT NULL DEFAULT 0',
+    inventoryReleased: 'INTEGER NOT NULL DEFAULT 0',
+    inventoryReleasedAt: 'INTEGER NOT NULL DEFAULT 0',
+    cancelReason: "TEXT NOT NULL DEFAULT ''"
   };
   for (const key of Object.keys(orderDefinitions)) {
     if (!orderExisting[key]) await run('ALTER TABLE orders ADD COLUMN ' + key + ' ' + orderDefinitions[key]);
+  }
+  var orderItemColumns = await all('PRAGMA table_info(order_items)');
+  var orderItemExisting = orderItemColumns.reduce(function (result, item) {
+    result[item.name] = true;
+    return result;
+  }, {});
+  var orderItemDefinitions = {
+    variantId: "TEXT NOT NULL DEFAULT ''",
+    variantLabel: "TEXT NOT NULL DEFAULT ''",
+    unitId: "TEXT NOT NULL DEFAULT ''",
+    unitLabel: "TEXT NOT NULL DEFAULT ''"
+  };
+  for (const key of Object.keys(orderItemDefinitions)) {
+    if (!orderItemExisting[key]) await run('ALTER TABLE order_items ADD COLUMN ' + key + ' ' + orderItemDefinitions[key]);
+  }
+  var cartItemColumns = await all('PRAGMA table_info(cart_items)');
+  var cartItemExisting = cartItemColumns.reduce(function (result, item) {
+    result[item.name] = true;
+    return result;
+  }, {});
+  var cartItemDefinitions = {
+    variantId: "TEXT NOT NULL DEFAULT ''",
+    variantLabel: "TEXT NOT NULL DEFAULT ''",
+    unitId: "TEXT NOT NULL DEFAULT ''",
+    unitLabel: "TEXT NOT NULL DEFAULT ''"
+  };
+  for (const key of Object.keys(cartItemDefinitions)) {
+    if (!cartItemExisting[key]) await run('ALTER TABLE cart_items ADD COLUMN ' + key + ' ' + cartItemDefinitions[key]);
   }
   var userCouponColumns = await all('PRAGMA table_info(user_coupons)');
   var userCouponExisting = userCouponColumns.reduce(function (result, item) {
@@ -2233,6 +3027,7 @@ async function initDatabase() {
   await backfillUserRelationsFromJson();
   // 支付与售后都能从现有订单状态回填；库存流水缺少历史差值，只能从本次版本开始持续积累。
   await backfillOrderDerivedRelations();
+  await cleanupExpiredPendingOrders(Date.now());
 }
 
 // [API_PRODUCTS] 商品列表和商品按 ID 新增/覆盖都走这组接口。
@@ -2243,6 +3038,15 @@ app.get('/api/products', async function (req, res) {
     res.json(rows.map(hydrateProduct));
   } catch (error) {
     res.status(500).json({ message: '获取商品失败', error: error.message });
+  }
+});
+
+app.get('/api/products/search', async function (req, res) {
+  try {
+    const products = await searchBuyerVisibleProducts(req.query && req.query.q);
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ message: '搜索商品失败', error: error.message });
   }
 });
 
@@ -2360,10 +3164,46 @@ app.post('/api/coupon-templates', async function (req, res) {
 
 app.get('/api/orders', async function (req, res) {
   try {
+    await cleanupExpiredPendingOrders(Date.now());
     const orders = await listAllOrderSnapshots();
     res.json(orders);
   } catch (error) {
     res.status(500).json({ message: '获取订单快照失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/prepare-payment', async function (req, res) {
+  try {
+    await cleanupExpiredPendingOrders(Date.now());
+    const ownerUsername = String(req.body && req.body.username || '').trim();
+    const order = await createPendingOrderFromCheckout(ownerUsername, req.body || {});
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '创建待支付订单失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/:orderId/pay', async function (req, res) {
+  try {
+    await cleanupExpiredPendingOrders(Date.now());
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const ownerUsername = String(req.body && (req.body.ownerUsername || req.body.username) || '').trim();
+    const order = await finalizePendingOrderPayment(ownerUsername, sourceOrderId);
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '待支付订单支付失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/:orderId/cancel-pending', async function (req, res) {
+  try {
+    await cleanupExpiredPendingOrders(Date.now());
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const ownerUsername = String(req.body && (req.body.ownerUsername || req.body.username) || '').trim();
+    const order = await cancelPendingOrder(ownerUsername, sourceOrderId);
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '待支付订单取消失败', error: error.message });
   }
 });
 
@@ -2484,6 +3324,7 @@ app.post('/api/refunds/:refundId/complete', async function (req, res) {
 // [API_USERS_AUTH] 用户列表、登录注册、状态落库、角色授权都集中在这里。
 app.get('/api/users', async function (req, res) {
   try {
+    await cleanupExpiredPendingOrders(Date.now());
     const users = await listUsers();
     res.json(users.map(publicUserRecord));
   } catch (error) {

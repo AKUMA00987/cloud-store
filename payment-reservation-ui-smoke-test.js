@@ -1,0 +1,403 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+function createClassList(initialValues) {
+  const set = new Set(initialValues || []);
+  return {
+    add(value) { set.add(value); },
+    remove(value) { set.delete(value); },
+    toggle(value, force) {
+      if (typeof force === 'boolean') {
+        if (force) set.add(value);
+        else set.delete(value);
+        return force;
+      }
+      if (set.has(value)) {
+        set.delete(value);
+        return false;
+      }
+      set.add(value);
+      return true;
+    },
+    contains(value) { return set.has(value); }
+  };
+}
+
+function createElement(id) {
+  return {
+    id,
+    value: '',
+    innerHTML: '',
+    textContent: '',
+    src: '',
+    files: [],
+    style: { display: '' },
+    classList: createClassList(id === 'admin-panel' || id === 'farmer-panel' ? ['hidden'] : []),
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() { },
+    focus() { }
+  };
+}
+
+function createDocument() {
+  const elements = {};
+  return {
+    getElementById(id) {
+      if (!elements[id]) elements[id] = createElement(id);
+      return elements[id];
+    },
+    createElement(tagName) {
+      return createElement(tagName || 'div');
+    }
+  };
+}
+
+function createJsonResponse(payload, status) {
+  const body = JSON.stringify(payload);
+  return {
+    ok: (status || 200) >= 200 && (status || 200) < 300,
+    status: status || 200,
+    async json() { return JSON.parse(body); },
+    async text() { return body; }
+  };
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+async function main() {
+  const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf-8');
+  const match = html.match(/<script>([\s\S]*?)<\/script>\s*<div id="admin-panel"/);
+  if (!match) throw new Error('未找到前端内联脚本');
+
+  const alerts = [];
+  const fetchCalls = [];
+  const storage = new Map();
+  const document = createDocument();
+
+  [
+    'app',
+    'nav',
+    'cart-badge',
+    'modal-root',
+    'admin-panel',
+    'farmer-panel',
+    'admin-db',
+    'admin-refund',
+    'admin-pd',
+    'admin-od',
+    'admin-category',
+    'admin-ship',
+    'admin-coupon',
+    'admin-banner',
+    'admin-auth',
+    'farmer-content',
+    'atab-db',
+    'atab-refund',
+    'atab-pd',
+    'atab-od',
+    'atab-category',
+    'atab-ship',
+    'atab-coupon',
+    'atab-banner',
+    'atab-auth'
+  ].forEach(function (id) {
+    document.getElementById(id);
+  });
+  document.getElementById('nav').style.display = 'flex';
+
+  const categories = [{ id: 'veg', name: '新鲜蔬菜', icon: '🥬', sortOrder: 0, showOnHome: true }];
+  const products = [
+    {
+      id: 1,
+      name: '高山青菜',
+      variants: [
+        {
+          id: 'veg-large',
+          label: '大份',
+          price: 26,
+          units: [
+            { id: 'large-bag', label: '袋装', stock: 4, sortOrder: 0, isDefault: true },
+            { id: 'large-box', label: '箱装', stock: 2, sortOrder: 1, isDefault: false }
+          ],
+          sortOrder: 0,
+          isDefault: true
+        }
+      ],
+      price: 26,
+      orig: 30,
+      unit: '袋装',
+      cat: 'veg',
+      stock: 6,
+      off: false,
+      tags: ['有机'],
+      sales: 5,
+      farmer: '老李',
+      farmerAccount: 'farmer_li',
+      farmerUserId: 3,
+      village: '青山村',
+      harvest: '2026-04-08',
+      dispatchHours: 6,
+      shippingAddressId: 'ship_farmer',
+      shippingAddressSnapshot: { id: 'ship_farmer', name: '老李', phone: '13800000001', full: '青山村 1 号' },
+      img: 'https://example.com/veg.jpg',
+      trace: []
+    }
+  ];
+
+  const users = [
+    {
+      id: 1,
+      username: 'buyer1',
+      roles: { isFarmer: false, isAdmin: false, isSuperAdmin: false, farmerName: 'buyer1' },
+      addresses: [{ id: 'addr1', name: '张三', phone: '13800000000', full: '测试收货地址' }],
+      shippingAddresses: [],
+      coupons: [],
+      selectedAddressId: 'addr1',
+      selectedCouponId: '',
+      cart: [{
+        id: 1,
+        productId: 1,
+        name: '高山青菜',
+        variantId: 'veg-large',
+        variantLabel: '大份',
+        unitId: 'large-bag',
+        unitLabel: '袋装',
+        price: 26,
+        unit: '袋装',
+        img: 'https://example.com/veg.jpg',
+        qty: 1
+      }],
+      orders: [],
+      member: { levelId: 'normal', points: 0, totalSpent: 0 },
+      createdAt: '2026/04/09'
+    }
+  ];
+
+  storage.set('cs_user', 'buyer1');
+  let prepareCounter = 0;
+
+  function getUser(username) {
+    return users.find(function (item) { return item.username === username; }) || null;
+  }
+
+  function buildAllOrders() {
+    return users.reduce(function (all, user) {
+      return all.concat((user.orders || []).map(function (order) {
+        return Object.assign({ owner: user.username }, cloneJson(order));
+      }));
+    }, []);
+  }
+
+  function syncProductStocks(product) {
+    product.variants = (product.variants || []).map(function (variant) {
+      const stock = (variant.units || []).reduce(function (sum, unit) { return sum + Number(unit.stock || 0); }, 0);
+      return Object.assign({}, variant, { stock: stock });
+    });
+    product.stock = (product.variants || []).reduce(function (sum, variant) {
+      return sum + Number(variant.stock || 0);
+    }, 0);
+  }
+
+  function setProductUnitStock(productId, variantId, unitId, delta) {
+    const product = products.find(function (item) { return Number(item.id || 0) === Number(productId || 0); });
+    if (!product) return;
+    product.variants = (product.variants || []).map(function (variant) {
+      if (String(variant.id || '') !== String(variantId || '')) return Object.assign({}, variant);
+      return Object.assign({}, variant, {
+        units: (variant.units || []).map(function (unit) {
+          if (String(unit.id || '') !== String(unitId || '')) return Object.assign({}, unit);
+          return Object.assign({}, unit, { stock: Number(unit.stock || 0) + Number(delta || 0) });
+        })
+      });
+    });
+    syncProductStocks(product);
+  }
+
+  const sandbox = {
+    console,
+    Math,
+    Date,
+    JSON,
+    parseInt,
+    parseFloat,
+    encodeURIComponent,
+    decodeURIComponent,
+    URL,
+    alert(message) {
+      alerts.push(String(message));
+    },
+    confirm() {
+      return true;
+    },
+    localStorage: {
+      getItem(key) {
+        return storage.has(key) ? storage.get(key) : null;
+      },
+      setItem(key, value) {
+        storage.set(key, String(value));
+      },
+      removeItem(key) {
+        storage.delete(key);
+      }
+    },
+    location: { hash: '#/home' },
+    window: {
+      addEventListener() { },
+      scrollTo() { },
+      open() { },
+      history: { back() { } },
+      prompt() { return ''; }
+    },
+    document,
+    lucide: { createIcons() { } },
+    FileReader: undefined,
+    Image: function () { },
+    setTimeout() { return 0; },
+    clearTimeout() { },
+    fetch: async function (url, options) {
+      const parsed = new URL(String(url), 'http://127.0.0.1:3000');
+      const method = String(options && options.method || 'GET').toUpperCase();
+      const payload = options && options.body ? JSON.parse(options.body) : null;
+      fetchCalls.push({ path: parsed.pathname, method: method, body: payload });
+
+      if (parsed.pathname === '/api/products' && method === 'GET') return createJsonResponse(cloneJson(products));
+      if (parsed.pathname === '/api/categories' && method === 'GET') return createJsonResponse(cloneJson(categories));
+      if (parsed.pathname === '/api/banners' && method === 'GET') return createJsonResponse([]);
+      if (parsed.pathname === '/api/announcements' && method === 'GET') return createJsonResponse([]);
+      if (parsed.pathname === '/api/coupon-templates' && method === 'GET') return createJsonResponse([]);
+      if (parsed.pathname === '/api/refunds' && method === 'GET') return createJsonResponse([]);
+      if (parsed.pathname === '/api/payment-transactions' && method === 'GET') return createJsonResponse([]);
+      if (parsed.pathname === '/api/aftersales' && method === 'GET') return createJsonResponse([]);
+      if (parsed.pathname === '/api/inventory-logs' && method === 'GET') return createJsonResponse([]);
+      if (parsed.pathname === '/api/orders' && method === 'GET') return createJsonResponse(buildAllOrders());
+      if (parsed.pathname === '/api/users' && method === 'GET') return createJsonResponse(cloneJson(users));
+
+      const stateMatch = parsed.pathname.match(/^\/api\/users\/([^/]+)\/state$/);
+      if (stateMatch && method === 'POST') {
+        const username = decodeURIComponent(stateMatch[1]);
+        const target = getUser(username);
+        Object.assign(target, cloneJson(payload || {}));
+        return createJsonResponse(cloneJson(target));
+      }
+
+      if (parsed.pathname === '/api/orders/prepare-payment' && method === 'POST') {
+        prepareCounter += 1;
+        const owner = getUser(payload.username);
+        const order = {
+          id: 'ORD_PENDING_' + prepareCounter,
+          owner: payload.username,
+          items: cloneJson(payload.items || []),
+          subtotal: Number(payload.subtotal || 0),
+          deliveryFee: Number(payload.deliveryFee || 0),
+          discount: Number(payload.discount || 0),
+          total: Number(payload.total || 0),
+          status: 'pending',
+          time: Date.now(),
+          address: cloneJson(payload.address || {}),
+          coupon: String(payload.couponText || ''),
+          couponId: String(payload.couponId || ''),
+          trackingNo: '',
+          reserveExpiresAt: Date.now() + 600000,
+          inventoryReleased: false,
+          inventoryReleasedAt: 0,
+          cancelReason: ''
+        };
+        owner.orders = [order].concat(owner.orders || []);
+        (payload.items || []).forEach(function (item) {
+          setProductUnitStock(item.productId || item.id, item.variantId, item.unitId, -Number(item.qty || 0));
+        });
+        return createJsonResponse(cloneJson(order));
+      }
+
+      const payMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/pay$/);
+      if (payMatch && method === 'POST') {
+        const orderId = decodeURIComponent(payMatch[1]);
+        const owner = getUser(payload.ownerUsername);
+        const order = (owner.orders || []).find(function (item) { return item.id === orderId; });
+        Object.assign(order, { status: 'paid', cancelReason: '', inventoryReleased: false });
+        return createJsonResponse(cloneJson(order));
+      }
+
+      const cancelMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/cancel-pending$/);
+      if (cancelMatch && method === 'POST') {
+        const orderId = decodeURIComponent(cancelMatch[1]);
+        const owner = getUser(payload.ownerUsername);
+        const order = (owner.orders || []).find(function (item) { return item.id === orderId; });
+        Object.assign(order, {
+          status: 'cancelled',
+          inventoryReleased: true,
+          inventoryReleasedAt: Date.now(),
+          cancelReason: 'buyer_pending_cancel'
+        });
+        (order.items || []).forEach(function (item) {
+          setProductUnitStock(item.productId || item.id, item.variantId, item.unitId, Number(item.qty || 0));
+        });
+        return createJsonResponse(cloneJson(order));
+      }
+
+      return createJsonResponse({ message: 'not found' }, 404);
+    }
+  };
+
+  vm.createContext(sandbox);
+  vm.runInContext(match[1], sandbox, { filename: 'index.html<script>' });
+
+  async function flush(times) {
+    for (let index = 0; index < (times || 6); index += 1) {
+      await Promise.resolve();
+      await new Promise(function (resolve) { setImmediate(resolve); });
+    }
+  }
+
+  function exec(code) {
+    return vm.runInContext(code, sandbox);
+  }
+
+  async function execAsync(code) {
+    return vm.runInContext('(async function(){' + code + '})()', sandbox);
+  }
+
+  await flush(8);
+
+  await execAsync('await pushView("confirmOrder");');
+  await flush(4);
+  await execAsync('await confirmCheckout();');
+  await flush(4);
+
+  const prepareCall = fetchCalls.find(function (item) {
+    return item.path === '/api/orders/prepare-payment' && item.method === 'POST';
+  });
+  assert(prepareCall, '确认订单时应请求服务端创建待支付订单');
+  assert(prepareCall.body.items[0].variantId === 'veg-large', '待支付下单应带上规格 ID');
+  assert(prepareCall.body.items[0].unitId === 'large-bag', '待支付下单应带上单位 ID');
+  assert(prepareCall.body.items[0].unitLabel === '袋装', '待支付下单应带上单位名称');
+  assert(exec('currentCheckoutOrder && currentCheckoutOrder.items[0].unitId') === 'large-bag', '待支付订单快照应保留单位 ID');
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 3, '进入支付后应立即预占单位库存');
+
+  await execAsync('await completeMockPayment();');
+  await flush(6);
+  assert(exec('cart.length') === 0, '支付成功后应清空购物车');
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 3, '支付成功后不应二次扣减单位库存');
+
+  exec('cart = [normalizeCartStateItem({ id: 1, productId: 1, name: "高山青菜", variantId: "veg-large", variantLabel: "大份", unitId: "large-box", unitLabel: "箱装", unit: "箱装", price: 26, img: "https://example.com/veg.jpg", qty: 1 })]; updateCartBadge();');
+  await execAsync('await confirmCheckout();');
+  await flush(4);
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).stock === 1, '第二笔待支付订单应预占对应单位库存');
+
+  await execAsync('await cancelOrder(0);');
+  await flush(6);
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).stock === 2, '取消待支付订单后应恢复单位库存');
+  assert(getUser('buyer1').orders.find(function (order) { return order.cancelReason === "buyer_pending_cancel"; }), '取消待支付订单应记录取消原因');
+
+  console.log('Payment reservation UI smoke test passed.');
+}
+
+main().catch(function (error) {
+  console.error(error);
+  process.exit(1);
+});
