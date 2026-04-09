@@ -991,7 +991,7 @@ async function saveProductMutationWithAudit(previousProduct, nextProduct, auditM
     note: '商品库存或销量发生变更'
   });
   await run(
-    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
+    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, imagesJson = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
     [
       item.name,
       item.price,
@@ -1009,6 +1009,7 @@ async function saveProductMutationWithAudit(previousProduct, nextProduct, auditM
       item.village,
       item.shippingAddressId,
       item.shippingAddressSnapshot,
+      item.imagesJson,
       item.img,
       item.off,
       item.trace,
@@ -1749,6 +1750,17 @@ async function hydrateUserWithRelations(row) {
 }
 
 function normalizeProduct(product) {
+  const source = product || {};
+  const rawImages = Array.isArray(source.images) ? source.images : [];
+  let normalizedImages = rawImages
+    .map(function (item) { return String(item || '').trim(); })
+    .filter(Boolean)
+    .filter(function (item, index, list) { return list.indexOf(item) === index; });
+  const explicitCover = String(source.img || source.coverImage || '').trim();
+  if (explicitCover && normalizedImages.indexOf(explicitCover) < 0) normalizedImages.unshift(explicitCover);
+  if (explicitCover && normalizedImages.indexOf(explicitCover) > 0) {
+    normalizedImages = [explicitCover].concat(normalizedImages.filter(function (item) { return item !== explicitCover; }));
+  }
   const normalized = Object.assign({
     cat: 'veg',
     tags: [],
@@ -1762,19 +1774,20 @@ function normalizeProduct(product) {
     village: '待设置',
     shippingAddressId: '',
     shippingAddressSnapshot: {},
+    images: [],
     img: '',
     off: false,
     trace: []
-  }, product || {}, {
-    id: product && product.id ? Number(product.id) : undefined,
-    orig: Number(product && (product.orig != null ? product.orig : product.price) || 0),
-    sales: Number(product && product.sales || 0),
-    dispatchHours: Number(product && product.dispatchHours || 4),
-    off: !!(product && product.off),
-    tags: Array.isArray(product && product.tags) ? product.tags : [],
-    shippingAddressId: product && product.shippingAddressId ? String(product.shippingAddressId) : '',
-    shippingAddressSnapshot: product && product.shippingAddressSnapshot && typeof product.shippingAddressSnapshot === 'object' && !Array.isArray(product.shippingAddressSnapshot) ? product.shippingAddressSnapshot : {},
-    trace: Array.isArray(product && product.trace) ? product.trace : []
+  }, source, {
+    id: source && source.id ? Number(source.id) : undefined,
+    orig: Number(source && (source.orig != null ? source.orig : source.price) || 0),
+    sales: Number(source && source.sales || 0),
+    dispatchHours: Number(source && source.dispatchHours || 4),
+    off: !!(source && source.off),
+    tags: Array.isArray(source && source.tags) ? source.tags : [],
+    shippingAddressId: source && source.shippingAddressId ? String(source.shippingAddressId) : '',
+    shippingAddressSnapshot: source && source.shippingAddressSnapshot && typeof source.shippingAddressSnapshot === 'object' && !Array.isArray(source.shippingAddressSnapshot) ? source.shippingAddressSnapshot : {},
+    trace: Array.isArray(source && source.trace) ? source.trace : []
   });
   normalized.variants = normalizeProductVariants(Object.assign({}, normalized, {
     variants: product && Array.isArray(product.variants) ? product.variants : normalized.variants
@@ -1789,6 +1802,11 @@ function normalizeProduct(product) {
   }, 0);
   normalized.defaultVariantId = defaultVariant && defaultVariant.id ? String(defaultVariant.id) : '';
   normalized.defaultUnitId = defaultUnit && defaultUnit.id ? String(defaultUnit.id) : '';
+  normalized.images = normalizedImages.length ? normalizedImages : (normalized.img ? [String(normalized.img).trim()] : []);
+  normalized.img = explicitCover && normalized.images.indexOf(explicitCover) > -1
+    ? explicitCover
+    : (normalized.images[0] || '');
+  if (!normalized.images.length && normalized.img) normalized.images = [normalized.img];
   return normalized;
 }
 
@@ -1811,6 +1829,7 @@ function hydrateProduct(row) {
     village: row.village,
     shippingAddressId: row.shippingAddressId,
     shippingAddressSnapshot: parseJsonObject(row.shippingAddressSnapshot, {}),
+    images: parseJsonArray(row.imagesJson),
     img: row.img,
     off: !!row.off,
     trace: parseJsonArray(row.trace),
@@ -1838,6 +1857,7 @@ function toDbProduct(product) {
     village: item.village || '待设置',
     shippingAddressId: item.shippingAddressId || '',
     shippingAddressSnapshot: JSON.stringify(item.shippingAddressSnapshot || {}),
+    imagesJson: JSON.stringify(item.images || []),
     img: item.img || '',
     off: item.off ? 1 : 0,
     trace: JSON.stringify(item.trace || []),
@@ -2003,7 +2023,7 @@ async function insertProduct(product) {
     note: '新商品创建并初始化库存'
   });
   const result = await run(
-    'INSERT INTO products (id, name, price, orig, unit, cat, tags, stock, sales, harvest, dispatchHours, farmer, farmerAccount, farmerUserId, village, shippingAddressId, shippingAddressSnapshot, img, off, "trace", variantsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO products (id, name, price, orig, unit, cat, tags, stock, sales, harvest, dispatchHours, farmer, farmerAccount, farmerUserId, village, shippingAddressId, shippingAddressSnapshot, imagesJson, img, off, "trace", variantsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       item.id || null,
       item.name,
@@ -2022,6 +2042,7 @@ async function insertProduct(product) {
       item.village,
       item.shippingAddressId,
       item.shippingAddressSnapshot,
+      item.imagesJson,
       item.img,
       item.off,
       item.trace,
@@ -2055,7 +2076,7 @@ async function updateProduct(product) {
   const existingRow = await get('SELECT * FROM products WHERE id = ?', [item.id]);
   const previous = existingRow ? hydrateProduct(existingRow) : null;
   const result = await run(
-    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
+    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, imagesJson = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
     [
       item.name,
       item.price,
@@ -2073,6 +2094,7 @@ async function updateProduct(product) {
       item.village,
       item.shippingAddressId,
       item.shippingAddressSnapshot,
+      item.imagesJson,
       item.img,
       item.off,
       item.trace,
@@ -2114,6 +2136,90 @@ async function updateProduct(product) {
     }
   }
   return result.changes;
+}
+
+function buildProductOrderStatusSummary(rows) {
+  const source = Array.isArray(rows) ? rows : [];
+  const statusMap = source.reduce(function (result, item) {
+    const key = String(item && item.status || '').trim() || 'unknown';
+    result[key] = Number(item && item.count || 0);
+    return result;
+  }, {});
+  const displayOrder = ['pending', 'paid', 'shipped', 'done', 'cancelled', 'refund_pending', 'refunded'];
+  const statusCounts = [];
+  for (let index = 0; index < displayOrder.length; index++) {
+    const status = displayOrder[index];
+    if (statusMap[status] > 0) statusCounts.push({ status: status, count: statusMap[status] });
+    delete statusMap[status];
+  }
+  Object.keys(statusMap).sort().forEach(function (status) {
+    if (statusMap[status] > 0) statusCounts.push({ status: status, count: statusMap[status] });
+  });
+  return statusCounts;
+}
+
+async function getProductDeleteImpact(productId) {
+  const id = Number(productId || 0);
+  if (!(id > 0)) return null;
+  const productRow = await get('SELECT * FROM products WHERE id = ?', [id]);
+  if (!productRow) return null;
+  const statusRows = await all(
+    'SELECT o.status AS status, COUNT(DISTINCT o.id) AS count FROM orders o INNER JOIN order_items oi ON oi.orderId = o.id WHERE oi.productId = ? GROUP BY o.status',
+    [id]
+  );
+  const statusCounts = buildProductOrderStatusSummary(statusRows);
+  const totalOrders = statusCounts.reduce(function (sum, item) {
+    return sum + Number(item && item.count || 0);
+  }, 0);
+  return {
+    productId: id,
+    productName: productRow.name || '',
+    totalOrders: totalOrders,
+    statusCounts: statusCounts
+  };
+}
+
+async function deleteProductById(productId, auditMeta) {
+  const id = Number(productId || 0);
+  if (!(id > 0)) return null;
+  const productRow = await get('SELECT * FROM products WHERE id = ?', [id]);
+  if (!productRow) return null;
+  const impact = await getProductDeleteImpact(id);
+  const product = hydrateProduct(productRow);
+  const audit = normalizeAuditMeta(auditMeta, {
+    actionType: 'product_delete',
+    operatorUsername: product.farmerAccount || '',
+    operatorRole: product.farmerAccount ? 'farmer' : 'admin',
+    note: '删除商品并保留历史订单快照'
+  });
+  await run(
+    'INSERT INTO inventory_logs (productId, productName, operatorUsername, operatorRole, actionType, deltaStock, deltaSales, beforeStock, afterStock, beforeSales, afterSales, orderId, note, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      product.id,
+      product.name,
+      audit.operatorUsername,
+      audit.operatorRole,
+      audit.actionType,
+      0,
+      0,
+      Number(product.stock || 0),
+      Number(product.stock || 0),
+      Number(product.sales || 0),
+      Number(product.sales || 0),
+      audit.orderId || '',
+      audit.note,
+      Date.now()
+    ]
+  );
+  await run('DELETE FROM cart_items WHERE productId = ?', [id]);
+  const result = await run('DELETE FROM products WHERE id = ?', [id]);
+  if (!result.changes) return null;
+  return {
+    deleted: true,
+    productId: id,
+    productName: product.name || '',
+    impact: impact || { productId: id, productName: product.name || '', totalOrders: 0, statusCounts: [] }
+  };
 }
 
 async function seedProductsIfNeeded() {
@@ -2369,7 +2475,8 @@ async function restoreInventoryByRefund(refund, actorUsername) {
   for (let index = 0; index < items.length; index++) {
     const item = normalizeOrderItem(items[index], index);
     const row = await get('SELECT * FROM products WHERE id = ?', [item.productId]);
-    if (!row) throw new Error(item.name + ' 已不存在，无法完成退款回库');
+    // 商品被删除后，退款流程继续完成；库存恢复直接跳过，不阻塞退款主链路。
+    if (!row) continue;
     const product = hydrateProduct(row);
     const inventoryMutation = applyVariantUnitInventoryDelta(product, item, Number(item.qty || 0), {
       allowCreateVariant: true,
@@ -2608,6 +2715,7 @@ async function initDatabase() {
       village TEXT NOT NULL DEFAULT '',
       shippingAddressId TEXT NOT NULL DEFAULT '',
       shippingAddressSnapshot TEXT NOT NULL DEFAULT '{}',
+      imagesJson TEXT NOT NULL DEFAULT '[]',
       img TEXT NOT NULL DEFAULT '',
       off INTEGER NOT NULL DEFAULT 0,
       "trace" TEXT NOT NULL DEFAULT '[]',
@@ -2851,6 +2959,7 @@ async function initDatabase() {
     village: "TEXT NOT NULL DEFAULT ''",
     shippingAddressId: "TEXT NOT NULL DEFAULT ''",
     shippingAddressSnapshot: "TEXT NOT NULL DEFAULT '{}'",
+    imagesJson: "TEXT NOT NULL DEFAULT '[]'",
     img: "TEXT NOT NULL DEFAULT ''",
     off: 'INTEGER NOT NULL DEFAULT 0',
     trace: "TEXT NOT NULL DEFAULT '[]'",
@@ -3066,6 +3175,32 @@ app.post('/api/products', async function (req, res) {
     res.json(hydrateProduct(row));
   } catch (error) {
     res.status(500).json({ message: '保存商品失败', error: error.message });
+  }
+});
+
+app.get('/api/products/:id/delete-impact', async function (req, res) {
+  try {
+    const impact = await getProductDeleteImpact(req.params.id);
+    if (!impact) return res.status(404).json({ message: '商品不存在' });
+    res.json(impact);
+  } catch (error) {
+    res.status(500).json({ message: '获取商品删除影响失败', error: error.message });
+  }
+});
+
+app.delete('/api/products/:id', async function (req, res) {
+  try {
+    const payload = req.body || {};
+    const deleted = await deleteProductById(req.params.id, normalizeAuditMeta(payload._audit, {
+      actionType: 'product_delete',
+      operatorUsername: '',
+      operatorRole: 'admin',
+      note: '删除商品并保留历史订单快照'
+    }));
+    if (!deleted) return res.status(404).json({ message: '商品不存在，无法删除' });
+    res.json(deleted);
+  } catch (error) {
+    res.status(500).json({ message: '删除商品失败', error: error.message });
   }
 });
 

@@ -8,19 +8,406 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   <style>
+    :root {
+      --brand-deep: #3D8B5F;
+      --brand-mid: #6BB77E;
+      --brand-soft: #E8F5EC;
+      --accent: #E8A44A;
+      --accent-soft: #FCEBD8;
+      --paper: #FAFAF5;
+      --paper-deep: #F3EEE2;
+      --surface: rgba(255, 253, 248, 0.96);
+      --surface-soft: #F7F3EA;
+      --surface-strong: #FFFFFF;
+      --line: rgba(61, 139, 95, 0.14);
+      --line-strong: rgba(61, 139, 95, 0.24);
+      --text-strong: #2C3A2D;
+      --text-muted: #6B7C6B;
+      --text-faint: #97A397;
+      --radius-sm: 12px;
+      --radius-md: 18px;
+      --radius-lg: 24px;
+      --radius-xl: 28px;
+      --shadow-soft: 0 16px 38px rgba(61, 139, 95, 0.08);
+      --shadow-card: 0 10px 24px rgba(61, 139, 95, 0.08);
+      --shadow-raise: 0 20px 44px rgba(44, 58, 45, 0.14);
+      --transition-fast: 160ms ease;
+    }
+
     * {
-      font-family: system-ui, -apple-system, sans-serif
+      box-sizing: border-box;
+      font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif
+    }
+
+    html {
+      background: var(--paper)
     }
 
     body {
-      background: #F5F0E8;
+      background:
+        radial-gradient(circle at top, rgba(107, 183, 126, 0.18), transparent 34%),
+        linear-gradient(180deg, #fdfcf7 0%, #f4efe4 100%);
       max-width: 428px;
       margin: 0 auto;
-      min-height: 100vh
+      min-height: 100vh;
+      color: var(--text-strong)
+    }
+
+    #app {
+      min-height: calc(100vh - 86px)
     }
 
     .btn:active {
       transform: scale(0.97)
+    }
+
+    .btn {
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast)
+    }
+
+    .btn:hover {
+      filter: brightness(1.03)
+    }
+
+    .page-shell {
+      padding: 18px 16px 104px
+    }
+
+    .page-shell.compact {
+      padding-top: 14px
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      justify-content: space-between;
+      margin-bottom: 18px
+    }
+
+    .page-heading {
+      min-width: 0;
+      flex: 1
+    }
+
+    .page-title {
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: var(--text-strong)
+    }
+
+    .page-subtitle {
+      margin-top: 6px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text-muted)
+    }
+
+    .page-back {
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      border: 1px solid rgba(61, 139, 95, 0.12);
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 8px 20px rgba(44, 58, 45, 0.08);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-strong)
+    }
+
+    .surface-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card)
+    }
+
+    .soft-card {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(247, 243, 234, 0.92));
+      border: 1px solid rgba(61, 139, 95, 0.1);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card)
+    }
+
+    .hero-card {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, rgba(61, 139, 95, 0.96), rgba(107, 183, 126, 0.88));
+      color: #fff;
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: var(--shadow-raise)
+    }
+
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      inset: auto -12% -45% auto;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.12);
+      filter: blur(2px)
+    }
+
+    .section-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px
+    }
+
+    .section-title {
+      font-size: 17px;
+      line-height: 1.3;
+      font-weight: 700;
+      color: var(--text-strong)
+    }
+
+    .section-note {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5
+    }
+
+    .subtle-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: 0.03em
+    }
+
+    .chip-muted {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--text-muted);
+      font-size: 12px;
+      border: 1px solid rgba(61, 139, 95, 0.08)
+    }
+
+    .search-launch {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 15px 16px;
+      text-align: left;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(61, 139, 95, 0.1);
+      border-radius: 22px;
+      box-shadow: var(--shadow-card)
+    }
+
+    .product-tile {
+      background: var(--surface);
+      border: 1px solid rgba(61, 139, 95, 0.1);
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: var(--shadow-card);
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast)
+    }
+
+    .product-tile:active {
+      transform: translateY(1px)
+    }
+
+    .list-tile {
+      background: var(--surface);
+      border: 1px solid rgba(61, 139, 95, 0.1);
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: var(--shadow-card)
+    }
+
+    .cjk-keep {
+      word-break: keep-all;
+      overflow-wrap: break-word
+    }
+
+    .category-media-frame {
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+      background: linear-gradient(135deg, rgba(243, 238, 226, 0.95), rgba(232, 245, 236, 0.75))
+    }
+
+    .category-media-frame::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(243, 238, 226, 0.3));
+      z-index: 1
+    }
+
+    .category-media-bg {
+      position: absolute;
+      inset: -8%;
+      width: 116%;
+      height: 116%;
+      display: block;
+      object-fit: cover;
+      filter: blur(18px);
+      opacity: 0.38;
+      transform: scale(1.08);
+      z-index: 0
+    }
+
+    .category-media-main {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      padding: 0
+    }
+
+    .product-gallery-scroll {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      border-top-left-radius: 24px;
+      border-top-right-radius: 24px
+    }
+
+    .product-gallery-scroll::-webkit-scrollbar {
+      display: none
+    }
+
+    .product-gallery-slide {
+      width: 100%;
+      flex: 0 0 100%;
+      scroll-snap-align: start
+    }
+
+    .choice-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(61, 139, 95, 0.12);
+      color: var(--text-muted);
+      font-size: 13px;
+      transition: all var(--transition-fast)
+    }
+
+    .choice-pill.active {
+      background: var(--brand-deep);
+      color: #fff;
+      border-color: var(--brand-deep);
+      box-shadow: 0 10px 20px rgba(61, 139, 95, 0.18)
+    }
+
+    .choice-pill.warm.active {
+      background: linear-gradient(135deg, #E8A44A, #D68928);
+      border-color: #D68928
+    }
+
+    .auth-card {
+      background: rgba(255, 253, 248, 0.98);
+      border: 1px solid rgba(61, 139, 95, 0.12);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-raise)
+    }
+
+    input,
+    select,
+    textarea {
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast)
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: rgba(61, 139, 95, 0.35) !important;
+      box-shadow: 0 0 0 4px rgba(61, 139, 95, 0.12)
+    }
+
+    .site-nav {
+      backdrop-filter: blur(16px);
+      background: rgba(250, 250, 245, 0.92);
+      border-top: 1px solid rgba(61, 139, 95, 0.12);
+      box-shadow: 0 -12px 30px rgba(44, 58, 45, 0.08)
+    }
+
+    .nav-action {
+      min-width: 68px;
+      border-radius: 18px;
+      color: var(--text-faint);
+      transition: all var(--transition-fast)
+    }
+
+    .nav-action.is-active {
+      background: rgba(61, 139, 95, 0.12);
+      color: var(--brand-deep)
+    }
+
+    .nav-action.is-active span {
+      font-weight: 700
+    }
+
+    #admin-panel,
+    #farmer-panel {
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top, rgba(107, 183, 126, 0.16), transparent 32%),
+        linear-gradient(180deg, #fcfaf4 0%, #f2eee2 100%)
+    }
+
+    .workspace-topbar {
+      backdrop-filter: blur(12px);
+      box-shadow: 0 12px 28px rgba(44, 58, 45, 0.14)
+    }
+
+    .workspace-side {
+      background: rgba(255, 252, 245, 0.86);
+      backdrop-filter: blur(8px)
+    }
+
+    .workspace-main {
+      padding-bottom: 48px
+    }
+
+    .workspace-banner {
+      background: linear-gradient(135deg, rgba(61, 139, 95, 0.94), rgba(107, 183, 126, 0.86));
+      color: #fff;
+      border-radius: var(--radius-xl);
+      padding: 18px;
+      box-shadow: var(--shadow-raise)
+    }
+
+    .workspace-banner.warm {
+      background: linear-gradient(135deg, rgba(232, 164, 74, 0.96), rgba(224, 123, 57, 0.92))
+    }
+
+    #admin-panel .bg-white,
+    #farmer-panel .bg-white {
+      background: rgba(255, 253, 248, 0.98) !important;
+      border: 1px solid rgba(61, 139, 95, 0.11);
+      box-shadow: var(--shadow-card)
+    }
+
+    #admin-panel .bg-\[\#F9F7F3\],
+    #farmer-panel .bg-\[\#F9F7F3\] {
+      background: #f7f3ea !important
     }
 
     .level-lv1 {
@@ -48,16 +435,16 @@
 <body class="bg-[#F5F0E8] pb-16">
   <div id="app"></div>
   <div id="modal-root"></div>
-  <nav id="nav" class="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-2"
+  <nav id="nav" class="site-nav fixed bottom-0 left-0 right-0 flex justify-around py-2"
     style="max-width:428px;margin:0 auto">
-    <button onclick="go('home')" class="flex flex-col items-center p-2"><i data-lucide="home" class="w-5 h-5"></i><span
+    <button id="nav-home" onclick="go('home')" class="nav-action flex flex-col items-center p-2"><i data-lucide="home" class="w-5 h-5"></i><span
         class="text-xs">首页</span></button>
-    <button onclick="go('category')" class="flex flex-col items-center p-2"><i data-lucide="grid-3x3"
+    <button id="nav-category" onclick="go('category')" class="nav-action flex flex-col items-center p-2"><i data-lucide="grid-3x3"
         class="w-5 h-5"></i><span class="text-xs">分类</span></button>
-    <button onclick="go('cart')" class="flex flex-col items-center p-2 relative"><i data-lucide="shopping-cart"
+    <button id="nav-cart" onclick="go('cart')" class="nav-action flex flex-col items-center p-2 relative"><i data-lucide="shopping-cart"
         class="w-5 h-5"></i><span class="text-xs">购物车</span><span id="cart-badge"
         class="hidden absolute -top-1 right-2 bg-[#E07B39] text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">0</span></button>
-    <button onclick="go('profile')" class="flex flex-col items-center p-2"><i data-lucide="user"
+    <button id="nav-profile" onclick="go('profile')" class="nav-action flex flex-col items-center p-2"><i data-lucide="user"
         class="w-5 h-5"></i><span class="text-xs">我的</span></button>
   </nav>
   <script>
@@ -178,6 +565,27 @@
     function scrollPageToTop() {
       try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (error) { window.scrollTo(0, 0); }
     }
+    function stabilizeViewportTop() {
+      scrollPageToTop();
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(function () {
+          scrollPageToTop();
+        });
+      }
+    }
+    function setWorkspaceMode(mode) {
+      var appRoot = $('app');
+      var navRoot = $('nav');
+      var adminPanel = $('admin-panel');
+      var farmerPanel = $('farmer-panel');
+      var buyerMode = mode !== 'admin' && mode !== 'farmer';
+      if (appRoot) appRoot.classList.toggle('hidden', !buyerMode);
+      if (navRoot && !buyerMode) navRoot.style.display = 'none';
+      if (buyerMode) {
+        if (adminPanel) adminPanel.classList.add('hidden');
+        if (farmerPanel) farmerPanel.classList.add('hidden');
+      }
+    }
     function buildHash(viewName, id) {
       return '/' + viewName + (id ? '/' + id : '');
     }
@@ -259,6 +667,20 @@
       }
       window.history.back();
     });
+    function syncNavActiveState() {
+      ['home', 'category', 'cart', 'profile'].forEach(function (navKey) {
+        var button = document.getElementById('nav-' + navKey);
+        if (!button) return;
+        button.classList.toggle('is-active', view === navKey);
+      });
+    }
+    function renderPageHeader(title, subtitle, options) {
+      var config = Object.assign({ back: false, actionHtml: '' }, options || {});
+      return `<div class="page-header"><div class="flex items-start gap-3 min-w-0 flex-1">${config.back ? '<button onclick="back()" class="page-back"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>' : ''}<div class="page-heading"><div class="page-title">${title}</div>${subtitle ? `<div class="page-subtitle">${subtitle}</div>` : ''}</div></div>${config.actionHtml || ''}</div>`;
+    }
+    function renderEmptyState(icon, title, description, actionHtml) {
+      return `<div class="page-shell"><div class="surface-card p-8 text-center"><div class="text-5xl mb-4">${icon}</div><div class="text-lg font-bold mb-2">${title}</div><div class="text-sm text-gray-500 leading-6">${description}</div>${actionHtml ? `<div class="mt-5">${actionHtml}</div>` : ''}</div></div>`;
+    }
     const setCat = c => enqueueNavigation(function () {
       cat = c;
       applyRouteState('category', 0);
@@ -549,12 +971,24 @@
         village: '待设置',
         shippingAddressId: '',
         shippingAddressSnapshot: {},
+        images: [],
         price: 0,
         unit: '',
         harvest: new Date().toISOString().slice(0, 10),
         dispatchHours: 4,
         trace: []
       }, p || {});
+      var explicitCover = String(normalized.img || normalized.coverImage || '').trim();
+      var imageList = (Array.isArray(normalized.images) ? normalized.images : [])
+        .map(function (item) { return String(item || '').trim(); })
+        .filter(Boolean)
+        .filter(function (item, index, list) { return list.indexOf(item) === index; });
+      if (explicitCover && imageList.indexOf(explicitCover) < 0) imageList.unshift(explicitCover);
+      if (explicitCover && imageList.indexOf(explicitCover) > 0) {
+        imageList = [explicitCover].concat(imageList.filter(function (item) { return item !== explicitCover; }));
+      }
+      if (!imageList.length && explicitCover) imageList = [explicitCover];
+      if (!imageList.length) imageList = [DEFAULT_PRODUCT_IMAGE];
       normalized.variants = normalizeProductVariants(normalized);
       var defaultVariant = getDefaultVariant(normalized);
       var defaultUnit = defaultVariant ? getDefaultUnitForVariant(defaultVariant, normalized) : null;
@@ -566,6 +1000,8 @@
       }, 0);
       normalized.defaultVariantId = defaultVariant && defaultVariant.id ? String(defaultVariant.id) : '';
       normalized.defaultUnitId = defaultUnit && defaultUnit.id ? String(defaultUnit.id) : '';
+      normalized.images = imageList;
+      normalized.img = explicitCover && imageList.indexOf(explicitCover) > -1 ? explicitCover : imageList[0];
       return normalized;
     }
 
@@ -580,6 +1016,7 @@
             })
           });
         }),
+        images: Array.isArray(product && product.images) ? product.images.slice() : [],
         shippingAddressSnapshot: product && product.shippingAddressSnapshot ? Object.assign({}, product.shippingAddressSnapshot) : {}
       }));
     }
@@ -1361,6 +1798,7 @@
         dispatchHours: 4,
         farmer: '',
         village: '',
+        images: [DEFAULT_PRODUCT_IMAGE],
         img: DEFAULT_PRODUCT_IMAGE
       }, overrides || {});
     }
@@ -1910,6 +2348,27 @@
       return canvas.toDataURL(config.mimeType, config.quality);
     }
 
+    async function cropImageFileToSquareDataUrl(file, options) {
+      var config = Object.assign({ size: 960, quality: 0.88, mimeType: 'image/webp' }, options || {});
+      if (!file) throw new Error('未选择图片');
+      if (typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof HTMLCanvasElement === 'undefined') {
+        return readFileAsDataUrl(file);
+      }
+      var src = await readFileAsDataUrl(file);
+      var img = await loadImageElement(src);
+      var canvas = document.createElement('canvas');
+      canvas.width = config.size;
+      canvas.height = config.size;
+      var context = canvas.getContext('2d');
+      if (!context) return src;
+      var minSide = Math.max(1, Math.min(img.width, img.height));
+      var sx = Math.max(0, Math.round((img.width - minSide) / 2));
+      var sy = Math.max(0, Math.round((img.height - minSide) / 2));
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(img, sx, sy, minSide, minSide, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL(config.mimeType, config.quality);
+    }
+
     function uploadImageDataUrl(dataUrl, fileName, folderName, done, fail) {
       fetch('/api/upload', {
         method: 'POST',
@@ -1955,10 +2414,152 @@
       getProcessedImageFromInput(inputId, fallbackImage, folderName, null, null, done, fail);
     }
 
+    function parseProductImageFieldValue(value) {
+      try {
+        var parsed = JSON.parse(String(value || '[]'));
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function normalizeProductImageList(list, fallbackImage) {
+      var fallback = String(fallbackImage || DEFAULT_PRODUCT_IMAGE).trim() || DEFAULT_PRODUCT_IMAGE;
+      var normalized = (Array.isArray(list) ? list : [])
+        .map(function (item) { return String(item || '').trim(); })
+        .filter(Boolean)
+        .filter(function (item, index, source) { return source.indexOf(item) === index; });
+      if (!normalized.length) normalized = [fallback];
+      return normalized;
+    }
+
+    function resolveProductCoverImage(images, preferredCover) {
+      var normalized = normalizeProductImageList(images, preferredCover || DEFAULT_PRODUCT_IMAGE);
+      var cover = String(preferredCover || '').trim();
+      return cover && normalized.indexOf(cover) > -1 ? cover : normalized[0];
+    }
+
+    function moveCoverToFirst(images, cover) {
+      var normalized = normalizeProductImageList(images, cover || DEFAULT_PRODUCT_IMAGE);
+      var resolvedCover = resolveProductCoverImage(normalized, cover);
+      if (normalized.indexOf(resolvedCover) <= 0) return normalized;
+      return [resolvedCover].concat(normalized.filter(function (item) { return item !== resolvedCover; }));
+    }
+
+    function getProductImageStateFromForm(prefix, fallbackProduct) {
+      var fallback = normalizeProduct(fallbackProduct || {});
+      var imagesInput = document.getElementById(prefix + '-images-json');
+      var coverInput = document.getElementById(prefix + '-cover-image');
+      var images = normalizeProductImageList(
+        parseProductImageFieldValue(imagesInput ? imagesInput.value : JSON.stringify(fallback.images || [])),
+        fallback.img || DEFAULT_PRODUCT_IMAGE
+      );
+      var cover = resolveProductCoverImage(images, coverInput ? coverInput.value : (fallback.img || images[0]));
+      return { images: images, cover: cover };
+    }
+
+    function renderProductImageListRows(prefix, images, cover) {
+      return images.map(function (item, index) {
+        var isCover = String(item) === String(cover || '');
+        return '<div class="rounded-xl bg-white border border-gray-200 p-2 flex items-center gap-3">'
+          + '<img src="' + item + '" class="w-14 h-14 rounded-lg object-cover shrink-0">'
+          + '<div class="min-w-0 flex-1"><div class="text-xs text-gray-400">图片 ' + (index + 1) + '</div><div class="text-xs text-gray-500 mt-1 line-clamp-2 break-all">' + item + '</div></div>'
+          + '<div class="flex flex-col items-end gap-2 shrink-0">'
+          + '<label class="text-xs ' + (isCover ? 'text-[#2D9D4E]' : 'text-gray-500') + '"><input type="radio" name="' + prefix + '-cover-radio" ' + (isCover ? 'checked ' : '') + 'onchange="setProductCoverImageByIndex(\'' + prefix + '\',' + index + ')"> 封面</label>'
+          + '<button type="button" onclick="removeProductImageAt(\'' + prefix + '\',' + index + ')" class="text-xs text-red-500">删除</button>'
+          + '</div></div>';
+      }).join('');
+    }
+
+    function setProductImageStateForForm(prefix, images, cover) {
+      var normalized = normalizeProductImageList(images, cover || DEFAULT_PRODUCT_IMAGE);
+      var resolvedCover = resolveProductCoverImage(normalized, cover);
+      var ordered = moveCoverToFirst(normalized, resolvedCover);
+      var imagesInput = document.getElementById(prefix + '-images-json');
+      var coverInput = document.getElementById(prefix + '-cover-image');
+      var listRoot = document.getElementById(prefix + '-images-list');
+      if (imagesInput) imagesInput.value = JSON.stringify(ordered);
+      if (coverInput) coverInput.value = resolvedCover;
+      if (listRoot) listRoot.innerHTML = renderProductImageListRows(prefix, ordered, resolvedCover);
+    }
+
+    function setProductCoverImageByIndex(prefix, index) {
+      var state = getProductImageStateFromForm(prefix, {});
+      var target = state.images[index];
+      if (!target) return;
+      setProductImageStateForForm(prefix, state.images, target);
+    }
+
+    function removeProductImageAt(prefix, index) {
+      var state = getProductImageStateFromForm(prefix, {});
+      if (state.images.length <= 1) {
+        alert('至少保留 1 张商品图片');
+        return;
+      }
+      var next = state.images.filter(function (_, itemIndex) { return itemIndex !== index; });
+      setProductImageStateForForm(prefix, next, state.cover);
+    }
+
+    function uploadImageDataUrlAsync(dataUrl, fileName, folderName) {
+      return new Promise(function (resolve, reject) {
+        uploadImageDataUrl(dataUrl, fileName, folderName, resolve, reject);
+      });
+    }
+
+    async function appendProductImagesFromInput(prefix) {
+      var input = document.getElementById(prefix + '-img');
+      if (!input || !input.files || !input.files.length) {
+        alert('请先选择图片');
+        return;
+      }
+      var state = getProductImageStateFromForm(prefix, {});
+      var next = state.images.slice();
+      for (var index = 0; index < input.files.length; index++) {
+        var file = input.files[index];
+        var dataUrl = await cropImageFileToSquareDataUrl(file);
+        var uploadedUrl = await uploadImageDataUrlAsync(dataUrl || '', file.name || 'product-image', 'products');
+        if (next.indexOf(uploadedUrl) < 0) next.push(uploadedUrl);
+      }
+      input.value = '';
+      setProductImageStateForForm(prefix, next, state.cover);
+    }
+
+    async function resolveProductImagesForSave(prefix, fallbackProduct) {
+      var state = getProductImageStateFromForm(prefix, fallbackProduct || {});
+      var input = document.getElementById(prefix + '-img');
+      if (!input || !input.files || !input.files.length) return state;
+      var next = state.images.slice();
+      for (var index = 0; index < input.files.length; index++) {
+        var file = input.files[index];
+        var dataUrl = await cropImageFileToSquareDataUrl(file);
+        var uploadedUrl = await uploadImageDataUrlAsync(dataUrl || '', file.name || 'product-image', 'products');
+        if (next.indexOf(uploadedUrl) < 0) next.push(uploadedUrl);
+      }
+      input.value = '';
+      var cover = resolveProductCoverImage(next, state.cover);
+      setProductImageStateForForm(prefix, next, cover);
+      return { images: next, cover: cover };
+    }
+
+    function renderProductImageUploader(prefix, product) {
+      var normalized = normalizeProduct(product || {});
+      var images = normalizeProductImageList(normalized.images || [normalized.img], normalized.img || DEFAULT_PRODUCT_IMAGE);
+      var cover = resolveProductCoverImage(images, normalized.img || images[0]);
+      return '<div class="rounded-xl border border-dashed border-gray-200 p-3 mb-2">'
+        + '<div class="flex items-center justify-between gap-2 mb-2"><div class="text-xs text-gray-500">商品图片列表（可多图，勾选封面）</div><span class="text-xs text-gray-400">共 ' + images.length + ' 张</span></div>'
+        + '<input id="' + prefix + '-images-json" type="hidden" value=\'' + escapeHtml(JSON.stringify(images)) + '\'>'
+        + '<input id="' + prefix + '-cover-image" type="hidden" value="' + escapeHtml(cover) + '">'
+        + '<div id="' + prefix + '-images-list" class="space-y-2 mb-2">' + renderProductImageListRows(prefix, images, cover) + '</div>'
+        + '<div class="flex items-center gap-2"><input id="' + prefix + '-img" type="file" accept="image/*" multiple class="flex-1 text-sm text-gray-500"><button type="button" onclick="appendProductImagesFromInput(\'' + prefix + '\')" class="px-3 py-2 rounded-full bg-[#2D9D4E] text-white text-xs">上传并加入列表</button></div>'
+        + '<div class="text-[11px] text-gray-400 mt-2">左侧缩略图用于选封面；封面会用于商品卡片和订单商品快照。</div>'
+        + '</div>';
+    }
+
     // 商品录入和编辑统一校验，避免后台字段和前台展示继续出现不一致。
     function validateProductPayload(payload) {
       if (!payload.name) return '请填写商品名称';
       if (!payload.cat) return '请选择商品分类';
+      if (!Array.isArray(payload.images) || !payload.images.length) return '请至少上传 1 张商品图片';
       if (!Array.isArray(payload.variants) || !payload.variants.length) return '请至少维护 1 条规格';
       for (var index = 0; index < payload.variants.length; index++) {
         var variant = payload.variants[index] || {};
@@ -1983,6 +2584,7 @@
       var tagInput = document.getElementById(prefix + '-tags');
       var shippingInput = document.getElementById(prefix + '-shipping-address-id');
       var variants = getProductFormVariants(prefix, fallback);
+      var imageState = getProductImageStateFromForm(prefix, fallback || {});
       var defaultVariant = getDefaultVariant({ variants: variants });
       var defaultUnit = defaultVariant ? getDefaultUnitForVariant(defaultVariant, { variants: variants }) : null;
       return {
@@ -1998,7 +2600,8 @@
         farmer: farmerInput ? farmerInput.value.trim() : (fallback.farmer || ''),
         village: document.getElementById(prefix + '-village').value.trim(),
         shippingAddressId: shippingInput ? shippingInput.value.trim() : (fallback.shippingAddressId || ''),
-        img: fallback.img || DEFAULT_PRODUCT_IMAGE
+        images: imageState.images,
+        img: imageState.cover
       };
     }
 
@@ -2023,7 +2626,7 @@
       if (canEditFarmer) h += '<div class="mb-3">' + renderFieldLabel('供货人 / 农户名称', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-farmer" value="' + (product.farmer || '') + '" placeholder="请输入供货人名称（可选）" class="w-full p-2 border rounded-lg text-sm"></div>';
       h += '<div class="mb-3">' + renderFieldLabel('来源产地', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-village" value="' + (product.village || '') + '" placeholder="请输入来源产地（可选）" class="w-full p-2 border rounded-lg text-sm"></div>';
       h += '<div class="mb-3">' + renderFieldLabel('发货地址', '从当前账号已维护的发货地址中弹窗选择并绑定到商品') + '<input id="' + prefix + '-shipping-address-id" type="hidden" value="' + (product.shippingAddressId || '') + '"><button type="button" onclick="openShippingAddressPicker(\'' + prefix + '\')" class="w-full text-left border rounded-lg p-3 text-sm bg-[#F9F7F3]"><div class="text-xs text-gray-400 mb-1">当前绑定</div><div id="' + prefix + '-shipping-address-label" class="' + ((product.shippingAddressId || '') ? 'text-gray-700' : 'text-gray-400') + '">' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '请选择发货地址') + '</div></button></div>';
-      h += renderImageUploader(prefix, product.img || DEFAULT_PRODUCT_IMAGE);
+      h += renderProductImageUploader(prefix, product);
       return h;
     }
 
@@ -2034,7 +2637,7 @@
       var expanded = !!options.expanded;
       var category = getCategoryMeta(product.cat || getDefaultCategoryId());
       var tagHtml = getProductTags(product.tags || []).map(renderTagBadge).join('');
-      return '<div class="bg-white rounded-xl p-4 shadow mb-3"><div class="flex gap-3 items-start"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="flex-1 text-left flex gap-3 items-start"><img src="' + (product.img || DEFAULT_PRODUCT_IMAGE) + '" class="w-16 h-16 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm">' + product.name + '</div><div class="text-xs text-gray-500 mt-1">' + renderCategoryInline(category, '来源：' + (product.village || '待补充') + ' · 库存：' + product.stock, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' }) + '</div><div class="text-xs text-gray-500 mt-1">采摘：' + product.harvest + ' · ' + Number(product.dispatchHours || 4) + ' 小时内发货</div><div class="text-xs text-gray-500 mt-1">发货地址：' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '未绑定') + '</div>' + (tagHtml ? '<div class="flex flex-wrap gap-2 mt-2">' + tagHtml + '</div>' : '') + '<div class="text-xs text-gray-400 mt-2">' + (expanded ? '点击收起编辑内容' : '点击展开填写与上传内容') + '</div></div></button><div class="flex flex-col gap-2 items-end"><button onclick="toggleProd(' + product.id + ')" class="text-xs px-2 py-1 rounded-full h-fit ' + tone.badge + '">' + (product.off ? '已下架' : '在售') + '</button><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="text-xs px-3 py-1 rounded-full border border-gray-200 text-gray-500">' + (expanded ? '收起编辑' : '展开编辑') + '</button></div></div><div class="' + (expanded ? 'mt-3 pt-3 border-t border-gray-100' : 'hidden') + '">' + renderProductFormFields(options.prefix, product, options.canEditFarmer) + '<button onclick="' + options.saveAction + '" class="w-full mt-2 ' + tone.button + ' text-white py-2 rounded-lg text-sm">' + options.saveText + '</button></div></div>';
+      return '<div class="surface-card p-4 mb-3"><div class="space-y-3"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="w-full text-left flex gap-3 items-start"><img src="' + (product.img || DEFAULT_PRODUCT_IMAGE) + '" class="w-16 h-16 rounded-[18px] object-cover shrink-0"><div class="min-w-0 flex-1"><div class="font-medium text-sm">' + product.name + '</div><div class="text-xs text-gray-500 mt-1">' + renderCategoryInline(category, '来源：' + (product.village || '待补充') + ' · 库存：' + product.stock, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' }) + '</div><div class="text-xs text-gray-500 mt-1">采摘：' + product.harvest + ' · ' + Number(product.dispatchHours || 4) + ' 小时内发货</div><div class="text-xs text-gray-500 mt-1">发货地址：' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '未绑定') + '</div>' + (tagHtml ? '<div class="flex flex-wrap gap-2 mt-2">' + tagHtml + '</div>' : '') + '<div class="text-xs text-gray-400 mt-2">' + (expanded ? '点击收起编辑内容' : '点击展开填写与上传内容') + '</div></div></button><div class="flex items-center justify-between gap-2 flex-wrap"><button onclick="toggleProd(' + product.id + ')" class="text-xs px-2 py-1 rounded-full h-fit ' + tone.badge + ' btn">' + (product.off ? '已下架' : '在售') + '</button><div class="flex items-center gap-2"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="text-xs px-3 py-1 rounded-full border border-gray-200 text-gray-500 btn">' + (expanded ? '收起编辑' : '展开编辑') + '</button><button onclick="confirmDeleteProduct(' + product.id + ',\'' + options.source + '\')" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500 btn">删除商品</button></div></div></div><div class="' + (expanded ? 'mt-3 pt-3 border-t border-gray-100' : 'hidden') + '">' + renderProductFormFields(options.prefix, product, options.canEditFarmer) + '<button onclick="' + options.saveAction + '" class="w-full mt-2 ' + tone.button + ' text-white py-2 rounded-lg text-sm btn">' + options.saveText + '</button></div></div>';
     }
 
     function validateAddressPayload(payload) {
@@ -2843,8 +3446,10 @@
     // === RENDER ===
     function render() {
       const app = $('app');
+      setWorkspaceMode('buyer');
       clearBannerAutoRotation();
       $('nav').style.display = ['home', 'category', 'cart', 'profile', 'orders', 'search'].includes(view) ? 'flex' : 'none';
+      syncNavActiveState();
       updateCartBadge();
       switch (view) {
         case 'home': app.innerHTML = home(); break;
@@ -2877,19 +3482,24 @@
       var bannerIndex = banners.length ? activeBannerIndex % banners.length : 0;
       var heroBanner = banners[bannerIndex] || normalizeBanner({}, 0);
       var announcements = getActiveAnnouncements();
-      return `<div class="p-4">
-<button onclick="openSearchPage()" class="w-full bg-white rounded-2xl px-4 py-3 shadow mb-4 flex items-center gap-3 text-left">
-<i data-lucide="search" class="w-5 h-5 text-gray-400"></i>
-<div class="min-w-0 flex-1"><div class="text-sm font-medium text-gray-700">搜索商品</div><div class="text-xs text-gray-400 mt-1">按商品名、农户、产地或标签快速查找</div></div>
+      return `<div class="page-shell">
+${renderPageHeader('晨露直达的鲜货', '像逛一个整洁的乡间市集，先挑今天想吃的新鲜货。')}
+<button onclick="openSearchPage()" class="search-launch mb-4">
+<span class="w-11 h-11 rounded-full bg-[#E8F5EC] text-[#3D8B5F] flex items-center justify-center shrink-0"><i data-lucide="search" class="w-5 h-5"></i></span>
+<div class="min-w-0 flex-1"><div class="text-sm font-semibold text-[#2C3A2D]">搜索商品</div><div class="text-xs text-gray-500 mt-1">按商品名、农户、产地或标签快速查找</div></div>
 </button>
-<div class="bg-white rounded-xl overflow-hidden shadow mb-4">
-<img src="${heroBanner.img}" class="w-full h-40 object-cover" onclick="triggerOperationalLink(getBanners()[${bannerIndex}])">
-<div class="p-3"><div class="font-bold text-[#2D9D4E]">${heroBanner.title}</div><div class="text-sm text-gray-500">${heroBanner.sub}</div></div>
-${banners.length > 1 ? `<div class="flex items-center justify-center gap-2 pb-3">${banners.map(function (_, index) { return `<button onclick="setActiveBanner(${index})" class="w-2.5 h-2.5 rounded-full ${index === bannerIndex ? 'bg-[#2D9D4E]' : 'bg-gray-200'}"></button>`; }).join('')}</div>` : ''}
+<div class="hero-card mb-5">
+<img src="${heroBanner.img}" class="w-full h-44 object-cover" onclick="triggerOperationalLink(getBanners()[${bannerIndex}])">
+<div class="p-4 relative z-[1]">
+<div class="subtle-label mb-3">日精月华 · 田间到餐桌</div>
+<div class="text-2xl font-bold leading-tight">${heroBanner.title}</div>
+<div class="text-sm text-white/80 mt-2 leading-6">${heroBanner.sub}</div>
+${banners.length > 1 ? `<div class="flex items-center gap-2 mt-4">${banners.map(function (_, index) { return `<button onclick="setActiveBanner(${index})" class="w-2.5 h-2.5 rounded-full ${index === bannerIndex ? 'bg-white' : 'bg-white/40'}"></button>`; }).join('')}</div>` : ''}
 </div>
-${announcements.length ? `<div class="bg-[#FFF7ED] rounded-xl p-3 mb-4 shadow"><div class="text-sm font-medium text-[#E07B39] mb-2">📢 今日公告</div><div class="space-y-2">${announcements.map(function (item, index) { return `<button onclick="triggerOperationalLink(getActiveAnnouncements()[${index}])" class="w-full text-left text-xs text-gray-600 leading-5 ${item.linkType !== 'none' ? 'hover:text-[#E07B39]' : ''}">• ${item.text}${item.linkType !== 'none' ? ' · ' + getOperationalLinkLabel(item.linkType) : ''}</button>`; }).join('')}</div></div>` : ''}
-<div class="font-bold text-lg mb-3">🌿 全部商品</div>
-${homeCategories.length ? `<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="flex gap-2 overflow-x-auto pb-1">${homeCategories.map(function (c) { return `<button onclick="setCat('${c.id}')" class="shrink-0 flex flex-col items-center justify-start gap-1.5 text-center rounded-2xl bg-[#F9F7F3] px-2 py-2" style="width:calc((100% - 1.5rem) / 4);min-width:calc((100% - 1.5rem) / 4)">${renderCategoryIcon(c, 'w-8 h-8 rounded-xl object-cover bg-white p-1')}<span class="text-[11px] leading-4 text-gray-600 break-words">${c.name}</span></button>`; }).join('')}</div></div>` : ''}
+</div>
+${announcements.length ? `<div class="soft-card p-4 mb-5"><div class="section-head !mb-3"><div><div class="section-title">今日公告</div><div class="section-note">当前运营消息和首页跳转入口</div></div><span class="chip-muted">公告 ${announcements.length} 条</span></div><div class="space-y-2">${announcements.map(function (item, index) { return `<button onclick="triggerOperationalLink(getActiveAnnouncements()[${index}])" class="w-full text-left rounded-2xl bg-white/70 px-3 py-3 text-sm text-gray-600 leading-6 ${item.linkType !== 'none' ? 'hover:text-[#E07B39]' : ''}">• ${item.text}${item.linkType !== 'none' ? ' · ' + getOperationalLinkLabel(item.linkType) : ''}</button>`; }).join('')}</div></div>` : ''}
+${homeCategories.length ? `<div class="surface-card p-4 mb-5"><div class="section-head"><div><div class="section-title">首页分类</div><div class="section-note">后台勾选展示的分类会出现在这里</div></div><button onclick="go('category')" class="chip-muted">查看全部</button></div><div class="flex gap-2 overflow-x-auto pb-1">${homeCategories.map(function (c) { return `<button onclick="setCat('${c.id}')" class="shrink-0 flex flex-col items-center justify-start gap-2 text-center rounded-[22px] bg-[#F7F3EA] px-2.5 py-3" style="width:calc((100% - 1.5rem) / 4);min-width:calc((100% - 1.5rem) / 4)">${renderCategoryIcon(c, 'w-9 h-9 rounded-2xl object-cover bg-white p-1.5 shadow-sm')}<span class="text-[11px] leading-4 text-gray-600 break-words">${c.name}</span></button>`; }).join('')}</div></div>` : ''}
+<div class="section-head"><div><div class="section-title">全部商品</div><div class="section-note">当前在售 ${prods.length} 件，支持规格、单位和实时库存</div></div><button onclick="go('category')" class="chip-muted">去分类页</button></div>
 <div class="grid grid-cols-2 gap-3">
 ${prods.map(p => card(p)).join('')}
 </div></div>`;
@@ -2898,28 +3508,27 @@ ${prods.map(p => card(p)).join('')}
     function card(p) {
       var category = getCategoryMeta(p.cat || getDefaultCategoryId());
       const tags = getProductTags(p.tags || []).map(renderTagBadge).join('');
-      return `<div class="bg-white rounded-xl shadow overflow-hidden" onclick="pushView('product',${p.id})">
+      return `<div class="product-tile" onclick="pushView('product',${p.id})">
 <img src="${p.img}" class="w-full aspect-square object-cover">
-<div class="p-3"><div class="text-xs text-gray-500">${renderCategoryInline(category, p.unit, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div>
-<div class="font-medium text-sm my-1 line-clamp-2">${p.name}</div>
-<div class="flex items-center gap-1"><span class="text-[#2D9D4E] font-bold">${fmt(p.price)}</span></div>
-<div class="flex items-center justify-between mt-1">
-<span class="text-[10px] text-gray-400">已售${p.sales} · 库存${p.stock}</span>
+<div class="p-3.5"><div class="text-xs text-gray-500">${renderCategoryInline(category, '', { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div>
+<div class="font-semibold text-sm my-1.5 line-clamp-2 text-[#2C3A2D]">${p.name}</div>
+<div class="flex items-center gap-2"><span class="text-[#3D8B5F] font-bold text-lg">${fmt(p.price)}</span></div>
+<div class="flex items-center justify-between mt-2 gap-2">
+<span class="text-[11px] text-gray-400">已售${p.sales} · 库存${p.stock}</span>
 ${tags}
 </div></div></div>`;
     }
 
     function renderCategoryNavButton(category, active) {
       var iconClassName = active
-        ? 'w-8 h-8 rounded-xl object-cover bg-white/15 p-1'
-        : 'w-8 h-8 rounded-xl object-cover bg-[#F9F7F3] p-1';
-      return `<button onclick="setCat('${category.id}')" class="w-full rounded-2xl px-3 py-3 text-left transition ${active ? 'bg-[#2D9D4E] text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'}"><div class="flex items-center gap-2">${renderCategoryIcon(category, iconClassName)}<div class="min-w-0 flex-1"><div class="text-sm font-medium leading-5">${category.name}</div></div></div></button>`;
+        ? 'w-5 h-5 rounded-lg object-cover bg-white/15 p-1'
+        : 'w-5 h-5 rounded-lg object-cover bg-[#F9F7F3] p-1';
+      return `<button onclick="setCat('${category.id}')" class="w-full rounded-2xl px-2 py-2.5 text-left transition ${active ? 'bg-[#2D9D4E] text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'}"><div class="flex items-center gap-1.5">${renderCategoryIcon(category, iconClassName)}<div class="min-w-0 flex-1"><div class="text-[11px] font-medium leading-4 cjk-keep">${category.name}</div></div></div></button>`;
     }
 
     function renderCategoryListCard(product) {
-      var category = getCategoryMeta(product.cat || getDefaultCategoryId());
       var tags = getProductTags(product.tags || []).map(renderTagBadge).join('');
-      return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden" onclick="pushView('product',${product.id})"><div class="flex gap-3 p-3"><img src="${product.img}" class="w-24 h-24 rounded-2xl object-cover shrink-0"><div class="min-w-0 flex-1"><div class="text-xs text-gray-500">${renderCategoryInline(category, product.unit, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div><div class="font-medium text-sm mt-1 line-clamp-2">${product.name}</div><div class="flex items-center gap-2 mt-2"><span class="text-[#2D9D4E] font-bold">${fmt(product.price)}</span></div><div class="text-xs text-gray-400 mt-2">已售${product.sales} · 库存${product.stock}</div>${tags ? '<div class="flex flex-wrap gap-2 mt-2">' + tags + '</div>' : ''}</div></div></div>`;
+      return `<div class="list-tile overflow-hidden h-36" onclick="pushView('product',${product.id})"><div class="flex h-full"><div class="w-28 h-36 shrink-0 category-media-frame"><img src="${product.img}" class="category-media-bg"><img src="${product.img}" class="category-media-main"></div><div class="min-w-0 flex-1 p-3 flex flex-col justify-between"><div class="min-w-0"><div class="font-semibold text-[14px] leading-5 line-clamp-3 text-[#2C3A2D] cjk-keep">${product.name}</div><div class="flex items-center gap-2 mt-2"><span class="text-[#3D8B5F] font-bold text-[1.12rem] leading-none">${fmt(product.price)}</span></div><div class="text-[10px] leading-4 text-gray-400 mt-2">已售${product.sales} · 库存${product.stock}</div></div>${tags ? '<div class="flex flex-wrap gap-1 mt-2">' + tags + '</div>' : '<div></div>'}</div></div></div>`;
     }
 
     function category() {
@@ -2927,15 +3536,15 @@ ${tags}
       const categories = getCategories();
       const f = cat ? prods.filter(p => p.cat === cat) : prods;
       const n = (categories.find(function (item) { return item.id === cat; }) || {}).name || '全部分类';
-      return `<div class="p-4">
-<div class="mb-4 flex items-start justify-between gap-3"><div><div class="font-bold text-lg">${n}</div><div class="text-xs text-gray-500 mt-1">${f.length ? '当前分类共 ' + f.length + ' 件在售商品' : '当前分类暂无在售商品'}</div></div><button onclick="openSearchPage()" class="shrink-0 px-3 py-2 rounded-2xl bg-white text-sm text-gray-600 shadow-sm flex items-center gap-2"><i data-lucide="search" class="w-4 h-4"></i>搜索</button></div>
-<div class="flex gap-3 items-start">
-<div class="w-24 shrink-0 space-y-2 sticky top-4">
-<button onclick="setCat('')" class="w-full rounded-2xl px-3 py-3 text-left transition ${!cat ? 'bg-[#2D9D4E] text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'}"><div class="text-sm font-medium">全部</div><div class="text-[11px] mt-1 ${!cat ? 'text-white/80' : 'text-gray-400'}">查看所有商品</div></button>
+      return `<div class="page-shell compact">
+${renderPageHeader(n, f.length ? '当前分类共 ' + f.length + ' 件在售商品' : '当前分类暂无在售商品', { actionHtml: `<button onclick="openSearchPage()" class="chip-muted shrink-0"><i data-lucide="search" class="w-4 h-4"></i>搜索</button>` })}
+<div class="flex gap-2.5 items-start">
+<div class="w-[4.85rem] shrink-0 space-y-2 sticky top-4">
+<button onclick="setCat('')" class="w-full rounded-2xl px-2 py-2.5 text-left transition ${!cat ? 'bg-[#2D9D4E] text-white shadow-sm' : 'bg-white text-gray-600 shadow-sm'}"><div class="text-[11px] font-medium leading-4 cjk-keep">全部</div><div class="text-[10px] mt-1 leading-4 cjk-keep ${!cat ? 'text-white/80' : 'text-gray-400'}">查看所有商品</div></button>
 ${categories.map(c => renderCategoryNavButton(c, cat === c.id)).join('')}
 </div>
 <div class="min-w-0 flex-1">
-${f.length ? `<div class="space-y-3">${f.map(p => renderCategoryListCard(p)).join('')}</div>` : '<div class="bg-white rounded-2xl shadow-sm p-6 text-sm text-gray-400">这个分类暂时还没有上架商品，先去看看其他分类吧。</div>'}
+${f.length ? `<div class="space-y-3">${f.map(p => renderCategoryListCard(p)).join('')}</div>` : '<div class="surface-card p-6 text-sm text-gray-400">这个分类暂时还没有上架商品，先去看看其他分类吧。</div>'}
 </div>
 </div></div>`;
     }
@@ -2943,7 +3552,7 @@ ${f.length ? `<div class="space-y-3">${f.map(p => renderCategoryListCard(p)).joi
     function renderSearchResultCard(product) {
       var category = getCategoryMeta(product.cat || getDefaultCategoryId());
       var tags = getProductTags(product.tags || []).map(renderTagBadge).join('');
-      return `<button onclick="pushView('product',${product.id})" class="w-full bg-white rounded-2xl shadow-sm overflow-hidden text-left"><div class="flex gap-3 p-3"><img src="${product.img}" class="w-24 h-24 rounded-2xl object-cover shrink-0"><div class="min-w-0 flex-1"><div class="text-xs text-gray-500">${renderCategoryInline(category, product.unit, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div><div class="font-medium text-sm mt-1 line-clamp-2">${product.name}</div><div class="flex items-center gap-2 mt-2"><span class="text-[#2D9D4E] font-bold">${fmt(product.price)}</span></div><div class="text-xs text-gray-400 mt-2">${product.farmer || '待补充'} · ${product.village || '待补充'}</div><div class="text-xs text-gray-400 mt-1">已售${product.sales} · 库存${product.stock}</div>${tags ? '<div class="flex flex-wrap gap-2 mt-2">' + tags + '</div>' : ''}</div></div></button>`;
+      return `<button onclick="pushView('product',${product.id})" class="w-full list-tile text-left overflow-hidden"><img src="${product.img}" class="w-full aspect-[4/3] object-cover"><div class="p-3.5"><div class="text-xs text-gray-500">${renderCategoryInline(category, product.unit, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div><div class="font-semibold text-sm mt-1.5 line-clamp-2 text-[#2C3A2D]">${product.name}</div><div class="flex items-center gap-2 mt-2"><span class="text-[#3D8B5F] font-bold text-lg">${fmt(product.price)}</span></div><div class="text-xs text-gray-400 mt-2">${product.farmer || '待补充'} · ${product.village || '待补充'}</div><div class="text-xs text-gray-400 mt-1">已售${product.sales} · 库存${product.stock}</div>${tags ? '<div class="flex flex-wrap gap-2 mt-2">' + tags + '</div>' : ''}</div></button>`;
     }
 
     function search() {
@@ -2951,12 +3560,12 @@ ${f.length ? `<div class="space-y-3">${f.map(p => renderCategoryListCard(p)).joi
       var keywordLabel = escapeHtml(keyword);
       var recentKeywords = searchState.recentKeywords.length ? searchState.recentKeywords : syncSearchHistoryState();
       var results = Array.isArray(searchState.results) ? searchState.results : [];
-      return `<div class="p-4">
-<div class="flex items-center gap-2 mb-4"><button onclick="back()" class="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center text-gray-500"><i data-lucide="arrow-left" class="w-4 h-4"></i></button><div class="flex-1 font-bold text-lg">搜索商品</div></div>
-<div class="bg-white rounded-2xl shadow p-3 mb-4"><div class="flex gap-2"><div class="flex-1 flex items-center gap-2 rounded-2xl bg-[#F9F7F3] px-3"><i data-lucide="search" class="w-4 h-4 text-gray-400"></i><input id="search-keyword" value="${keywordLabel}" oninput="setSearchKeyword(this.value)" onkeydown="if(event.key==='Enter'){submitSearch()}" placeholder="搜索商品、农户、产地或标签" class="w-full bg-transparent py-3 text-sm outline-none"></div><button onclick="submitSearch()" class="px-4 rounded-2xl bg-[#2D9D4E] text-white text-sm btn">搜索</button></div>${recentKeywords.length ? `<div class="mt-3 flex items-center justify-between gap-3"><div class="text-xs text-gray-400">最近搜索</div><button onclick="clearRecentSearchKeywords()" class="text-xs text-gray-400">清空</button></div><div class="flex flex-wrap gap-2 mt-2">${recentKeywords.map(function (item) { return `<button onclick='runRecentSearch(${JSON.stringify(String(item))})' class="px-3 py-1.5 rounded-full bg-[#F9F7F3] text-xs text-gray-600">${escapeHtml(item)}</button>`; }).join('')}</div>` : '<div class="mt-3 text-xs text-gray-400">输入关键字后可按商品名、农户、产地或标签查找。</div>'}</div>
-${searchState.isLoading ? '<div class="bg-white rounded-2xl shadow-sm p-6 text-sm text-gray-400 text-center">搜索中，请稍候...</div>' : ''}
-${!searchState.isLoading && searchState.searched && results.length ? `<div class="mb-3 flex items-center justify-between"><div class="font-medium text-sm">搜索结果</div><div class="text-xs text-gray-400">共 ${results.length} 件匹配商品</div></div><div class="space-y-3">${results.map(renderSearchResultCard).join('')}</div>` : ''}
-${!searchState.isLoading && searchState.searched && !results.length ? '<div class="bg-white rounded-2xl shadow-sm p-6 text-sm text-gray-400 text-center">没有找到匹配商品，换个关键词再试试吧。</div>' : ''}
+      return `<div class="page-shell compact">
+${renderPageHeader('搜索商品', '按商品名、农户、产地或标签快速查找。', { back: true })}
+<div class="surface-card p-3 mb-4"><div class="flex gap-2"><div class="flex-1 flex items-center gap-2 rounded-[18px] bg-[#F7F3EA] px-3"><i data-lucide="search" class="w-4 h-4 text-gray-400"></i><input id="search-keyword" value="${keywordLabel}" oninput="setSearchKeyword(this.value)" onkeydown="if(event.key==='Enter'){submitSearch()}" placeholder="搜索商品、农户、产地或标签" class="w-full bg-transparent py-3 text-sm outline-none"></div><button onclick="submitSearch()" class="px-4 rounded-[18px] bg-[#3D8B5F] text-white text-sm btn">搜索</button></div>${recentKeywords.length ? `<div class="mt-3 flex items-center justify-between gap-3"><div class="text-xs text-gray-400">最近搜索</div><button onclick="clearRecentSearchKeywords()" class="text-xs text-gray-400">清空</button></div><div class="flex flex-wrap gap-2 mt-2">${recentKeywords.map(function (item) { return `<button onclick='runRecentSearch(${JSON.stringify(String(item))})' class="chip-muted">${escapeHtml(item)}</button>`; }).join('')}</div>` : '<div class="mt-3 text-xs text-gray-400">输入关键字后可按商品名、农户、产地或标签查找。</div>'}</div>
+${searchState.isLoading ? '<div class="surface-card p-6 text-sm text-gray-400 text-center">搜索中，请稍候...</div>' : ''}
+${!searchState.isLoading && searchState.searched && results.length ? `<div class="section-head"><div><div class="section-title">搜索结果</div><div class="section-note">共 ${results.length} 件匹配商品</div></div></div><div class="space-y-3">${results.map(renderSearchResultCard).join('')}</div>` : ''}
+${!searchState.isLoading && searchState.searched && !results.length ? '<div class="surface-card p-6 text-sm text-gray-400 text-center">没有找到匹配商品，换个关键词再试试吧。</div>' : ''}
 </div>`;
     }
 
@@ -3029,39 +3638,60 @@ ${!searchState.isLoading && searchState.searched && !results.length ? '<div clas
       }) || null;
     }
 
+    function renderProductGallery(images) {
+      var list = normalizeProductImageList(images, DEFAULT_PRODUCT_IMAGE);
+      if (list.length <= 1) {
+        return '<img src="' + list[0] + '" class="w-full rounded-t-[24px] h-72 object-cover">';
+      }
+      return '<div class="product-gallery-scroll">'
+        + list.map(function (item, index) {
+          return '<div class="product-gallery-slide"><img src="' + item + '" class="w-full h-72 object-cover" alt="商品图' + (index + 1) + '"></div>';
+        }).join('')
+        + '</div><div class="px-4 py-2 text-xs text-gray-400">左右滑动查看商品图片（共 ' + list.length + ' 张）</div>';
+    }
+
     function product(id) {
       const p = getProds().find(x => x.id === id);
-      if (!p) return '<div class="p-4 text-center">商品不存在</div>';
+      if (!p) return renderEmptyState('📦', '商品不存在', '这个商品可能已下架，先回首页看看其他在售商品吧。', `<button onclick="go('home')" class="px-5 py-3 rounded-[18px] bg-[#3D8B5F] text-white text-sm btn">返回首页</button>`);
+      var productImages = normalizeProductImageList(p.images || [p.img], p.img || DEFAULT_PRODUCT_IMAGE);
       var variants = normalizeProductVariants(p);
       var selectedVariant = getSelectedVariantForProduct(p, { autoSingle: variants.length === 1 });
       var selectedUnit = getSelectedUnitForProduct(p, { autoSingle: selectedVariant ? normalizeVariantUnits(selectedVariant, Number(selectedVariant.sortOrder || 0), p).length === 1 : false });
       const price = selectedUnit ? Number(selectedUnit.price || 0) : (selectedVariant ? Number(selectedVariant.price || 0) : Number(p.price || 0));
       var category = getCategoryMeta(p.cat || getDefaultCategoryId());
       var units = selectedVariant ? normalizeVariantUnits(selectedVariant, Number(selectedVariant.sortOrder || 0), p) : [];
-      var variantHtml = variants.length ? `<div class="bg-white rounded-xl p-4 mb-4">
+      var variantHtml = variants.length ? `<div class="surface-card p-4 mb-4">
 <div class="flex items-center justify-between mb-3"><div class="font-medium">规格选择</div><div class="text-xs ${selectedVariant ? 'text-[#2D9D4E]' : 'text-[#E07B39]'}">${selectedVariant ? ('已选规格：' + selectedVariant.label) : '请先选择规格'}</div></div>
-<div class="flex flex-wrap gap-2">${variants.map(function (variant) { var active = selectedVariant && String(selectedVariant.id || '') === String(variant.id || ''); return `<button type="button" onclick='selectVariant(${p.id}, ${JSON.stringify(String(variant.id || ""))})' class="${active ? 'px-3 py-2 rounded-full text-sm bg-[#2D9D4E] text-white' : 'px-3 py-2 rounded-full text-sm bg-[#F5F0E8] text-gray-600 border border-gray-200'}">${variant.label}<span class="ml-1">${getVariantPriceSummary(variant, p)}</span></button>`; }).join('')}</div>
-${selectedVariant ? `<div class="mt-4 pt-4 border-t border-gray-100"><div class="flex items-center justify-between mb-3"><div class="font-medium">单位选择</div><div class="text-xs ${selectedUnit ? 'text-[#2D9D4E]' : 'text-[#E07B39]'}">${selectedUnit ? ('已选单位：' + selectedUnit.label) : '请继续选择单位'}</div></div><div class="flex flex-wrap gap-2">${units.map(function (unit) { var active = selectedUnit && String(selectedUnit.id || '') === String(unit.id || ''); return `<button type="button" onclick='selectUnit(${p.id}, ${JSON.stringify(String(unit.id || ""))})' class="${active ? 'px-3 py-2 rounded-full text-sm bg-[#E07B39] text-white' : 'px-3 py-2 rounded-full text-sm bg-white text-gray-600 border border-gray-200'}">${unit.label}<span class="ml-1 text-xs ${active ? 'text-white/80' : 'text-gray-400'}">${fmt(unit.price || 0)} · 库存${Number(unit.stock || 0)}</span></button>`; }).join('')}</div><div class="text-xs text-gray-500 mt-3">当前规格价格：${getVariantPriceSummary(selectedVariant, p)} · 当前单位价格：${fmt(selectedUnit ? selectedUnit.price : 0)} · 当前单位库存：${Number(selectedUnit ? selectedUnit.stock : 0)}</div></div>` : ''}
+<div class="flex flex-wrap gap-2">${variants.map(function (variant) { var active = selectedVariant && String(selectedVariant.id || '') === String(variant.id || ''); return `<button type="button" onclick='selectVariant(${p.id}, ${JSON.stringify(String(variant.id || ""))})' class="choice-pill ${active ? 'active' : ''}">${variant.label}<span class="ml-1">${getVariantPriceSummary(variant, p)}</span></button>`; }).join('')}</div>
+${selectedVariant ? `<div class="mt-4 pt-4 border-t border-gray-100"><div class="flex items-center justify-between mb-3"><div class="font-medium">单位选择</div><div class="text-xs ${selectedUnit ? 'text-[#2D9D4E]' : 'text-[#E07B39]'}">${selectedUnit ? ('已选单位：' + selectedUnit.label) : '请继续选择单位'}</div></div><div class="flex flex-wrap gap-2">${units.map(function (unit) { var active = selectedUnit && String(selectedUnit.id || '') === String(unit.id || ''); return `<button type="button" onclick='selectUnit(${p.id}, ${JSON.stringify(String(unit.id || ""))})' class="choice-pill warm ${active ? 'active' : ''}">${unit.label}<span class="ml-1 text-xs ${active ? 'text-white/80' : 'text-gray-400'}">${fmt(unit.price || 0)} · 库存${Number(unit.stock || 0)}</span></button>`; }).join('')}</div><div class="text-xs text-gray-500 mt-3">当前规格价格：${getVariantPriceSummary(selectedVariant, p)} · 当前单位价格：${fmt(selectedUnit ? selectedUnit.price : 0)} · 当前单位库存：${Number(selectedUnit ? selectedUnit.stock : 0)}</div></div>` : ''}
 </div>` : '';
-      return `<div class="p-4">
-<a onclick="back()" class="flex items-center gap-1 text-sm text-gray-500 mb-3"><i data-lucide="arrow-left" class="w-4 h-4"></i>返回</a>
-<img src="${p.img}" class="w-full rounded-xl mb-4">
+      return `<div class="page-shell compact">
+${renderPageHeader('商品详情', '保留当前规格、单位、库存与下单链路，只升级视觉表达。', { back: true })}
+<div class="surface-card overflow-hidden mb-4">
+${renderProductGallery(productImages)}
+<div class="p-4">
 <div class="flex items-center gap-2 mb-1">
 ${getProductTags(p.tags || []).map(renderTagBadge).join('')}
 </div>
-<div class="font-bold text-xl mb-1">${p.name}</div>
-<div class="text-sm text-gray-500 mb-2">${renderCategoryInline(category, p.unit + ' · 已售' + p.sales + ' · 库存' + p.stock, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div>
+<div class="font-bold text-2xl mb-1 text-[#2C3A2D]">${p.name}</div>
+<div class="text-sm text-gray-500 mb-2">${renderCategoryInline(category, '已售' + p.sales + ' · 库存' + p.stock, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div>
 <div class="flex items-baseline gap-2 mb-4">
-<span class="text-[#2D9D4E] font-bold text-3xl">${fmt(price)}</span>
+<span class="text-[#3D8B5F] font-bold text-3xl">${fmt(price)}</span>
 </div>
+<div class="grid grid-cols-3 gap-2 text-center">
+<div class="soft-card p-3"><div class="text-xs text-gray-400">在售状态</div><div class="font-bold text-sm mt-1">${p.off ? '已下架' : '在售'}</div></div>
+<div class="soft-card p-3"><div class="text-xs text-gray-400">销量</div><div class="font-bold text-sm mt-1">${p.sales}</div></div>
+<div class="soft-card p-3"><div class="text-xs text-gray-400">总库存</div><div class="font-bold text-sm mt-1">${p.stock}</div></div>
+</div>
+</div></div>
 ${variantHtml}
-${p.farmer ? `<div class="bg-[#E8F5EC] rounded-xl p-3 mb-4">
+${p.farmer ? `<div class="soft-card p-4 mb-4">
 <div class="flex items-center gap-2">
 <span class="text-2xl">👨‍🌾</span>
 <div><div class="font-medium text-sm">${p.farmer || '待补充'}</div><div class="text-xs text-gray-500">${p.village || '待补充'} · 种植人</div></div>
 <button onclick="pushView('trace',${p.id})" class="ml-auto flex items-center gap-1 text-xs text-[#2D9D4E]">溯源<i data-lucide="chevron-right" class="w-3 h-3"></i></button>
 </div></div>`: ''}
-<div class="bg-white rounded-xl p-4 mb-4">
+<div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">📦 配送信息</div>
 <div class="text-sm text-gray-500">采摘日期: ${p.harvest}</div>
 <div class="text-sm text-gray-500">${p.dispatchHours || 4}小时内发货</div>
@@ -3073,8 +3703,8 @@ ${p.farmer ? `<div class="bg-[#E8F5EC] rounded-xl p-3 mb-4">
     }
 
     function cartPage() {
-      if (!user) return `<div class="p-4 text-center"><div class="text-5xl mb-4">🛒</div><div class="mb-4">登录后查看购物车</div><button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">登录</button></div>`;
-      if (cart.length === 0) return `<div class="p-4 text-center"><div class="text-5xl mb-4">🛒</div><div class="mb-4 text-gray-500">购物车是空的</div><button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">去逛逛</button></div>`;
+      if (!user) return renderEmptyState('🛒', '登录后查看购物车', '当前购物车、地址和优惠券都需要登录态才能同步。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">登录</button>`);
+      if (cart.length === 0) return renderEmptyState('🧺', '购物车还是空的', '先去首页或分类页挑点今天想下单的新鲜货。', `<button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">去逛逛</button>`);
       // 购物车页兼任结算确认页：这里集中展示地址和优惠券选择结果。
       var meta = getUserMeta();
       var address = getSelectedAddress(meta);
@@ -3083,9 +3713,9 @@ ${p.farmer ? `<div class="bg-[#E8F5EC] rounded-xl p-3 mb-4">
       var coupon = getSelectedCoupon(meta, t);
       var discount = calcCouponDiscount(coupon, t);
       const total = Math.max(0, t + delFee - discount);
-      return `<div class="p-4">
-<div class="font-bold text-lg mb-4">购物车 (${cart.length}件)</div>
-<div class="space-y-3 mb-4">${cart.map(function (i) { var product = getProds().find(function (p) { return p.id === i.id; }); var variant = product ? resolveVariantForCartItem(product, i) : null; var unit = product ? resolveUnitForCartItem(product, i, variant) : null; var specLabel = variant && variant.label ? variant.label : (i.variantLabel || '默认规格'); var unitLabel = unit && unit.label ? unit.label : (i.unitLabel || i.unit || specLabel); var stockLabel = unit ? ('单位库存' + Number(unit.stock || 0)) : (variant ? ('规格库存' + Number(variant.stock || 0)) : (product ? ('库存' + Number(product.stock || 0)) : '商品已下架')); return `<div class="bg-white rounded-xl p-3 flex gap-3">
+      return `<div class="page-shell compact">
+${renderPageHeader('购物车', '当前共 ' + cart.length + ' 件商品，结账前可继续调整数量。')}
+<div class="space-y-3 mb-4">${cart.map(function (i) { var product = getProds().find(function (p) { return p.id === i.id; }); var variant = product ? resolveVariantForCartItem(product, i) : null; var unit = product ? resolveUnitForCartItem(product, i, variant) : null; var specLabel = variant && variant.label ? variant.label : (i.variantLabel || '默认规格'); var unitLabel = unit && unit.label ? unit.label : (i.unitLabel || i.unit || specLabel); var stockLabel = unit ? ('单位库存' + Number(unit.stock || 0)) : (variant ? ('规格库存' + Number(variant.stock || 0)) : (product ? ('库存' + Number(product.stock || 0)) : '商品已下架')); return `<div class="surface-card p-3.5 flex gap-3">
 <img src="${i.img}" class="w-16 h-16 rounded-lg object-cover">
 <div class="flex-1"><div class="font-medium text-sm line-clamp-1">${i.name}</div><div class="text-xs text-gray-500">${specLabel} / ${unitLabel} · ${stockLabel}</div>
 <div class="flex items-center justify-between mt-2">
@@ -3095,7 +3725,7 @@ ${p.farmer ? `<div class="bg-[#E8F5EC] rounded-xl p-3 mb-4">
 <span class="text-sm w-5 text-center">${i.qty}</span>
 <button onclick='upd(${i.productId || i.id}, 1, ${JSON.stringify(String(i.variantId || ""))}, ${JSON.stringify(String(i.unitId || ""))})' class="w-7 h-7 bg-[#2D9D4E] text-white rounded-full flex items-center justify-center btn">+</button>
 </div></div></div></div>`; }).join('')}</div>
-<div class="bg-white rounded-xl p-4 mb-20">
+<div class="surface-card p-4 mb-20">
 <div class="flex justify-between items-center text-sm mb-1"><span class="text-gray-500">收货地址</span><button onclick="go('address')" class="text-[#2D9D4E]">${address ? '去修改' : '去添加'}</button></div>
 <div class="text-xs text-gray-500 mb-3">${address ? address.name + ' · ' + address.phone + ' · ' + address.full : '暂无收货地址，请先添加'}</div>
 <div class="flex justify-between items-center text-sm mb-2"><span class="text-gray-500">优惠券</span><button onclick="go('coupon')" class="text-[#2D9D4E]">${coupon ? coupon.name : '去选择'}</button></div>
@@ -3108,23 +3738,23 @@ ${coupon ? `<div class="text-xs text-[#E07B39] mb-2">${getCouponMetaText(coupon)
     }
 
     function confirmOrderPage() {
-      if (!user) return `<div class="p-4 text-center"><div class="mb-4">请先登录后再确认订单</div><button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">去登录</button></div>`;
-      if (!cart.length) return `<div class="p-4 text-center"><div class="mb-4 text-gray-500">购物车为空</div><button onclick="go('cart')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">返回购物车</button></div>`;
+      if (!user) return renderEmptyState('🔐', '请先登录后再确认订单', '登录后才能锁定地址、优惠券和待支付订单。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">去登录</button>`);
+      if (!cart.length) return renderEmptyState('🧺', '购物车为空', '先回购物车或首页挑选商品，再继续确认订单。', `<button onclick="go('cart')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回购物车</button>`);
       var meta = getUserMeta();
       var address = getSelectedAddress(meta);
       var summary = buildCheckoutSummary(meta);
       var validationError = validateCheckoutBeforePayment();
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4"><button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button><div class="font-bold text-lg">确认订单</div></div>
-<div class="bg-white rounded-xl p-4 shadow mb-4">
+      return `<div class="page-shell compact">
+${renderPageHeader('确认订单', address ? '当前将配送到：' + address.name : '请先选择收货地址', { back: true })}
+<div class="surface-card p-4 mb-4">
 <div class="flex justify-between items-center text-sm mb-2"><span class="text-gray-500">收货地址</span><button onclick="go('address')" class="text-[#2D9D4E]">管理地址</button></div>
 ${(meta.addresses || []).length ? `<div class="space-y-2">${meta.addresses.map(function (item) { return `<button onclick="setDefaultAddress('${item.id}')" class="w-full text-left border rounded-xl p-3 ${meta.selectedAddressId === item.id ? 'border-[#2D9D4E] bg-[#E8F5EC]' : 'border-gray-200 bg-[#F9F7F3]'}"><div class="font-medium text-sm">${item.name} · ${item.phone}</div><div class="text-xs text-gray-500 mt-1">${item.full}</div></button>`; }).join('')}</div>` : '<div class="text-sm text-gray-400">暂无收货地址，请先添加</div>'}
 </div>
-<div class="bg-white rounded-xl p-4 shadow mb-4">
+<div class="surface-card p-4 mb-4">
 <div class="font-bold mb-3">商品清单</div>
 <div class="space-y-3">${buildCheckoutItemsSnapshot().map(function (item) { return `<div class="flex gap-3"><img src="${item.img}" class="w-14 h-14 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm">${item.name}</div><div class="text-xs text-gray-500 mt-1">${item.variantLabel || '默认规格'} / ${item.unit || item.unitLabel || '默认单位'} × ${item.qty}</div></div><div class="text-sm font-bold text-[#2D9D4E]">${fmt(item.price * item.qty)}</div></div>`; }).join('')}</div>
 </div>
-<div class="bg-white rounded-xl p-4 shadow">
+<div class="surface-card p-4">
 <div class="flex justify-between items-center text-sm mb-2"><span class="text-gray-500">优惠券</span><button onclick="go('coupon')" class="text-[#2D9D4E]">${summary.coupon ? summary.coupon.name : '去选择'}</button></div>
 ${summary.coupon ? `<div class="text-xs text-[#E07B39] mb-2">${getCouponMetaText(summary.coupon)}</div>` : ''}
 <div class="flex justify-between text-sm mb-2"><span class="text-gray-500">商品金额</span><span>${fmt(summary.subtotal)}</span></div>
@@ -3137,23 +3767,23 @@ ${validationError ? `<div class="text-xs text-[#E07B39] mb-3">${validationError}
     }
 
     function paymentPage() {
-      if (!currentCheckoutOrder) return `<div class="p-4 text-center"><div class="mb-4 text-gray-500">暂无待支付订单</div><button onclick="go('cart')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">返回购物车</button></div>`;
+      if (!currentCheckoutOrder) return renderEmptyState('💳', '暂无待支付订单', '待支付订单创建后会在这里展示支付时效和锁定中的商品。', `<button onclick="go('cart')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回购物车</button>`);
       var reserveText = getPendingOrderReserveText(currentCheckoutOrder);
       var expired = isPendingOrderExpired(currentCheckoutOrder) || currentCheckoutOrder.status !== 'pending';
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4"><button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button><div class="font-bold text-lg">支付订单</div></div>
-<div class="bg-white rounded-xl p-4 shadow mb-4">
+      return `<div class="page-shell compact">
+${renderPageHeader('支付订单', expired ? '这笔待支付订单已超时取消。' : '进入支付即已锁定库存，请在有效期内完成支付。', { back: true })}
+<div class="surface-card p-4 mb-4">
 <div class="text-xs text-gray-500">订单号</div>
 <div class="font-bold mt-1">${currentCheckoutOrder.id}</div>
 <div class="mt-4 text-xs text-gray-500">应付金额</div>
 <div class="text-3xl font-bold text-[#2D9D4E] mt-1">${fmt(currentCheckoutOrder.total)}</div>
 <div class="text-xs ${expired ? 'text-[#E07B39]' : 'text-gray-400'} mt-2">${reserveText || '测试阶段先用按钮模拟 H5 支付完成，后续接入微信 / 支付宝支付。'}</div>
 </div>
-<div class="bg-white rounded-xl p-4 shadow mb-4">
+<div class="surface-card p-4 mb-4">
 <div class="font-bold mb-3">收货地址</div>
 <div class="text-sm text-gray-600">${getAddressSummary(currentCheckoutOrder.address)}</div>
 </div>
-<div class="bg-white rounded-xl p-4 shadow mb-4">
+<div class="surface-card p-4 mb-4">
 <div class="font-bold mb-3">商品与发货地址</div>
 <div class="space-y-3">${(currentCheckoutOrder.items || []).map(function (item) { return `<div class="rounded-xl bg-[#F9F7F3] p-3"><div class="flex gap-3"><img src="${item.img}" class="w-12 h-12 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm">${item.name}</div><div class="text-xs text-gray-500 mt-1">${item.variantLabel || '默认规格'} / ${item.unit || item.unitLabel || '默认单位'} × ${item.qty}</div><div class="text-xs text-gray-500 mt-2">发货地址：${getAddressSummary(item.shippingAddressSnapshot)}</div></div><div class="text-sm font-bold text-[#2D9D4E]">${fmt(item.price * item.qty)}</div></div></div>`; }).join('')}</div>
 </div>
@@ -3163,30 +3793,24 @@ ${expired ? `<div class="bg-[#FFF7ED] text-[#E07B39] rounded-xl p-4 text-sm mb-3
     }
 
     function memberCenter() {
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4">
-<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-<div class="font-bold text-lg">功能说明</div>
-</div>
-<div class="bg-white rounded-xl p-4 mb-4">
+      return `<div class="page-shell compact">
+${renderPageHeader('功能说明', '当前版本聚焦交易闭环与后台可用性，页面说明会随功能迭代同步更新。', { back: true })}
+<div class="surface-card p-4 mb-4">
 <div class="font-bold mb-3">当前说明</div>
 <div class="text-sm text-gray-500 leading-6">当前版本聚焦商品购买、地址、优惠券、角色权限和库存管理能力，页面说明会随功能迭代同步更新。</div>
 </div></div>`;
     }
 
     function ordersPage() {
-      if (!user) return `<div class="p-4 text-center"><div class="text-4xl mb-4">📋</div><button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">登录</button></div>`;
-      if (orders.length === 0) return `<div class="p-4 text-center"><div class="text-5xl mb-4">📦</div><div class="text-gray-500 mb-4">暂无订单</div><button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">去逛逛</button></div>`;
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4">
-<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-<div class="font-bold text-lg">我的订单</div>
-</div>
+      if (!user) return renderEmptyState('📋', '登录后查看订单', '订单、退款和待支付状态都会统一沉淀在这里。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">登录</button>`);
+      if (orders.length === 0) return renderEmptyState('📦', '暂无订单', '先去首页逛逛，下单后这里会展示待支付、发货和退款状态。', `<button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">去逛逛</button>`);
+      return `<div class="page-shell compact">
+${renderPageHeader('我的订单', '统一查看待支付、发货、退款和完成状态。', { back: true })}
 <div class="space-y-3">
 ${orders.map((o, i) => {
         const p = o.items[0];
         var latestRefund = getLatestRefundRequest(o.id, user);
-        return `<div class="bg-white rounded-xl p-3" onclick="pushView('orderDetail',${i})">
+        return `<div class="surface-card p-3.5" onclick="pushView('orderDetail',${i})">
 <div class="flex justify-between text-sm mb-2"><span class="text-gray-500">订单号: ${o.id}</span><span class="${getOrderStatusTone(o.status)}">${getOrderStatusLabel(o.status)}</span></div>
 <div class="flex gap-3"><img src="${p.img}" class="w-14 h-14 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm line-clamp-1">${p.name}${o.items.length > 1 ? `等${o.items.length}件` : ''}</div><div class="text-xs text-gray-500 mt-1">${o.items.length}件 · 实付<span class="text-[#2D9D4E] font-bold">${fmt(o.total)}</span></div></div></div>
 ${o.trackingNo ? `<div class="text-xs text-gray-400 mt-2">物流编号：${o.trackingNo}</div>` : ''}
@@ -3202,15 +3826,12 @@ ${o.status === 'paid' || o.status === 'shipped' ? `<div class="mt-3 flex gap-2">
 
     function orderDetail(idx) {
       const o = orders[idx];
-      if (!o) return '<div class="p-4">订单不存在</div>';
+      if (!o) return renderEmptyState('📦', '订单不存在', '这笔订单可能已被刷新或删除，请返回订单列表重新查看。', `<button onclick="go('orders')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回订单列表</button>`);
       var addrText = o.address ? (o.address.name + ' · ' + o.address.phone + ' · ' + o.address.full) : '暂无地址信息';
       var latestRefund = getLatestRefundRequest(o.id, user);
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4">
-<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-<div class="font-bold text-lg">订单详情</div>
-</div>
-<div class="bg-white rounded-xl p-4 mb-4">
+      return `<div class="page-shell compact">
+${renderPageHeader('订单详情', '商品、地址、物流、退款和待支付时效都在这里集中展示。', { back: true })}
+<div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">订单状态</div>
 <div class="${getOrderStatusTone(o.status)} font-bold">${getOrderStatusLabel(o.status)}</div>
 <div class="text-sm text-gray-500 mt-1">订单号: ${o.id}</div>
@@ -3218,8 +3839,8 @@ ${o.status === 'paid' || o.status === 'shipped' ? `<div class="mt-3 flex gap-2">
 ${o.status === 'pending' ? `<div class="text-sm ${isPendingOrderExpired(o) ? 'text-[#E07B39]' : 'text-gray-500'}">${getPendingOrderReserveText(o)}</div>` : ''}
 ${o.trackingNo ? `<div class="text-sm text-gray-500">物流编号: ${o.trackingNo}</div>` : ''}
 </div>
-${latestRefund ? `<div class="bg-white rounded-xl p-4 mb-4"><div class="font-medium mb-2">退款处理</div><div class="${getRefundStatusTone(latestRefund.status)} font-bold">${getRefundStatusLabel(latestRefund.status)}</div><div class="text-sm text-gray-500 mt-2">退款原因：${latestRefund.reason || '未填写'}</div>${latestRefund.rejectReason ? `<div class="text-sm text-red-500 mt-2">驳回原因：${latestRefund.rejectReason}</div>` : ''}${latestRefund.completedAt ? `<div class="text-sm text-gray-500 mt-2">完成时间：${new Date(latestRefund.completedAt).toLocaleString('zh-CN')}</div>` : ''}</div>` : ''}
-<div class="bg-white rounded-xl p-4 mb-4">
+${latestRefund ? `<div class="surface-card p-4 mb-4"><div class="font-medium mb-2">退款处理</div><div class="${getRefundStatusTone(latestRefund.status)} font-bold">${getRefundStatusLabel(latestRefund.status)}</div><div class="text-sm text-gray-500 mt-2">退款原因：${latestRefund.reason || '未填写'}</div>${latestRefund.rejectReason ? `<div class="text-sm text-red-500 mt-2">驳回原因：${latestRefund.rejectReason}</div>` : ''}${latestRefund.completedAt ? `<div class="text-sm text-gray-500 mt-2">完成时间：${new Date(latestRefund.completedAt).toLocaleString('zh-CN')}</div>` : ''}</div>` : ''}
+<div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">商品清单</div>
 ${o.items.map(i => `<div class="flex gap-3 py-2 border-b last:border-0">
 <img src="${i.img}" class="w-12 h-12 rounded-lg object-cover">
@@ -3228,11 +3849,11 @@ ${o.items.map(i => `<div class="flex gap-3 py-2 border-b last:border-0">
 </div>`).join('')}
 <div class="flex justify-between font-bold mt-3 pt-3 border-t"><span>实付金额</span><span class="text-[#2D9D4E]">${fmt(o.total)}</span></div>
 </div>
-${o.status === 'shipped' ? `<div class="bg-[#E8F5EC] rounded-xl p-4 mb-4">
+${o.status === 'shipped' ? `<div class="soft-card p-4 mb-4">
 <div class="font-medium text-[#2D9D4E] mb-2">📍 物流信息</div>
 <div class="text-sm text-gray-600">物流编号：${o.trackingNo || '待补充'}</div>
 </div>`: ''}
-<div class="bg-white rounded-xl p-4 mb-4">
+<div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">收货地址</div>
 <div class="text-sm text-gray-500">${addrText}</div>
 </div>
@@ -3245,19 +3866,16 @@ ${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full
 
     function tracePage(id) {
       const p = getProds().find(x => x.id === id);
-      if (!p) return '<div class="p-4">商品不存在</div>';
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4">
-<button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-<div class="font-bold text-lg">溯源档案</div>
-</div>
+      if (!p) return renderEmptyState('🌿', '商品不存在', '没有找到对应的溯源内容，先返回商品列表看看其他商品。', `<button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回首页</button>`);
+      return `<div class="page-shell compact">
+${renderPageHeader('溯源档案', '当前阶段只展示来源信息，不扩展为完整时间轴系统。', { back: true })}
 <div class="bg-gradient-to-r from-[#E8F5EC] to-[#F5F0E8] rounded-xl p-4 mb-4">
 <div class="flex items-center gap-3">
 <img src="${p.img}" class="w-12 h-12 rounded-lg object-cover">
 <div class="flex-1"><div class="font-bold">${p.name}</div><div class="text-xs text-gray-500">只展示来源信息，不展示物流节点</div></div>
 </div>
 </div>
-<div class="bg-white rounded-xl p-4 space-y-3">
+<div class="surface-card p-4 space-y-3">
 <div><div class="text-sm text-gray-500 mb-1">来源产地</div><div class="font-medium">${p.village || '待补充'}</div></div>
 <div><div class="text-sm text-gray-500 mb-1">种植 / 供货人</div><div class="font-medium">${p.farmer || '待补充'}</div></div>
 <div><div class="text-sm text-gray-500 mb-1">采摘日期</div><div class="font-medium">${p.harvest}</div></div>
@@ -3266,23 +3884,11 @@ ${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full
     }
 
     function loginPage() {
-      return `<div class="p-4 max-w-sm mx-auto">
-<div class="font-bold text-2xl mb-6 text-center">🌾 日精月华</div>
-<div class="text-center text-gray-500 text-sm mb-6">登录后管理订单、地址和优惠券</div>
-<input id="lu" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3">
-<input id="lp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4">
-<button onclick="doLogin()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">登录</button>
-<div class="text-center mt-4 text-sm text-gray-500">没有账号? <button onclick="go('register')" class="text-[#2D9D4E] font-medium">立即注册</button></div></div>`;
+      return `<div class="page-shell compact"><div class="auth-card max-w-sm mx-auto p-6"><div class="text-center"><div class="text-4xl mb-4">🌾</div><div class="font-bold text-2xl">日精月华</div><div class="text-center text-gray-500 text-sm mt-3 mb-6">登录后管理订单、地址和优惠券</div></div><input id="lu" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3 bg-white/80"><input id="lp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4 bg-white/80"><button onclick="doLogin()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">登录</button><div class="text-center mt-4 text-sm text-gray-500">没有账号? <button onclick="go('register')" class="text-[#2D9D4E] font-medium">立即注册</button></div></div></div>`;
     }
 
     function registerPage() {
-      return `<div class="p-4 max-w-sm mx-auto">
-<div class="font-bold text-2xl mb-6 text-center">🌾 加入日精月华</div>
-<div class="text-center text-gray-500 text-sm mb-6">注册后即可下单、配置地址与使用优惠券</div>
-<input id="ru" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3">
-<input id="rp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4">
-<button onclick="doRegister()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">注册并登录</button>
-<div class="text-center mt-4 text-sm text-gray-500">已有账号? <button onclick="go('login')" class="text-[#2D9D4E] font-medium">立即登录</button></div></div>`;
+      return `<div class="page-shell compact"><div class="auth-card max-w-sm mx-auto p-6"><div class="text-center"><div class="text-4xl mb-4">🌱</div><div class="font-bold text-2xl">加入日精月华</div><div class="text-center text-gray-500 text-sm mt-3 mb-6">注册后即可下单、配置地址与使用优惠券</div></div><input id="ru" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3 bg-white/80"><input id="rp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4 bg-white/80"><button onclick="doRegister()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">注册并登录</button><div class="text-center mt-4 text-sm text-gray-500">已有账号? <button onclick="go('login')" class="text-[#2D9D4E] font-medium">立即登录</button></div></div></div>`;
     }
 
     // === ACTIONS ===
@@ -3346,20 +3952,21 @@ ${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full
 
     // [BUYER_PROFILE] 买家个人中心、地址簿、优惠券页与地址自动保存逻辑都在本段。
     function profile() {
-      if (!user) return '<div class="p-4 text-center"><div class="text-5xl mb-4">👤</div><div class="mb-4">登录后查看个人信息</div><button onclick="go(\'login\')" class="bg-[#2D9D4E] text-white px-6 py-2 rounded-xl">登录</button></div>';
+      if (!user) return renderEmptyState('👤', '登录后查看个人信息', '登录后可统一管理订单、地址、优惠券和角色入口。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">登录</button>`);
       var role = getUserRole();
-      var farmerBtn = canAccessFarmerPanel() ? '<button onclick="go(\'farmer\')" class="w-full p-4 bg-[#FCEBD8] text-[#E07B39] font-medium rounded-xl mb-3">👨🌾 进入农户端</button>' : '';
-      var adminBtn = canAccessAdminPanel() ? '<button onclick="go(\'admin\')" class="w-full p-4 bg-[#E8F5EC] text-[#2D9D4E] font-medium rounded-xl mb-3">🔧 进入管理端</button>' : '';
+      var farmerBtn = canAccessFarmerPanel() ? '<button onclick="go(\'farmer\')" class="w-full p-4 bg-[#FCEBD8] text-[#E07B39] font-medium rounded-xl mb-3 btn">👨🌾 进入农户端</button>' : '';
+      var adminBtn = canAccessAdminPanel() ? '<button onclick="go(\'admin\')" class="w-full p-4 bg-[#E8F5EC] text-[#2D9D4E] font-medium rounded-xl mb-3 btn">🔧 进入管理端</button>' : '';
       var meta = getUserMeta();
       var address = getSelectedAddress(meta);
       var availableCoupon = (meta.coupons || []).filter(function (item) { return !item.used; }).length;
       var orderCount = orders ? orders.length : 0;
-      var h = '<div class="p-4">';
-      h += '<div class="bg-white rounded-xl p-4 mb-4"><div class="flex items-center gap-3 mb-3"><div class="w-14 h-14 rounded-full bg-[#E8F5EC] flex items-center justify-center text-2xl">🌾</div><div class="flex-1"><div class="flex items-center gap-2 flex-wrap"><div class="font-bold text-lg">' + user + '</div>' + getRoleBadgeHtml({ roles: role }) + '</div><div class="text-xs text-gray-400 mt-1">注册时间：' + (meta.createdAt || '待记录') + '</div></div></div><div class="bg-[#F5F0E8] rounded-lg p-3"><div class="flex justify-between text-xs mb-1"><span class="text-gray-500">累计消费</span><span>¥' + Number(member.totalSpent || 0).toFixed(2) + '</span></div><div class="text-xs text-gray-500 mt-2">当前版本已开放商品购买、地址、优惠券、角色权限和库存管理能力</div></div></div>';
-      h += '<div class="bg-white rounded-xl divide-y mb-4"><button onclick="go(\'orders\')" class="w-full p-4 flex justify-between"><span>我的订单</span><span class="text-gray-400">' + orderCount + '笔 ›</span></button><button onclick="go(\'address\')" class="w-full p-4 flex justify-between"><span>收货地址</span><span class="text-gray-400">' + (address ? address.name + ' ›' : '去添加 ›') + '</span></button><button onclick="go(\'coupon\')" class="w-full p-4 flex justify-between"><span>优惠券</span><span class="text-gray-400">' + availableCoupon + '张可用 ›</span></button></div>';
+      var h = '<div class="page-shell compact">';
+      h += renderPageHeader('我的', '把订单、地址、优惠券和后台入口都收在这里。');
+      h += '<div class="hero-card mb-4"><div class="p-4 relative z-[1]"><div class="flex items-center gap-3 mb-3"><div class="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center text-2xl">🌾</div><div class="flex-1"><div class="flex items-center gap-2 flex-wrap"><div class="font-bold text-lg">' + user + '</div>' + getRoleBadgeHtml({ roles: role }) + '</div><div class="text-xs text-white/75 mt-1">注册时间：' + (meta.createdAt || '待记录') + '</div></div></div><div class="grid grid-cols-2 gap-3"><div class="bg-white/12 rounded-2xl p-3"><div class="text-xs text-white/70">累计消费</div><div class="text-xl font-bold mt-1">¥' + Number(member.totalSpent || 0).toFixed(2) + '</div></div><div class="bg-white/12 rounded-2xl p-3"><div class="text-xs text-white/70">可用优惠券</div><div class="text-xl font-bold mt-1">' + availableCoupon + ' 张</div></div></div></div></div>';
+      h += '<div class="surface-card divide-y mb-4"><button onclick="go(\'orders\')" class="w-full p-4 flex justify-between"><span>我的订单</span><span class="text-gray-400">' + orderCount + '笔 ›</span></button><button onclick="go(\'address\')" class="w-full p-4 flex justify-between"><span>收货地址</span><span class="text-gray-400">' + (address ? address.name + ' ›' : '去添加 ›') + '</span></button><button onclick="go(\'coupon\')" class="w-full p-4 flex justify-between"><span>优惠券</span><span class="text-gray-400">' + availableCoupon + '张可用 ›</span></button></div>';
       h += farmerBtn;
       h += adminBtn;
-      h += '<button onclick="logout()" class="w-full p-3 bg-gray-100 rounded-xl text-gray-500">退出登录</button></div>';
+      h += '<button onclick="logout()" class="w-full p-3 bg-gray-100 rounded-xl text-gray-500 btn">退出登录</button></div>';
       return h;
     }
 
@@ -3433,13 +4040,13 @@ ${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full
       var ui = getAddressEditorUi(scope);
       var prefix = mode === 'edit' ? ui.prefixEdit : ui.prefixNew;
       var title = mode === 'edit' ? ui.editTitle : ui.newTitle;
-      return '<div class="bg-white rounded-xl p-4 shadow mt-3"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">' + title + '</div><div class="text-xs text-gray-400 mt-1">' + ui.description + '</div></div><button onclick="closeAddressEditor(\'' + scope + '\')" class="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-500">收起</button></div><input id="' + prefix + '-name" value="' + (item.name || '') + '" placeholder="' + ui.namePlaceholder + '" class="w-full p-2 border rounded-lg mb-2 text-sm"><input id="' + prefix + '-phone" value="' + (item.phone || '') + '" placeholder="' + ui.phonePlaceholder + '" class="w-full p-2 border rounded-lg mb-2 text-sm"><textarea id="' + prefix + '-full" placeholder="' + ui.fullPlaceholder + '" class="w-full p-2 border rounded-lg mb-3 text-sm h-24 resize-none">' + (item.full || '') + '</textarea><div class="grid grid-cols-2 gap-2"><button onclick="' + (scope === 'receiver' ? 'addAddress()' : 'addShippingAddress(\'' + scope + '\')') + '" class="py-2 rounded-lg text-sm ' + ui.buttonClass + '">' + ui.saveText + '</button><button onclick="closeAddressEditor(\'' + scope + '\')" class="py-2 rounded-lg text-sm border text-gray-500">取消</button></div></div>';
+      return '<div class="surface-card p-4 mt-3"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">' + title + '</div><div class="text-xs text-gray-400 mt-1">' + ui.description + '</div></div><button onclick="closeAddressEditor(\'' + scope + '\')" class="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-500">收起</button></div><input id="' + prefix + '-name" value="' + (item.name || '') + '" placeholder="' + ui.namePlaceholder + '" class="w-full p-2 border rounded-lg mb-2 text-sm"><input id="' + prefix + '-phone" value="' + (item.phone || '') + '" placeholder="' + ui.phonePlaceholder + '" class="w-full p-2 border rounded-lg mb-2 text-sm"><textarea id="' + prefix + '-full" placeholder="' + ui.fullPlaceholder + '" class="w-full p-2 border rounded-lg mb-3 text-sm h-24 resize-none">' + (item.full || '') + '</textarea><div class="grid grid-cols-2 gap-2"><button onclick="' + (scope === 'receiver' ? 'addAddress()' : 'addShippingAddress(\'' + scope + '\')') + '" class="py-2 rounded-lg text-sm ' + ui.buttonClass + '">' + ui.saveText + '</button><button onclick="closeAddressEditor(\'' + scope + '\')" class="py-2 rounded-lg text-sm border text-gray-500">取消</button></div></div>';
     }
     function renderAddressCreateCard(scope) {
       var state = getAddressEditorState(scope);
       var ui = getAddressEditorUi(scope);
       if (state.mode === 'new') return renderAddressEditorForm(scope, {}, 'new');
-      return '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-center justify-between gap-3"><div><div class="font-bold">' + ui.newTitle + '</div><div class="text-xs text-gray-400 mt-1">' + ui.description + '</div></div><button onclick="openAddressEditor(\'' + scope + '\',\'new\')" class="text-xs px-3 py-2 rounded-full ' + ui.ghostClass + '">新增</button></div></div>';
+      return '<div class="surface-card p-4"><div class="flex items-center justify-between gap-3"><div><div class="font-bold">' + ui.newTitle + '</div><div class="text-xs text-gray-400 mt-1">' + ui.description + '</div></div><button onclick="openAddressEditor(\'' + scope + '\',\'new\')" class="text-xs px-3 py-2 rounded-full ' + ui.ghostClass + '">新增</button></div></div>';
     }
     function renderAddressItemCard(scope, item, options) {
       var ui = getAddressEditorUi(scope);
@@ -3452,7 +4059,7 @@ ${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full
       var deleteAction = scope === 'receiver'
         ? 'deleteReceiverAddress(\'' + item.id + '\')'
         : 'deleteShippingAddress(\'' + scope + '\',\'' + item.id + '\')';
-      var body = '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-start justify-between gap-3"><div class="flex-1"><div class="font-medium text-sm">' + item.name + ' · ' + item.phone + '</div><div class="text-xs text-gray-500 mt-2">' + item.full + '</div></div><div class="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">' + defaultButton + '<button onclick="openAddressEditor(\'' + scope + '\',\'edit\',\'' + item.id + '\')" class="text-xs px-3 py-1 rounded-full ' + ui.ghostClass + '">修改</button><button onclick="' + deleteAction + '" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500">删除</button></div></div>';
+      var body = '<div class="surface-card p-4"><div class="flex items-start justify-between gap-3"><div class="flex-1"><div class="font-medium text-sm">' + item.name + ' · ' + item.phone + '</div><div class="text-xs text-gray-500 mt-2">' + item.full + '</div></div><div class="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">' + defaultButton + '<button onclick="openAddressEditor(\'' + scope + '\',\'edit\',\'' + item.id + '\')" class="text-xs px-3 py-1 rounded-full ' + ui.ghostClass + '">修改</button><button onclick="' + deleteAction + '" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500">删除</button></div></div>';
       if (isEditing) body += renderAddressEditorForm(scope, item, 'edit');
       body += '</div>';
       return body;
@@ -3460,22 +4067,22 @@ ${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full
 
     // 买家地址管理改成表单录入，保证录入校验和默认地址选择都留在同一页完成。
     function addressPage() {
-      if (!user) return '<div class="p-4 text-center">请先登录</div>';
+      if (!user) return renderEmptyState('📍', '请先登录', '登录后即可维护收货地址，并在确认订单时直接选择。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">去登录</button>`);
       var meta = getUserMeta();
       var list = meta.addresses || [];
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4"><button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button><div class="font-bold text-lg">收货地址</div></div>
-<div class="space-y-3 mb-4">${list.length ? list.map(function (item) { return renderAddressItemCard('receiver', item, { isDefault: meta.selectedAddressId === item.id }); }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400">' + getAddressEditorUi('receiver').emptyText + '</div>'}</div>
+      return `<div class="page-shell compact">
+${renderPageHeader('收货地址', '支持默认地址、展开修改和删除，结账时会直接复用。', { back: true })}
+<div class="space-y-3 mb-4">${list.length ? list.map(function (item) { return renderAddressItemCard('receiver', item, { isDefault: meta.selectedAddressId === item.id }); }).join('') : '<div class="surface-card p-4 text-sm text-gray-400">' + getAddressEditorUi('receiver').emptyText + '</div>'}</div>
 ${renderAddressCreateCard('receiver')}</div>`;
     }
 
     function couponPage() {
-      if (!user) return '<div class="p-4 text-center">请先登录</div>';
+      if (!user) return renderEmptyState('🎟', '请先登录', '登录后即可查看后台发放的优惠券，并在结账时选择使用。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">去登录</button>`);
       var meta = getUserMeta();
       var list = meta.coupons || [];
-      return `<div class="p-4">
-<div class="flex items-center gap-3 mb-4"><button onclick="back()" class="p-1"><i data-lucide="arrow-left" class="w-5 h-5"></i></button><div class="font-bold text-lg">优惠券</div></div>
-<div class="text-xs text-gray-500 mb-3">优惠券由后台配置后自动发放，结算时可直接选择。</div><div class="space-y-3">${list.length ? list.map(function (item) { return `<button onclick="selectCoupon('${item.id}')" class="w-full text-left rounded-xl p-4 ${item.used ? 'bg-gray-100 text-gray-400' : 'bg-white'} border ${meta.selectedCouponId === item.id ? 'border-[#E07B39]' : 'border-transparent'}"><div class="flex justify-between"><div class="font-bold text-lg">${item.name}</div><div class="text-sm">${item.used ? '已使用' : getCouponBenefitText(item)}</div></div><div class="text-xs mt-2">${item.used ? '该券已失效' : (meta.selectedCouponId === item.id ? '当前已选中 · ' + getCouponTypeLabel(item.type) : '点击即可设为本次结算优惠券')}</div></button>`; }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400">暂无优惠券</div>'}</div></div>`;
+      return `<div class="page-shell compact">
+${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只在结账环节通过优惠券体现。', { back: true })}
+<div class="text-xs text-gray-500 mb-3">优惠券由后台配置后自动发放，结算时可直接选择。</div><div class="space-y-3">${list.length ? list.map(function (item) { return `<button onclick="selectCoupon('${item.id}')" class="w-full text-left rounded-xl p-4 ${item.used ? 'bg-gray-100 text-gray-400' : 'bg-white'} border ${meta.selectedCouponId === item.id ? 'border-[#E07B39]' : 'border-transparent'} surface-card"><div class="flex justify-between"><div class="font-bold text-lg">${item.name}</div><div class="text-sm">${item.used ? '已使用' : getCouponBenefitText(item)}</div></div><div class="text-xs mt-2">${item.used ? '该券已失效' : (meta.selectedCouponId === item.id ? '当前已选中 · ' + getCouponTypeLabel(item.type) : '点击即可设为本次结算优惠券')}</div></button>`; }).join('') : '<div class="surface-card p-4 text-sm text-gray-400">暂无优惠券</div>'}</div></div>`;
     }
 
     // [ADDRESS_AUTOSAVE] 收货地址与发货地址的草稿识别、ID 覆盖和静默自动保存都在这里。
@@ -4332,7 +4939,8 @@ ${renderAddressCreateCard('receiver')}</div>`;
       var prods = getProds();
       var pend = allOrders.filter(function (o) { return o.status === "paid" || o.status === "pending"; });
       var pendingRefunds = getRefundRequests().filter(function (item) { return item.status === 'pending'; });
-      var h = '<div class="grid grid-cols-2 gap-3 mb-4">';
+      var h = '<div class="workspace-banner mb-4"><div class="text-xs text-white/75 mb-2">经营总览</div><div class="text-xl font-bold">先看今日订单、退款和库存，再进入明细工作台</div><div class="text-sm text-white/80 mt-2">本轮只统一视觉，不改变退款、库存和交易台账的真实逻辑。</div></div>';
+      h += '<div class="grid grid-cols-2 gap-3 mb-4">';
       h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#2D9D4E]">' + todays + '</div><div class="text-xs text-gray-500 mt-1">今日订单</div></div>';
       h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#E07B39]">¥' + gmv.toFixed(0) + '</div><div class="text-xs text-gray-500 mt-1">累计GMV</div></div>';
       h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#2D9D4E]">' + us + '</div><div class="text-xs text-gray-500 mt-1">用户数</div></div>';
@@ -4402,7 +5010,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
           : ledgerRows.map(function (item) {
             return '<div class="rounded-xl bg-[#F9F7F3] p-3 mb-2"><div class="flex justify-between gap-3"><div><div class="font-medium text-sm">' + (item.productName || ('商品#' + item.productId)) + '</div><div class="text-xs text-gray-500 mt-1">' + (item.operatorUsername || 'system') + ' · ' + item.actionType + '</div></div><div class="text-right"><div class="font-bold text-sm text-[#2D9D4E]">' + (item.deltaStock > 0 ? '+' : '') + item.deltaStock + ' / 销量 ' + (item.deltaSales > 0 ? '+' : '') + item.deltaSales + '</div><div class="text-xs text-gray-400 mt-1">' + formatDateTimeLabel(item.createdAt) + '</div></div></div><div class="text-xs text-gray-500 mt-2">库存：' + item.beforeStock + ' → ' + item.afterStock + '</div><div class="text-xs text-gray-500 mt-1">订单：' + (item.orderId || '无') + '</div><div class="text-xs text-gray-500 mt-1">备注：' + (item.note || '无') + '</div></div>';
           }).join('');
-      var h = '<div class="flex items-center justify-between mb-3"><div><div class="font-bold">退款工作台</div><div class="text-xs text-gray-500 mt-1">主入口处理退款，并联动查看支付 / 售后 / 库存台账</div></div><button onclick="loadAdminRefundWorkspace().catch(function(error){alert(error.message||\'退款工作台加载失败\')})" class="px-3 py-2 rounded-full bg-[#2D9D4E] text-white text-xs">刷新</button></div>';
+      var h = '<div class="flex items-center justify-between mb-3"><div><div class="font-bold">退款工作台</div><div class="text-xs text-gray-500 mt-1">主入口处理退款，并联动查看支付 / 售后 / 库存台账</div></div><button onclick="loadAdminRefundWorkspace().catch(function(error){alert(error.message||\'退款工作台加载失败\')})" class="px-3 py-2 rounded-full bg-[#2D9D4E] text-white text-xs btn">刷新</button></div>';
       h += '<div class="grid grid-cols-3 gap-3 mb-4"><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">待处理退款</div><div class="text-2xl font-bold text-[#E07B39] mt-2">' + pendingRefunds.length + '</div></div><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">已退款</div><div class="text-2xl font-bold text-[#2D9D4E] mt-2">' + completedRefunds.length + '</div></div><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">已驳回</div><div class="text-2xl font-bold text-red-500 mt-2">' + rejectedRefunds.length + '</div></div></div>';
       h += '<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="font-bold mb-3">退款筛选</div><div class="grid grid-cols-2 gap-2"><select id="refund-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ' + (adminRefundFilters.status === 'pending' ? 'selected' : '') + '>待处理</option><option value="completed" ' + (adminRefundFilters.status === 'completed' ? 'selected' : '') + '>已退款</option><option value="rejected" ' + (adminRefundFilters.status === 'rejected' ? 'selected' : '') + '>已驳回</option></select><input id="refund-filter-order" value="' + (adminRefundFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="refund-filter-owner" value="' + (adminRefundFilters.ownerUsername || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><input id="refund-filter-date-from" type="date" value="' + (adminRefundFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="refund-filter-date-to" type="date" value="' + (adminRefundFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div><div class="flex gap-2 mt-3"><button onclick="applyAdminRefundFilters()" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">查询退款</button><button onclick="resetAdminRefundFilters()" class="flex-1 py-2 rounded-lg border text-sm">重置</button></div></div>';
       h += '<div class="mb-4">' + (refundCards || '<div class="bg-white rounded-xl p-4 shadow text-sm text-gray-400">没有匹配的退款记录</div>') + '</div>';
@@ -4415,7 +5023,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
     }
     function renderAdminPd() {
       var prods = getProds();
-      var h = '<div class="flex justify-between items-center mb-3"><div class="font-bold">商品列表</div><button onclick="showAddProdForm()" class="bg-[#2D9D4E] text-white text-xs px-3 py-1 rounded-full">+ 新增</button></div>';
+      var h = '<div class="flex justify-between items-center mb-3"><div><div class="font-bold">商品列表</div><div class="text-xs text-gray-500 mt-1">统一维护商品、规格、单位、库存和发货地址</div></div><button onclick="showAddProdForm()" class="bg-[#2D9D4E] text-white text-xs px-3 py-1 rounded-full btn">+ 新增</button></div>';
       h += '<div id="add-prod-form" class="hidden bg-white rounded-xl p-4 shadow mb-3">' + renderProductFormFields('new', createProductDraft({ farmer: '待设置' }), true) + '<div class="flex gap-2 mt-3"><button onclick="saveNewProduct()" class="flex-1 bg-[#2D9D4E] text-white py-2 rounded-lg text-sm">保存</button><button onclick="showAddProdForm()" class="flex-1 border py-2 rounded-lg text-sm">取消</button></div></div>';
       h += prods.map(function (p) {
         return renderProductEditorCard(p, {
@@ -4433,7 +5041,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
     function renderAdminOd() {
       var allOrders = getAllOrders();
       if (!allOrders.length) { document.getElementById('admin-od').innerHTML = "<div class='text-center py-8 text-gray-400'>暂无订单</div>"; return; }
-      var h = '<div class="font-bold mb-3">订单管理</div>';
+      var h = '<div class="mb-3"><div class="font-bold">订单管理</div><div class="text-xs text-gray-500 mt-1">查看待支付、待发货、退款和物流状态，不改变原有处理权限。</div></div>';
       h += allOrders.map(function (o) {
         var latestRefund = getLatestRefundRequest(o.id, o.owner);
         var statusControl = o.status === 'refund_pending'
@@ -4448,7 +5056,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
     function renderAdminShip() {
       var meta = getUserMeta();
       var list = meta.shippingAddresses || [];
-      var h = '<div class="font-bold mb-3">发货地址维护</div>';
+      var h = '<div class="mb-3"><div class="font-bold">发货地址维护</div><div class="text-xs text-gray-500 mt-1">商品会绑定这里维护的发货地址快照。</div></div>';
       h += '<div class="space-y-3 mb-4">' + (list.length ? list.map(function (item) {
         return renderAddressItemCard('admin', item);
       }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400 shadow">' + getAddressEditorUi('admin').emptyText + '</div>') + '</div>';
@@ -4526,9 +5134,13 @@ ${renderAddressCreateCard('receiver')}</div>`;
       ]);
     }
     function buildComparableProductPayload(payload) {
+      var imageList = normalizeProductImageList(payload.images || [payload.img], payload.img || DEFAULT_PRODUCT_IMAGE);
+      var coverImage = resolveProductCoverImage(imageList, payload.img || imageList[0]);
       return JSON.stringify({
         name: payload.name || '',
         price: Number(payload.price || 0),
+        img: coverImage,
+        images: imageList,
         unit: payload.unit || '',
         variants: normalizeProductVariants(payload).map(function (item) { return Object.assign({}, item); }),
         cat: payload.cat || '',
@@ -4560,6 +5172,90 @@ ${renderAddressCreateCard('receiver')}</div>`;
         alert(error.message || '商品状态更新失败');
       }
     }
+
+    function formatProductDeleteImpactMessage(productName, impact) {
+      var statusOrder = ['pending', 'paid', 'shipped', 'done', 'cancelled', 'refund_pending', 'refunded'];
+      var counts = (impact && Array.isArray(impact.statusCounts) ? impact.statusCounts.slice() : []).sort(function (a, b) {
+        var aIndex = statusOrder.indexOf(String(a && a.status || ''));
+        var bIndex = statusOrder.indexOf(String(b && b.status || ''));
+        if (aIndex < 0 && bIndex < 0) return String(a && a.status || '').localeCompare(String(b && b.status || ''));
+        if (aIndex < 0) return 1;
+        if (bIndex < 0) return -1;
+        return aIndex - bIndex;
+      });
+      var lines = [
+        '将删除商品：' + (productName || '未命名商品'),
+        '已有 ' + Number(impact && impact.totalOrders || 0) + ' 个订单购买过该商品。'
+      ];
+      if (counts.length) {
+        lines.push('订单状态分布：');
+        counts.forEach(function (item) {
+          lines.push(' - ' + getOrderStatusLabel(item.status || '') + '：' + Number(item.count || 0) + ' 单');
+        });
+      } else {
+        lines.push('当前没有订单购买记录。');
+      }
+      lines.push('删除后仍可正常走退款流程；该商品库存将不再追踪。');
+      lines.push('确认继续删除吗？');
+      return lines.join('\n');
+    }
+
+    async function fetchProductDeleteImpact(productId) {
+      var response = await fetch('/api/products/' + encodeURIComponent(String(productId || '')) + '/delete-impact');
+      if (!response.ok) {
+        var errorText = '获取商品删除影响失败';
+        try {
+          var payload = await response.json();
+          if (payload && payload.message) errorText = payload.message;
+        } catch (e) { }
+        throw new Error(errorText);
+      }
+      return response.json();
+    }
+
+    async function confirmDeleteProduct(productId, source) {
+      var id = Number(productId || 0);
+      if (!(id > 0)) return;
+      var product = getProds().find(function (item) { return Number(item.id || 0) === id; });
+      if (!product) {
+        alert('商品不存在或已删除');
+        return;
+      }
+      try {
+        var impact = await fetchProductDeleteImpact(id);
+        var message = formatProductDeleteImpactMessage(product.name, impact);
+        if (!confirm(message)) return;
+        var response = await fetch('/api/products/' + encodeURIComponent(String(id)), {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            _audit: createAuditMeta({
+              actionType: 'product_delete',
+              operatorRole: source === 'farmer' ? 'farmer' : 'admin',
+              note: source === 'farmer' ? '农户删除商品，保留历史订单快照' : '管理员删除商品，保留历史订单快照'
+            })
+          })
+        });
+        if (!response.ok) {
+          var errorText = '商品删除失败';
+          try {
+            var errorPayload = await response.json();
+            if (errorPayload && errorPayload.message) errorText = errorPayload.message;
+          } catch (e) { }
+          throw new Error(errorText);
+        }
+        await refreshPersistedEntities({ products: true, orders: true, refunds: true });
+        if (source === 'farmer') showFarmerPanel();
+        else {
+          renderAdminPd();
+          renderAdminDb();
+        }
+        alert('商品已删除');
+      } catch (error) {
+        alert(error.message || '商品删除失败');
+      }
+    }
+
     function adjustStock(id, delta) {
       var ps = getProds();
       var p = ps.find(function (x) { return x.id === id; });
@@ -4619,15 +5315,18 @@ ${renderAddressCreateCard('receiver')}</div>`;
           farmerAccount: source === 'farmer' ? user : (p.farmerAccount || ''),
           farmerUserId: source === 'farmer' ? Number((getUserRecord(user) && getUserRecord(user).id) || 0) : Number(p.farmerUserId || 0),
           village: draft.village,
+          images: draft.images,
+          img: draft.img,
           shippingAddressId: shippingSelection.shippingAddressId,
           shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot,
           harvest: draft.harvest,
           dispatchHours: draft.dispatchHours
         });
         if (!hasExistingProductDraftChanges(p, comparablePayload, imageSelected)) return false;
-        var img = await getImageFromInputAsync(prefix + '-img', p.img || DEFAULT_PRODUCT_IMAGE, 'products');
+        var imageState = await resolveProductImagesForSave(prefix, p);
         var payload = Object.assign({}, comparablePayload, {
-          img: img
+          images: imageState.images,
+          img: imageState.cover
         });
         await saveProductToServer(withProductAudit(payload, {
           actionType: 'manual_adjust',
@@ -4662,8 +5361,8 @@ ${renderAddressCreateCard('receiver')}</div>`;
         return false;
       }
       try {
-        var img = await getImageFromInputAsync('new-img', DEFAULT_PRODUCT_IMAGE, 'products');
-        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, img: img, tags: draft.tags, sales: 0, farmer: draft.farmer, farmerAccount: '', farmerUserId: 0, village: draft.village, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
+        var imageState = await resolveProductImagesForSave('new', draft);
+        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, images: imageState.images, img: imageState.cover, tags: draft.tags, sales: 0, farmer: draft.farmer, farmerAccount: '', farmerUserId: 0, village: draft.village, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
           actionType: 'create',
           operatorRole: 'admin',
           note: '管理员新增商品并初始化库存'
@@ -4701,8 +5400,8 @@ ${renderAddressCreateCard('receiver')}</div>`;
         return false;
       }
       try {
-        var img = await getImageFromInputAsync('farmer-new-img', DEFAULT_PRODUCT_IMAGE, 'products');
-        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, img: img, tags: draft.tags, sales: 0, farmer: role.farmerName || user, farmerAccount: user, farmerUserId: Number((getUserRecord(user) && getUserRecord(user).id) || 0), village: draft.village, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
+        var imageState = await resolveProductImagesForSave('farmer-new', draft);
+        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, images: imageState.images, img: imageState.cover, tags: draft.tags, sales: 0, farmer: role.farmerName || user, farmerAccount: user, farmerUserId: Number((getUserRecord(user) && getUserRecord(user).id) || 0), village: draft.village, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
           actionType: 'create',
           operatorRole: 'farmer',
           note: '农户新增商品并初始化库存'
@@ -4783,24 +5482,23 @@ ${renderAddressCreateCard('receiver')}</div>`;
       });
     }
     function showFarmerPanel() {
+      setWorkspaceMode('farmer');
       document.getElementById('farmer-panel').classList.remove('hidden');
       document.getElementById('admin-panel').classList.add('hidden');
-      document.getElementById('nav').style.display = 'none';
-      document.getElementById('app').innerHTML = '';
       var role = getUserRole();
       var myProds = getFarmerProducts();
       var h = '<div class="space-y-4">';
-      h += '<div class="grid grid-cols-2 gap-2 bg-white rounded-xl p-2 shadow"><button onclick="switchFarmerTab(\'product\')" class="py-2 rounded-lg text-sm ' + (currentFarmerTab === 'product' ? 'bg-[#E07B39] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">商品管理</button><button onclick="switchFarmerTab(\'ship\')" class="py-2 rounded-lg text-sm ' + (currentFarmerTab === 'ship' ? 'bg-[#E07B39] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">发货地址</button></div>';
-      h += '<div class="bg-[#FCEBD8] rounded-xl p-3"><div class="font-medium text-sm text-[#E07B39]">🌿 农户可上架自己商品，并维护库存与来源信息</div></div>';
+      h += '<div class="workspace-banner warm"><div class="text-xs text-white/75 mb-2">农户工作台</div><div class="text-xl font-bold">维护你自己的商品、单位库存和发货地址</div><div class="text-sm text-white/80 mt-2">保持现有商品链路不变，只把工作区做得更清晰、更统一。</div></div>';
+      h += '<div class="grid grid-cols-2 gap-2 surface-card p-2"><button onclick="switchFarmerTab(\'product\')" class="py-2 rounded-lg text-sm btn ' + (currentFarmerTab === 'product' ? 'bg-[#E07B39] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">商品管理</button><button onclick="switchFarmerTab(\'ship\')" class="py-2 rounded-lg text-sm btn ' + (currentFarmerTab === 'ship' ? 'bg-[#E07B39] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">发货地址</button></div>';
       if (currentFarmerTab === 'ship') {
         var meta = getUserMeta();
         var list = meta.shippingAddresses || [];
         h += '<div class="space-y-3">' + (list.length ? list.map(function (item) {
           return renderAddressItemCard('farmer', item);
-        }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400">' + getAddressEditorUi('farmer').emptyText + '</div>') + '</div>';
+        }).join('') : '<div class="surface-card p-4 text-sm text-gray-400">' + getAddressEditorUi('farmer').emptyText + '</div>') + '</div>';
         h += renderAddressCreateCard('farmer');
       } else {
-        h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-3">新增商品</div>' + renderProductFormFields('farmer-new', createProductDraft({ farmer: role.farmerName || user }), false) + '<button onclick="saveFarmerProduct()" class="w-full bg-[#E07B39] text-white py-2 rounded-lg text-sm">上架商品</button></div>';
+        h += '<div class="surface-card p-4"><div class="font-bold mb-1">新增商品</div><div class="text-xs text-gray-500 mb-3">先录规格和单位，再补齐来源、发货地址和图片。</div>' + renderProductFormFields('farmer-new', createProductDraft({ farmer: role.farmerName || user }), false) + '<button onclick="saveFarmerProduct()" class="w-full bg-[#E07B39] text-white py-2 rounded-lg text-sm btn">上架商品</button></div>';
         h += '<div class="font-bold text-sm">我的商品</div>';
         h += myProds.length ? myProds.map(function (p) {
           return renderProductEditorCard(p, {
@@ -4816,6 +5514,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
       }
       h += '</div>';
       document.getElementById('farmer-content').innerHTML = h;
+      stabilizeViewportTop();
     }
     function farmerBack() {
       return enqueueNavigation(function () {
@@ -4827,14 +5526,14 @@ ${renderAddressCreateCard('receiver')}</div>`;
     // ===== 管理端入口/退出 =====
     function showAdminPanel() {
       if (!canAccessAdminPanel()) return;
+      setWorkspaceMode('admin');
       document.getElementById('admin-panel').classList.remove('hidden');
       document.getElementById('farmer-panel').classList.add('hidden');
-      document.getElementById('nav').style.display = 'none';
-      document.getElementById('app').innerHTML = '';
       var authTabButton = document.getElementById('atab-auth');
       if (authTabButton) authTabButton.classList.toggle('hidden', !canManageAuth());
       if (!canManageAuth() && currentAdminTab === 'auth') currentAdminTab = 'db';
       activateAdminTab(currentAdminTab || 'db');
+      stabilizeViewportTop();
     }
     function adminBack() {
       return enqueueNavigation(function () {
@@ -4848,13 +5547,13 @@ ${renderAddressCreateCard('receiver')}</div>`;
   </script>
 
   <div id="admin-panel" class="hidden">
-    <div class="bg-[#2D9D4E] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="workspace-topbar bg-[#2D9D4E] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
       <div class="font-bold">🌱 日精月华管理端</div>
       <div class="flex gap-2"><button onclick="adminBack()" class="text-xs bg-white/20 px-3 py-1 rounded-full">←
           返回</button><button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded-full">退出</button></div>
     </div>
     <div class="flex items-start min-h-[calc(100vh-56px)]">
-      <div class="w-24 shrink-0 bg-[#F8F5EF] border-r border-[#E9E1D4] p-2 space-y-2 sticky top-[56px] self-start">
+      <div class="workspace-side w-24 shrink-0 bg-[#F8F5EF] border-r border-[#E9E1D4] p-2 space-y-2 sticky top-[56px] self-start">
         <button onclick="switchAdminTab('db')" id="atab-db"
           class="w-full px-2 py-3 rounded-2xl text-xs font-medium border bg-[#E8F5EC] text-[#2D9D4E] border-[#D8EBD8] shadow-sm">📊<div class="mt-1">数据</div></button>
         <button onclick="switchAdminTab('refund')" id="atab-refund"
@@ -4874,7 +5573,7 @@ ${renderAddressCreateCard('receiver')}</div>`;
         <button onclick="switchAdminTab('auth')" id="atab-auth"
           class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🔐<div class="mt-1">权限</div></button>
       </div>
-      <div class="min-w-0 flex-1">
+      <div class="workspace-main min-w-0 flex-1">
         <div id="admin-db" class="p-4"></div>
         <div id="admin-refund" class="hidden p-4"></div>
         <div id="admin-pd" class="hidden p-4"></div>
@@ -4888,12 +5587,12 @@ ${renderAddressCreateCard('receiver')}</div>`;
     </div>
   </div>
   <div id="farmer-panel" class="hidden">
-    <div class="bg-[#E07B39] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="workspace-topbar bg-[#E07B39] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
       <div class="font-bold">👨🌾 农户端</div>
       <div class="flex gap-2"><button onclick="farmerBack()" class="text-xs bg-white/20 px-3 py-1 rounded-full">←
           返回</button></div>
     </div>
-    <div id="farmer-content" class="p-4"></div>
+    <div id="farmer-content" class="workspace-main p-4"></div>
   </div>
 
 </body>
