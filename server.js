@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -8,15 +9,63 @@ const sqlite3 = require('sqlite3').verbose();
 // [SERVER_BOOTSTRAP] Express、SQLite 路径和静态资源入口统一在文件头初始化。
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const dbPath = path.join(__dirname, 'cloud-store.sqlite');
-const publicPath = path.join(__dirname, 'public');
+const host = String(process.env.HOST || '127.0.0.1').trim() || '127.0.0.1';
+const dbPath = path.resolve(process.env.CLOUD_STORE_DB_PATH || path.join(__dirname, 'cloud-store.sqlite'));
+const publicPath = path.resolve(process.env.CLOUD_STORE_PUBLIC_PATH || path.join(__dirname, 'public'));
 const htmlPath = path.join(publicPath, 'index.html');
-const uploadRootPath = path.join(publicPath, 'uploads');
+const uploadRootPath = path.resolve(process.env.CLOUD_STORE_UPLOAD_ROOT || path.join(publicPath, 'uploads'));
+const disableDefaultSeedMarkerPath = path.resolve(
+  process.env.CLOUD_STORE_DISABLE_SAMPLE_DATA_FILE || path.join(__dirname, '.disable-default-seed')
+);
+const disableDefaultSampleData =
+  /^(1|true|yes|on)$/i.test(String(process.env.CLOUD_STORE_DISABLE_SAMPLE_DATA || '').trim()) ||
+  fs.existsSync(disableDefaultSeedMarkerPath);
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+fs.mkdirSync(uploadRootPath, { recursive: true });
 const db = new sqlite3.Database(dbPath);
+const SESSION_COOKIE_NAME = 'cs_session';
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_REFRESH_MS = 12 * 60 * 60 * 1000;
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const AUTH_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const AUTH_RATE_LIMIT_MAX_FAILURES = 8;
+const authAttemptBuckets = new Map();
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ limit: '12mb', extended: true }));
 app.use(express.static(publicPath));
+app.use('/uploads', express.static(uploadRootPath));
+
+function setSecurityHeaders(req, res) {
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self' https: data: blob:; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  );
+}
+
+app.use(function (req, res, next) {
+  setSecurityHeaders(req, res);
+  next();
+});
+
+app.get('/healthz', function (req, res) {
+  res.json({
+    ok: true,
+    service: 'cloud-store',
+    host: host,
+    port: port,
+    storage: {
+      database: path.basename(dbPath),
+      uploadsMounted: !!uploadRootPath
+    },
+    now: new Date().toISOString()
+  });
+});
 
 // [SERVER_DB_HELPERS] 所有 SQLite 增删改查 Promise 封装都从这里往下查。
 function run(sql, params) {
@@ -137,6 +186,50 @@ function isTimestampInRange(value, dateFrom, dateTo) {
   return true;
 }
 
+function parsePositiveInt(value, fallback, options) {
+  const config = Object.assign({ min: 1, max: 100 }, options || {});
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(config.max, Math.max(config.min, Math.floor(parsed)));
+}
+
+function hasPagingQuery(query) {
+  return !!(query && (query.page != null || query.pageSize != null));
+}
+
+function normalizePaging(query, defaults) {
+  const config = Object.assign({ page: 1, pageSize: 20, maxPageSize: 100 }, defaults || {});
+  const page = parsePositiveInt(query && query.page, config.page, { min: 1, max: 100000 });
+  const pageSize = parsePositiveInt(query && query.pageSize, config.pageSize, { min: 1, max: config.maxPageSize });
+  return {
+    page: page,
+    pageSize: pageSize,
+    offset: (page - 1) * pageSize
+  };
+}
+
+function buildPagedResult(items, totalCount, page, pageSize) {
+  const total = Math.max(0, Number(totalCount || 0));
+  const currentPage = Math.max(1, Number(page || 1));
+  const size = Math.max(1, Number(pageSize || 1));
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  return {
+    items: Array.isArray(items) ? items : [],
+    meta: {
+      page: currentPage,
+      pageSize: size,
+      totalCount: total,
+      totalPages: totalPages,
+      hasPrev: currentPage > 1,
+      hasNext: currentPage < totalPages
+    }
+  };
+}
+
+function buildContainsLikeValue(value) {
+  return '%' + normalizeTextFilter(value) + '%';
+}
+
 function ensureDirectory(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
   return dirPath;
@@ -162,6 +255,8 @@ function writeDataUrlImage(dataUrl, folderName, originalName) {
   if (!matched) throw new Error('图片数据格式不正确');
   const mimeType = matched[1].toLowerCase();
   if (!/^image\/(png|jpeg|jpg|webp|gif)$/.test(mimeType)) throw new Error('仅支持 PNG、JPG、WEBP、GIF 图片');
+  const binarySize = Buffer.byteLength(matched[2], 'base64');
+  if (binarySize > MAX_UPLOAD_BYTES) throw new Error('图片大小不能超过 5MB');
   const uploadDir = ensureDirectory(path.join(uploadRootPath, sanitizeFileSegment(folderName || 'common')));
   const ext = mimeType === 'image/jpg' ? '.jpg' : getExtensionByMime(mimeType);
   const baseName = sanitizeFileSegment(path.parse(originalName || '').name || 'image');
@@ -169,6 +264,93 @@ function writeDataUrlImage(dataUrl, folderName, originalName) {
   const filePath = path.join(uploadDir, fileName);
   fs.writeFileSync(filePath, matched[2], 'base64');
   return '/uploads/' + sanitizeFileSegment(folderName || 'common') + '/' + fileName;
+}
+
+function parseCookies(headerValue) {
+  return String(headerValue || '').split(';').reduce(function (result, pair) {
+    const separatorIndex = pair.indexOf('=');
+    if (separatorIndex < 0) return result;
+    const key = pair.slice(0, separatorIndex).trim();
+    const value = pair.slice(separatorIndex + 1).trim();
+    if (!key) return result;
+    result[key] = decodeURIComponent(value || '');
+    return result;
+  }, {});
+}
+
+function generateToken(bytes) {
+  return crypto.randomBytes(bytes || 24).toString('hex');
+}
+
+function hashPassword(password, salt) {
+  const normalizedSalt = salt || generateToken(16);
+  const hash = crypto.scryptSync(String(password || ''), normalizedSalt, 64).toString('hex');
+  return ['scrypt', normalizedSalt, hash].join('$');
+}
+
+function isPasswordHash(value) {
+  return String(value || '').indexOf('scrypt$') === 0;
+}
+
+function verifyPassword(storedPassword, candidatePassword) {
+  const stored = String(storedPassword || '');
+  const candidate = String(candidatePassword || '');
+  if (!stored || !candidate) return false;
+  if (!isPasswordHash(stored)) return stored === candidate;
+  const parts = stored.split('$');
+  if (parts.length !== 3) return false;
+  const expected = hashPassword(candidate, parts[1]);
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(stored));
+}
+
+function buildSessionCookieValue(sessionId, req) {
+  const parts = [
+    SESSION_COOKIE_NAME + '=' + encodeURIComponent(sessionId),
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=' + Math.floor(SESSION_TTL_MS / 1000)
+  ];
+  const forwardedProto = String(req && req.headers && req.headers['x-forwarded-proto'] || '').toLowerCase();
+  const isSecure = !!(req && req.secure) || forwardedProto === 'https';
+  if (isSecure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function clearSessionCookie(res, req) {
+  res.setHeader('Set-Cookie', buildSessionCookieValue('', req) + '; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+}
+
+function getClientIp(req) {
+  const forwardedFor = String(req && req.headers && req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwardedFor || String(req && req.ip || 'unknown');
+}
+
+function consumeRateLimitFailure(key) {
+  const now = Date.now();
+  const existing = authAttemptBuckets.get(key) || { failures: [], blockedUntil: 0 };
+  const recentFailures = existing.failures.filter(function (timestamp) {
+    return now - timestamp <= AUTH_RATE_LIMIT_WINDOW_MS;
+  });
+  recentFailures.push(now);
+  const blockedUntil = recentFailures.length >= AUTH_RATE_LIMIT_MAX_FAILURES ? now + AUTH_RATE_LIMIT_WINDOW_MS : 0;
+  authAttemptBuckets.set(key, { failures: recentFailures, blockedUntil: blockedUntil });
+  return blockedUntil;
+}
+
+function clearRateLimitFailures(key) {
+  authAttemptBuckets.delete(key);
+}
+
+function getRateLimitBlockMessage(key) {
+  const now = Date.now();
+  const bucket = authAttemptBuckets.get(key);
+  if (!bucket) return '';
+  if (bucket.blockedUntil && bucket.blockedUntil > now) {
+    const waitMinutes = Math.max(1, Math.ceil((bucket.blockedUntil - now) / 60000));
+    return '登录失败次数过多，请在 ' + waitMinutes + ' 分钟后重试';
+  }
+  return '';
 }
 
 function readDefaultArray(pattern) {
@@ -282,10 +464,24 @@ function normalizeUserRecord(record) {
   });
 }
 
-function publicUserRecord(record) {
+function buildUserSummaryRecord(record) {
+  const user = normalizeUserRecord(record);
+  return {
+    id: user.id,
+    username: user.username,
+    roles: user.roles,
+    createdAt: user.createdAt
+  };
+}
+
+function selfUserRecord(record) {
   const user = normalizeUserRecord(record);
   delete user.password;
   return user;
+}
+
+function publicUserRecord(record) {
+  return buildUserSummaryRecord(record);
 }
 
 function hydrateUser(row) {
@@ -1344,6 +1540,395 @@ function normalizeInventoryLog(row) {
   };
 }
 
+const PRODUCT_LIST_COLUMNS = [
+  'id', 'name', 'price', 'orig', 'unit', 'cat', 'tags', 'stock', 'sales', 'harvest', 'dispatchHours',
+  'farmer', 'farmerAccount', 'farmerUserId', 'village', 'shippingAddressId', 'shippingAddressSnapshot',
+  'imagesJson', 'img', 'off', '"trace"', 'variantsJson'
+].join(', ');
+
+const ORDER_LIST_COLUMNS = [
+  'id', 'sourceId', 'username', 'status', 'total', 'subtotal', 'deliveryFee', 'discount', 'couponText',
+  'couponId', 'receiverName', 'receiverPhone', 'receiverFull', 'trackingNo', 'ownerDeleted', 'createdAt',
+  'reserveExpiresAt', 'inventoryReleased', 'inventoryReleasedAt', 'cancelReason'
+].join(', ');
+
+const ORDER_ITEM_COLUMNS = [
+  'id', 'orderId', 'productId', 'name', 'variantId', 'variantLabel', 'unitId', 'unitLabel', 'unit', 'price',
+  'qty', 'img', 'shippingAddressId', 'shippingName', 'shippingPhone', 'shippingFull', 'sortOrder'
+].join(', ');
+
+const USER_SUMMARY_COLUMNS = ['id', 'username', 'roles', 'createdAt'].join(', ');
+const REFUND_LIST_COLUMNS = ['id', 'orderId', 'ownerUsername', 'scopeType', 'itemsSnapshot', 'sourceOrderStatus', 'status', 'refundAmount', 'reason', 'assigneeRole', 'assigneeUsername', 'inventoryRestored', 'paymentRefunded', 'rejectReason', 'requestedAt', 'reviewedAt', 'completedAt', 'updatedAt'].join(', ');
+const PAYMENT_LIST_COLUMNS = ['id', 'username', 'orderId', 'amount', 'status', 'channel', 'couponId', 'couponText', 'receiverName', 'receiverPhone', 'receiverFull', 'createdAt', 'paidAt'].join(', ');
+const AFTERSALE_LIST_COLUMNS = ['id', 'username', 'orderId', 'type', 'status', 'amount', 'reason', 'createdAt', 'updatedAt'].join(', ');
+const INVENTORY_LOG_COLUMNS = ['id', 'productId', 'productName', 'operatorUsername', 'operatorRole', 'actionType', 'deltaStock', 'deltaSales', 'beforeStock', 'afterStock', 'beforeSales', 'afterSales', 'orderId', 'note', 'createdAt'].join(', ');
+
+function upsertUserRecordByUsername(list, item) {
+  const next = Array.isArray(list) ? list.slice() : [];
+  const target = normalizeUserRecord(item);
+  const index = next.findIndex(function (entry) {
+    return String(entry && entry.username || '') === target.username;
+  });
+  if (index >= 0) next[index] = target;
+  else next.push(target);
+  return next;
+}
+
+async function listProductsPage(filters) {
+  await seedProductsIfNeeded();
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 12, maxPageSize: 40 });
+  const conditions = [];
+  const params = [];
+  const keyword = normalizeTextFilter(query.keyword || query.q);
+  const categoryId = normalizeTextFilter(query.category || query.cat);
+  const status = normalizeTextFilter(query.status);
+  if (status === 'active') conditions.push('off = 0');
+  else if (status === 'inactive') conditions.push('off = 1');
+  if (categoryId) {
+    conditions.push('cat = ?');
+    params.push(categoryId);
+  }
+  if (keyword) {
+    conditions.push('(name LIKE ? OR farmer LIKE ? OR village LIKE ?)');
+    params.push(buildContainsLikeValue(keyword), buildContainsLikeValue(keyword), buildContainsLikeValue(keyword));
+  }
+  const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
+  const countRow = await get('SELECT COUNT(*) AS count FROM products' + whereClause, params);
+  const rows = await all(
+    'SELECT ' + PRODUCT_LIST_COLUMNS + ' FROM products' + whereClause + ' ORDER BY id DESC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  return buildPagedResult(rows.map(hydrateProduct), countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function listUserSummariesPage(filters) {
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 12, maxPageSize: 40 });
+  const conditions = [];
+  const params = [];
+  const keyword = normalizeTextFilter(query.keyword);
+  const roleType = normalizeTextFilter(query.roleType || query.role);
+  const detailedUsername = normalizeTextFilter(query.detailedUsername);
+  if (keyword) {
+    conditions.push('username LIKE ?');
+    params.push(buildContainsLikeValue(keyword));
+  }
+  if (roleType === 'admin') conditions.push("(roles LIKE '%\"isAdmin\":true%' OR roles LIKE '%\"isSuperAdmin\":true%')");
+  else if (roleType === 'farmer') conditions.push("roles LIKE '%\"isFarmer\":true%'");
+  else if (roleType === 'normal') conditions.push("(roles NOT LIKE '%\"isAdmin\":true%' AND roles NOT LIKE '%\"isSuperAdmin\":true%' AND roles NOT LIKE '%\"isFarmer\":true%')");
+  const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
+  const countRow = await get('SELECT COUNT(*) AS count FROM users' + whereClause, params);
+  const rows = await all(
+    'SELECT ' + USER_SUMMARY_COLUMNS + ' FROM users' + whereClause + ' ORDER BY id ASC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  let items = rows.map(function (row) {
+    return buildUserSummaryRecord({
+      id: row.id,
+      username: row.username,
+      roles: parseJsonObject(row.roles, { isFarmer: false, isAdmin: false, isSuperAdmin: false, farmerName: row.username }),
+      createdAt: row.createdAt
+    });
+  });
+  if (detailedUsername) {
+    const detailedUser = await getUserByUsername(detailedUsername);
+    if (detailedUser) items = upsertUserRecordByUsername(items, buildUserSummaryRecord(detailedUser));
+  }
+  return buildPagedResult(items, countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function hydratePagedOrders(orderRows) {
+  const rows = Array.isArray(orderRows) ? orderRows : [];
+  if (!rows.length) return [];
+  const placeholders = rows.map(function () { return '?'; }).join(', ');
+  const itemRows = await all(
+    'SELECT ' + ORDER_ITEM_COLUMNS + ' FROM order_items WHERE orderId IN (' + placeholders + ') ORDER BY orderId ASC, sortOrder ASC, id ASC',
+    rows.map(function (row) { return row.id; })
+  );
+  const ownerNames = rows.map(function (row) {
+    return String(row && row.username || '').trim();
+  }).filter(Boolean);
+  const uniqueOwners = Array.from(new Set(ownerNames));
+  const ownerDeletedMap = {};
+  if (uniqueOwners.length) {
+    const userPlaceholders = uniqueOwners.map(function () { return '?'; }).join(', ');
+    const userRows = await all(
+      'SELECT username FROM users WHERE username IN (' + userPlaceholders + ')',
+      uniqueOwners
+    );
+    const activeUsers = userRows.reduce(function (result, row) {
+      result[String(row && row.username || '').trim()] = true;
+      return result;
+    }, {});
+    uniqueOwners.forEach(function (username) {
+      ownerDeletedMap[username] = !activeUsers[username];
+    });
+  }
+  const itemsByOrderId = itemRows.reduce(function (result, row) {
+    if (!result[row.orderId]) result[row.orderId] = [];
+    result[row.orderId].push(row);
+    return result;
+  }, {});
+  return rows.map(function (row) {
+    return hydrateOrderRows(Object.assign({}, row, {
+      ownerDeleted: row.ownerDeleted || ownerDeletedMap[String(row && row.username || '').trim()]
+    }), itemsByOrderId[row.id] || []);
+  });
+}
+
+async function listOrdersByOwnerPage(ownerUsername, filters) {
+  const owner = String(ownerUsername || '').trim();
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 8, maxPageSize: 30 });
+  if (!owner) return buildPagedResult([], 0, paging.page, paging.pageSize);
+  const conditions = ['username = ?'];
+  const params = [owner];
+  const status = normalizeTextFilter(query.status);
+  const dateFrom = parseTimeFilterValue(query.dateFrom);
+  const dateTo = parseTimeFilterValue(query.dateTo, { endOfDay: true });
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+  if (dateFrom) {
+    conditions.push('createdAt >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('createdAt <= ?');
+    params.push(dateTo);
+  }
+  const whereClause = ' WHERE ' + conditions.join(' AND ');
+  const countRow = await get('SELECT COUNT(*) AS count FROM orders' + whereClause, params);
+  const orderRows = await all(
+    'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders' + whereClause + ' ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  const items = await hydratePagedOrders(orderRows);
+  return buildPagedResult(items, countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function listAllOrdersPage(filters) {
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 10, maxPageSize: 50 });
+  const conditions = [];
+  const params = [];
+  const ownerUsername = normalizeTextFilter(query.ownerUsername || query.username);
+  const status = normalizeTextFilter(query.status);
+  const orderId = normalizeTextFilter(query.orderId);
+  const dateFrom = parseTimeFilterValue(query.dateFrom);
+  const dateTo = parseTimeFilterValue(query.dateTo, { endOfDay: true });
+  if (ownerUsername) {
+    conditions.push('username LIKE ?');
+    params.push(buildContainsLikeValue(ownerUsername));
+  }
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+  if (orderId) {
+    conditions.push('(sourceId LIKE ? OR id LIKE ?)');
+    params.push(buildContainsLikeValue(orderId), buildContainsLikeValue(orderId));
+  }
+  if (dateFrom) {
+    conditions.push('createdAt >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('createdAt <= ?');
+    params.push(dateTo);
+  }
+  const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
+  const countRow = await get('SELECT COUNT(*) AS count FROM orders' + whereClause, params);
+  const orderRows = await all(
+    'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders' + whereClause + ' ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  const items = await hydratePagedOrders(orderRows);
+  return buildPagedResult(items, countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function listRefundRequestsPage(filters) {
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 8, maxPageSize: 40 });
+  const conditions = [];
+  const params = [];
+  const status = normalizeTextFilter(query.status);
+  const orderId = normalizeTextFilter(query.orderId);
+  const ownerUsername = normalizeTextFilter(query.ownerUsername);
+  const dateFrom = parseTimeFilterValue(query.dateFrom);
+  const dateTo = parseTimeFilterValue(query.dateTo, { endOfDay: true });
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+  if (orderId) {
+    conditions.push('orderId LIKE ?');
+    params.push(buildContainsLikeValue(orderId));
+  }
+  if (ownerUsername) {
+    conditions.push('ownerUsername LIKE ?');
+    params.push(buildContainsLikeValue(ownerUsername));
+  }
+  if (dateFrom) {
+    conditions.push('requestedAt >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('requestedAt <= ?');
+    params.push(dateTo);
+  }
+  const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
+  const countRow = await get('SELECT COUNT(*) AS count FROM refund_requests' + whereClause, params);
+  const rows = await all(
+    'SELECT ' + REFUND_LIST_COLUMNS + ' FROM refund_requests' + whereClause + ' ORDER BY requestedAt DESC, id DESC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  return buildPagedResult(rows.map(hydrateRefundRequest), countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function listPaymentTransactionsPage(filters) {
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 10, maxPageSize: 50 });
+  const conditions = [];
+  const params = [];
+  const orderId = normalizeTextFilter(query.orderId);
+  const username = normalizeTextFilter(query.username);
+  const status = normalizeTextFilter(query.status);
+  const dateFrom = parseTimeFilterValue(query.dateFrom);
+  const dateTo = parseTimeFilterValue(query.dateTo, { endOfDay: true });
+  if (orderId) {
+    conditions.push('orderId LIKE ?');
+    params.push(buildContainsLikeValue(orderId));
+  }
+  if (username) {
+    conditions.push('username LIKE ?');
+    params.push(buildContainsLikeValue(username));
+  }
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+  if (dateFrom) {
+    conditions.push('(CASE WHEN paidAt > 0 THEN paidAt ELSE createdAt END) >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('(CASE WHEN paidAt > 0 THEN paidAt ELSE createdAt END) <= ?');
+    params.push(dateTo);
+  }
+  const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
+  const countRow = await get('SELECT COUNT(*) AS count FROM payment_transactions' + whereClause, params);
+  const rows = await all(
+    'SELECT ' + PAYMENT_LIST_COLUMNS + ' FROM payment_transactions' + whereClause + ' ORDER BY paidAt DESC, createdAt DESC, id DESC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  return buildPagedResult(rows.map(normalizePaymentTransaction), countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function listAftersaleRecordsPage(filters) {
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 10, maxPageSize: 50 });
+  const conditions = [];
+  const params = [];
+  const orderId = normalizeTextFilter(query.orderId);
+  const username = normalizeTextFilter(query.username);
+  const status = normalizeTextFilter(query.status);
+  const type = normalizeTextFilter(query.type);
+  const dateFrom = parseTimeFilterValue(query.dateFrom);
+  const dateTo = parseTimeFilterValue(query.dateTo, { endOfDay: true });
+  if (orderId) {
+    conditions.push('orderId LIKE ?');
+    params.push(buildContainsLikeValue(orderId));
+  }
+  if (username) {
+    conditions.push('username LIKE ?');
+    params.push(buildContainsLikeValue(username));
+  }
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+  if (type) {
+    conditions.push('type = ?');
+    params.push(type);
+  }
+  if (dateFrom) {
+    conditions.push('(CASE WHEN updatedAt > 0 THEN updatedAt ELSE createdAt END) >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('(CASE WHEN updatedAt > 0 THEN updatedAt ELSE createdAt END) <= ?');
+    params.push(dateTo);
+  }
+  const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
+  const countRow = await get('SELECT COUNT(*) AS count FROM aftersales' + whereClause, params);
+  const rows = await all(
+    'SELECT ' + AFTERSALE_LIST_COLUMNS + ' FROM aftersales' + whereClause + ' ORDER BY updatedAt DESC, createdAt DESC, id DESC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  return buildPagedResult(rows.map(normalizeAftersaleRecord), countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function listInventoryLogsPage(filters) {
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 10, maxPageSize: 50 });
+  const conditions = [];
+  const params = [];
+  const orderId = normalizeTextFilter(query.orderId);
+  const username = normalizeTextFilter(query.username || query.operatorUsername);
+  const actionType = normalizeTextFilter(query.actionType || query.status);
+  const dateFrom = parseTimeFilterValue(query.dateFrom);
+  const dateTo = parseTimeFilterValue(query.dateTo, { endOfDay: true });
+  if (orderId) {
+    conditions.push('orderId LIKE ?');
+    params.push(buildContainsLikeValue(orderId));
+  }
+  if (username) {
+    conditions.push('operatorUsername LIKE ?');
+    params.push(buildContainsLikeValue(username));
+  }
+  if (actionType) {
+    conditions.push('actionType = ?');
+    params.push(actionType);
+  }
+  if (dateFrom) {
+    conditions.push('createdAt >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('createdAt <= ?');
+    params.push(dateTo);
+  }
+  const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
+  const countRow = await get('SELECT COUNT(*) AS count FROM inventory_logs' + whereClause, params);
+  const rows = await all(
+    'SELECT ' + INVENTORY_LOG_COLUMNS + ' FROM inventory_logs' + whereClause + ' ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+    params.concat([paging.pageSize, paging.offset])
+  );
+  return buildPagedResult(rows.map(normalizeInventoryLog), countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+async function getAdminLightStats() {
+  const stats = await Promise.all([
+    get('SELECT COUNT(*) AS count FROM products'),
+    get('SELECT COUNT(*) AS count FROM users'),
+    get('SELECT COUNT(*) AS count FROM orders'),
+    get("SELECT COUNT(*) AS count FROM refund_requests WHERE status = 'pending'"),
+    get("SELECT COUNT(*) AS count FROM orders WHERE status = 'pending'"),
+    get("SELECT COALESCE(SUM(amount), 0) AS total FROM payment_transactions WHERE status = 'paid'")
+  ]);
+  return {
+    productCount: Number(stats[0] && stats[0].count || 0),
+    userCount: Number(stats[1] && stats[1].count || 0),
+    orderCount: Number(stats[2] && stats[2].count || 0),
+    pendingRefundCount: Number(stats[3] && stats[3].count || 0),
+    pendingOrderCount: Number(stats[4] && stats[4].count || 0),
+    paidSalesTotal: Number(stats[5] && stats[5].total || 0)
+  };
+}
+
 async function listRefundRequests(filters) {
   const rows = await all('SELECT * FROM refund_requests ORDER BY requestedAt DESC, id DESC');
   const query = filters || {};
@@ -1426,7 +2011,10 @@ async function searchBuyerVisibleProducts(keyword) {
     return result;
   }, {});
   const tokens = tokenizeSearchKeyword(keyword);
-  const rows = await all('SELECT * FROM products WHERE off = 0 ORDER BY sales DESC, id DESC');
+  const rows = await all(
+    'SELECT ' + PRODUCT_LIST_COLUMNS + ' FROM products WHERE off = 0 ORDER BY sales DESC, id DESC LIMIT ?',
+    [120]
+  );
   const hydrated = rows.map(hydrateProduct);
   if (!tokens.length) return hydrated;
   return hydrated
@@ -1451,7 +2039,14 @@ async function searchBuyerVisibleProducts(keyword) {
       if (Number(b.item.sales || 0) !== Number(a.item.sales || 0)) return Number(b.item.sales || 0) - Number(a.item.sales || 0);
       return Number(b.item.id || 0) - Number(a.item.id || 0);
     })
+    .slice(0, 24)
     .map(function (entry) { return entry.item; });
+}
+
+async function getProductById(productId) {
+  await seedProductsIfNeeded();
+  const row = await get('SELECT * FROM products WHERE id = ?', [Number(productId || 0)]);
+  return row ? hydrateProduct(row) : null;
 }
 
 async function getActiveRefundRequestByOrder(ownerUsername, orderId) {
@@ -2223,6 +2818,7 @@ async function deleteProductById(productId, auditMeta) {
 }
 
 async function seedProductsIfNeeded() {
+  if (disableDefaultSampleData) return;
   const row = await get('SELECT COUNT(*) AS count FROM products');
   if (row && row.count > 0) return;
   const defaults = readDefaultProducts();
@@ -2243,6 +2839,7 @@ async function saveCouponTemplateList(list) {
 }
 
 async function seedCouponTemplatesIfNeeded() {
+  if (disableDefaultSampleData) return;
   const row = await get('SELECT COUNT(*) AS count FROM coupon_templates');
   if (row && row.count > 0) return;
   await saveCouponTemplateList(createDefaultCouponTemplates());
@@ -2278,6 +2875,129 @@ async function updateUser(record) {
   await syncUserCartRelations(user.username, JSON.parse(user.cart));
   await syncUserCouponRelations(user.username, JSON.parse(user.coupons));
   return result.changes;
+}
+
+async function createSession(username) {
+  const sessionId = generateToken(32);
+  const now = Date.now();
+  await run(
+    'INSERT INTO sessions (id, username, createdAt, expiresAt, lastSeenAt) VALUES (?, ?, ?, ?, ?)',
+    [sessionId, String(username || '').trim(), now, now + SESSION_TTL_MS, now]
+  );
+  return sessionId;
+}
+
+async function getSessionRecord(sessionId) {
+  const normalized = String(sessionId || '').trim();
+  if (!normalized) return null;
+  const row = await get('SELECT * FROM sessions WHERE id = ?', [normalized]);
+  if (!row) return null;
+  if (Number(row.expiresAt || 0) <= Date.now()) {
+    await run('DELETE FROM sessions WHERE id = ?', [normalized]);
+    return null;
+  }
+  return {
+    id: String(row.id || ''),
+    username: String(row.username || '').trim(),
+    createdAt: Number(row.createdAt || 0),
+    expiresAt: Number(row.expiresAt || 0),
+    lastSeenAt: Number(row.lastSeenAt || 0)
+  };
+}
+
+async function touchSession(session) {
+  const target = session || {};
+  if (!target.id) return;
+  const now = Date.now();
+  const shouldRefresh = Number(target.expiresAt || 0) - now <= SESSION_REFRESH_MS;
+  await run(
+    'UPDATE sessions SET lastSeenAt = ?, expiresAt = ? WHERE id = ?',
+    [now, shouldRefresh ? now + SESSION_TTL_MS : Number(target.expiresAt || now + SESSION_TTL_MS), target.id]
+  );
+}
+
+async function deleteSession(sessionId) {
+  if (!sessionId) return;
+  await run('DELETE FROM sessions WHERE id = ?', [String(sessionId || '').trim()]);
+}
+
+async function deleteSessionsByUsername(username) {
+  const target = String(username || '').trim();
+  if (!target) return;
+  await run('DELETE FROM sessions WHERE username = ?', [target]);
+}
+
+async function cleanupExpiredSessions() {
+  await run('DELETE FROM sessions WHERE expiresAt <= ?', [Date.now()]);
+}
+
+async function backfillPasswordHashes() {
+  const rows = await all('SELECT id, password FROM users');
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const password = String(row && row.password || '');
+    if (!password || isPasswordHash(password)) continue;
+    await run('UPDATE users SET password = ? WHERE id = ?', [hashPassword(password), row.id]);
+  }
+}
+
+function buildBootstrapAdminPassword() {
+  const configured = String(process.env.CS_ADMIN_BOOTSTRAP_PASSWORD || '').trim();
+  if (configured) return configured;
+  return 'boot-' + generateToken(8);
+}
+
+function getAccessLevel(user) {
+  const roles = normalizeRoleFlags(user && user.username, user && user.roles);
+  if (roles.isSuperAdmin) return 'superadmin';
+  if (roles.isAdmin) return 'admin';
+  if (roles.isFarmer) return 'farmer';
+  if (user && user.username) return 'logged';
+  return 'public';
+}
+
+function hasAccessLevel(user, level) {
+  const access = getAccessLevel(user);
+  if (level === 'public') return true;
+  if (level === 'logged') return access !== 'public';
+  if (level === 'farmer') return ['farmer', 'admin', 'superadmin'].indexOf(access) >= 0;
+  if (level === 'admin') return ['admin', 'superadmin'].indexOf(access) >= 0;
+  if (level === 'superadmin') return access === 'superadmin';
+  return false;
+}
+
+function ensureAccess(level, message) {
+  return function (req, res) {
+    if (!hasAccessLevel(req.currentUser, level)) {
+      res.status(403).json({ message: message || '当前账号无权执行该操作' });
+      return false;
+    }
+    return true;
+  };
+}
+
+function ensureLoggedIn(req, res, message) {
+  if (!req.currentUser || !req.currentUser.username) {
+    res.status(401).json({ message: message || '请先登录' });
+    return false;
+  }
+  return true;
+}
+
+function canManageTargetUser(currentUser, targetUsername) {
+  const target = String(targetUsername || '').trim();
+  if (!target) return false;
+  if (!currentUser || !currentUser.username) return false;
+  if (currentUser.username === target) return true;
+  return hasAccessLevel(currentUser, 'admin');
+}
+
+function canManageProduct(currentUser, product) {
+  if (!currentUser || !currentUser.username) return false;
+  if (hasAccessLevel(currentUser, 'admin')) return true;
+  if (!hasAccessLevel(currentUser, 'farmer')) return false;
+  const normalized = normalizeProduct(product || {});
+  return String(normalized.farmerAccount || '').trim() === String(currentUser.username || '').trim();
 }
 
 async function finalizePendingOrderPayment(ownerUsername, sourceOrderId) {
@@ -2571,6 +3291,7 @@ async function deleteUserAccount(username) {
     await run('DELETE FROM inventory_logs WHERE productId IN (' + placeholders + ')', productIds);
   }
   await run('DELETE FROM products WHERE farmerAccount = ? OR farmerUserId = ?', [owner, Number(existing.id || 0)]);
+  await deleteSessionsByUsername(owner);
   await run('DELETE FROM users WHERE username = ?', [owner]);
   return {
     deleted: true,
@@ -2599,12 +3320,16 @@ async function seedAdminIfNeeded() {
     const normalizedAdmin = normalizeUserRecord(Object.assign({}, admin, {
       roles: normalizeRoleFlags('admin', admin.roles)
     }));
+    if (normalizedAdmin.password && !isPasswordHash(normalizedAdmin.password)) {
+      normalizedAdmin.password = hashPassword(normalizedAdmin.password);
+    }
     await updateUser(normalizedAdmin);
     return;
   }
+  const bootstrapPassword = buildBootstrapAdminPassword();
   await insertUser(normalizeUserRecord({
     username: 'admin',
-    password: 'admin123',
+    password: hashPassword(bootstrapPassword),
     roles: { isFarmer: true, isAdmin: true, isSuperAdmin: true, farmerName: '系统管理员' },
     addresses: [],
     coupons: [],
@@ -2613,6 +3338,7 @@ async function seedAdminIfNeeded() {
     member: { levelId: 'normal', points: 0, totalSpent: 680 },
     createdAt: new Date().toLocaleDateString('zh-CN')
   }));
+  console.warn('[security] 未发现 admin 账号，已创建一次性引导密码，请尽快登录后修改：' + bootstrapPassword);
 }
 
 async function saveBannerList(list) {
@@ -2627,6 +3353,7 @@ async function saveBannerList(list) {
 }
 
 async function seedBannersIfNeeded() {
+  if (disableDefaultSampleData) return;
   const row = await get('SELECT COUNT(*) AS count FROM banners');
   if (row && row.count > 0) return;
   await saveBannerList(readDefaultBanners());
@@ -2667,6 +3394,7 @@ async function saveAnnouncementList(list) {
 }
 
 async function seedAnnouncementsIfNeeded() {
+  if (disableDefaultSampleData) return;
   const row = await get('SELECT COUNT(*) AS count FROM announcements');
   if (row && row.count > 0) return;
   await saveAnnouncementList(readDefaultAnnouncements());
@@ -2691,6 +3419,35 @@ async function backfillUserRelationsFromJson() {
     if (!couponCountRow || Number(couponCountRow.count || 0) === 0) {
       await syncUserCouponRelations(row.username, parseJsonArray(row.coupons));
     }
+  }
+}
+
+async function ensureScaleReadyIndexes() {
+  const statements = [
+    'CREATE INDEX IF NOT EXISTS idx_products_cat_off_id ON products(cat, off, id)',
+    'CREATE INDEX IF NOT EXISTS idx_products_off_id ON products(off, id)',
+    'CREATE INDEX IF NOT EXISTS idx_products_farmer_account_id ON products(farmerAccount, id)',
+    'CREATE INDEX IF NOT EXISTS idx_users_username_id ON users(username, id)',
+    'CREATE INDEX IF NOT EXISTS idx_orders_username_status_created_id ON orders(username, status, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_orders_status_created_id ON orders(status, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_orders_source_username ON orders(sourceId, username)',
+    'CREATE INDEX IF NOT EXISTS idx_order_items_order_sort_id ON order_items(orderId, sortOrder, id)',
+    'CREATE INDEX IF NOT EXISTS idx_cart_items_username_product_id ON cart_items(username, productId, id)',
+    'CREATE INDEX IF NOT EXISTS idx_user_addresses_username_type_sort_id ON user_addresses(username, type, sortOrder, id)',
+    'CREATE INDEX IF NOT EXISTS idx_user_coupons_username_used_sort_id ON user_coupons(username, used, sortOrder, id)',
+    'CREATE INDEX IF NOT EXISTS idx_refund_requests_owner_status_requested_id ON refund_requests(ownerUsername, status, requestedAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_refund_requests_order_id ON refund_requests(orderId, id)',
+    'CREATE INDEX IF NOT EXISTS idx_payment_transactions_username_status_created_id ON payment_transactions(username, status, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_payment_transactions_order_status ON payment_transactions(orderId, status)',
+    'CREATE INDEX IF NOT EXISTS idx_aftersales_username_status_created_id ON aftersales(username, status, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_aftersales_order_type_created_id ON aftersales(orderId, type, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_inventory_logs_order_created_id ON inventory_logs(orderId, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_inventory_logs_operator_action_created_id ON inventory_logs(operatorUsername, actionType, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_sessions_username_expires ON sessions(username, expiresAt)',
+    'CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expiresAt)'
+  ];
+  for (let index = 0; index < statements.length; index++) {
+    await run(statements[index]);
   }
 }
 
@@ -2737,6 +3494,15 @@ async function initDatabase() {
       orders TEXT NOT NULL DEFAULT '[]',
       member TEXT NOT NULL DEFAULT '{}',
       createdAt TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      createdAt INTEGER NOT NULL DEFAULT 0,
+      expiresAt INTEGER NOT NULL DEFAULT 0,
+      lastSeenAt INTEGER NOT NULL DEFAULT 0
     )
   `);
   await run(`
@@ -3130,6 +3896,9 @@ async function initDatabase() {
   for (const key of Object.keys(refundDefinitions)) {
     if (!refundExisting[key]) await run('ALTER TABLE refund_requests ADD COLUMN ' + key + ' ' + refundDefinitions[key]);
   }
+  await ensureScaleReadyIndexes();
+  await cleanupExpiredSessions();
+  await backfillPasswordHashes();
   await seedCategoriesIfNeeded();
   await seedCouponTemplatesIfNeeded();
   await seedAdminIfNeeded();
@@ -3139,12 +3908,56 @@ async function initDatabase() {
   await cleanupExpiredPendingOrders(Date.now());
 }
 
+app.use(function (req, res, next) {
+  (async function () {
+    req.sessionId = '';
+    req.currentUser = null;
+    req.currentAccessLevel = 'public';
+    const cookies = parseCookies(req.headers && req.headers.cookie);
+    const sessionId = String(cookies[SESSION_COOKIE_NAME] || '').trim();
+    if (!sessionId) return;
+    const session = await getSessionRecord(sessionId);
+    if (!session) {
+      clearSessionCookie(res, req);
+      return;
+    }
+    const currentUser = await getUserByUsername(session.username);
+    if (!currentUser) {
+      await deleteSession(session.id);
+      clearSessionCookie(res, req);
+      return;
+    }
+    await touchSession(session);
+    req.sessionId = session.id;
+    req.currentUser = currentUser;
+    req.currentAccessLevel = getAccessLevel(currentUser);
+  })().then(function () {
+    next();
+  }).catch(next);
+});
+
 // [API_PRODUCTS] 商品列表和商品按 ID 新增/覆盖都走这组接口。
 app.get('/api/products', async function (req, res) {
   try {
-    await seedProductsIfNeeded();
-    const rows = await all('SELECT * FROM products ORDER BY id ASC');
-    res.json(rows.map(hydrateProduct));
+    if (hasPagingQuery(req.query)) {
+      const page = await listProductsPage({
+        page: req.query && req.query.page,
+        pageSize: req.query && req.query.pageSize,
+        category: req.query && req.query.category,
+        cat: req.query && req.query.cat,
+        status: hasAccessLevel(req.currentUser, 'farmer') ? (req.query && req.query.status) : 'active',
+        keyword: req.query && req.query.keyword,
+        q: req.query && req.query.q
+      });
+      return res.json(page);
+    }
+    if (hasAccessLevel(req.currentUser, 'farmer')) {
+      await seedProductsIfNeeded();
+      const rows = await all('SELECT * FROM products ORDER BY id ASC');
+      return res.json(rows.map(hydrateProduct));
+    }
+    const page = await listProductsPage({ page: 1, pageSize: 60, status: 'active' });
+    res.json(page.items);
   } catch (error) {
     res.status(500).json({ message: '获取商品失败', error: error.message });
   }
@@ -3159,9 +3972,33 @@ app.get('/api/products/search', async function (req, res) {
   }
 });
 
+app.get('/api/products/:id', async function (req, res) {
+  try {
+    const product = await getProductById(req.params.id);
+    if (!product) return res.status(404).json({ message: '商品不存在' });
+    if (product.off && !canManageProduct(req.currentUser, product)) {
+      return res.status(404).json({ message: '商品不存在' });
+    }
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ message: '获取商品详情失败', error: error.message });
+  }
+});
+
 app.post('/api/products', async function (req, res) {
   try {
+    if (!ensureAccess('farmer')(req, res, '当前账号无权维护商品')) return;
     const payload = normalizeProduct(req.body || {});
+    const existing = payload.id ? await getProductById(payload.id) : null;
+    if (payload.id && !existing) return res.status(404).json({ message: '商品不存在，无法更新' });
+    if (existing && !canManageProduct(req.currentUser, existing)) {
+      return res.status(403).json({ message: '当前账号无权修改该商品' });
+    }
+    if (!hasAccessLevel(req.currentUser, 'admin')) {
+      payload.farmerAccount = req.currentUser.username;
+      payload.farmer = req.currentUser.roles && req.currentUser.roles.farmerName ? req.currentUser.roles.farmerName : req.currentUser.username;
+      payload.farmerUserId = Number(req.currentUser.id || 0);
+    }
     let productId = payload.id;
     if (productId) {
       const changes = await updateProduct(payload);
@@ -3180,8 +4017,13 @@ app.post('/api/products', async function (req, res) {
 
 app.get('/api/products/:id/delete-impact', async function (req, res) {
   try {
+    if (!ensureAccess('farmer')(req, res, '当前账号无权删除商品')) return;
     const impact = await getProductDeleteImpact(req.params.id);
     if (!impact) return res.status(404).json({ message: '商品不存在' });
+    const product = await getProductById(req.params.id);
+    if (!canManageProduct(req.currentUser, product)) {
+      return res.status(403).json({ message: '当前账号无权查看该商品删除影响' });
+    }
     res.json(impact);
   } catch (error) {
     res.status(500).json({ message: '获取商品删除影响失败', error: error.message });
@@ -3190,14 +4032,19 @@ app.get('/api/products/:id/delete-impact', async function (req, res) {
 
 app.delete('/api/products/:id', async function (req, res) {
   try {
+    if (!ensureAccess('farmer')(req, res, '当前账号无权删除商品')) return;
+    const existing = await getProductById(req.params.id);
+    if (!existing) return res.status(404).json({ message: '商品不存在，无法删除' });
+    if (!canManageProduct(req.currentUser, existing)) {
+      return res.status(403).json({ message: '当前账号无权删除该商品' });
+    }
     const payload = req.body || {};
     const deleted = await deleteProductById(req.params.id, normalizeAuditMeta(payload._audit, {
       actionType: 'product_delete',
-      operatorUsername: '',
-      operatorRole: 'admin',
+      operatorUsername: req.currentUser.username,
+      operatorRole: hasAccessLevel(req.currentUser, 'admin') ? 'admin' : 'farmer',
       note: '删除商品并保留历史订单快照'
     }));
-    if (!deleted) return res.status(404).json({ message: '商品不存在，无法删除' });
     res.json(deleted);
   } catch (error) {
     res.status(500).json({ message: '删除商品失败', error: error.message });
@@ -3216,6 +4063,7 @@ app.get('/api/categories', async function (req, res) {
 
 app.post('/api/categories', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权维护商品分类')) return;
     const payload = Array.isArray(req.body) ? req.body : [];
     await saveCategoryList(payload);
     const categories = await getCategoryList();
@@ -3237,6 +4085,7 @@ app.get('/api/banners', async function (req, res) {
 
 app.post('/api/banners', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权维护 Banner')) return;
     const payload = Array.isArray(req.body) ? req.body : [];
     await saveBannerList(payload);
     const rows = await all('SELECT * FROM banners ORDER BY sortOrder ASC, id ASC');
@@ -3258,6 +4107,7 @@ app.get('/api/announcements', async function (req, res) {
 
 app.post('/api/announcements', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权维护公告')) return;
     const payload = Array.isArray(req.body) ? req.body : [];
     await saveAnnouncementList(payload);
     const rows = await all('SELECT * FROM announcements ORDER BY sortOrder ASC, id ASC');
@@ -3269,8 +4119,13 @@ app.post('/api/announcements', async function (req, res) {
 
 app.post('/api/upload', function (req, res) {
   try {
+    if (!ensureAccess('farmer')(req, res, '当前账号无权上传图片')) return;
     const payload = req.body || {};
-    const imageUrl = writeDataUrlImage(payload.dataUrl, payload.folder, payload.fileName);
+    const folder = sanitizeFileSegment(payload.folder || 'common');
+    if (['banner', 'category'].indexOf(folder) >= 0 && !hasAccessLevel(req.currentUser, 'admin')) {
+      return res.status(403).json({ message: '当前账号无权上传该类型图片' });
+    }
+    const imageUrl = writeDataUrlImage(payload.dataUrl, folder, payload.fileName);
     res.json({ url: imageUrl });
   } catch (error) {
     res.status(400).json({ message: '图片上传失败', error: error.message });
@@ -3288,6 +4143,7 @@ app.get('/api/coupon-templates', async function (req, res) {
 
 app.post('/api/coupon-templates', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权维护优惠券模板')) return;
     const payload = Array.isArray(req.body) ? req.body : [];
     await saveCouponTemplateList(payload);
     const templates = await getCouponTemplateList();
@@ -3300,6 +4156,35 @@ app.post('/api/coupon-templates', async function (req, res) {
 app.get('/api/orders', async function (req, res) {
   try {
     await cleanupExpiredPendingOrders(Date.now());
+    if (hasPagingQuery(req.query)) {
+      const ownerUsername = String(req.query && (req.query.ownerUsername || req.query.username) || '').trim();
+      if (ownerUsername) {
+        if (!ensureLoggedIn(req, res, '请先登录后查看订单')) return;
+        if (ownerUsername !== req.currentUser.username && !hasAccessLevel(req.currentUser, 'admin')) {
+          return res.status(403).json({ message: '当前账号无权查看该订单列表' });
+        }
+        const page = await listOrdersByOwnerPage(req.query.ownerUsername, {
+          page: req.query.page,
+          pageSize: req.query.pageSize,
+          status: req.query.status,
+          dateFrom: req.query.dateFrom,
+          dateTo: req.query.dateTo
+        });
+        return res.json(page);
+      }
+      if (!ensureAccess('admin')(req, res, '当前账号无权查看全部订单')) return;
+      const page = await listAllOrdersPage({
+        page: req.query && req.query.page,
+        pageSize: req.query && req.query.pageSize,
+        ownerUsername: req.query && (req.query.ownerUsername || req.query.username),
+        orderId: req.query && req.query.orderId,
+        status: req.query && req.query.status,
+        dateFrom: req.query && req.query.dateFrom,
+        dateTo: req.query && req.query.dateTo
+      });
+      return res.json(page);
+    }
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看全部订单')) return;
     const orders = await listAllOrderSnapshots();
     res.json(orders);
   } catch (error) {
@@ -3309,8 +4194,9 @@ app.get('/api/orders', async function (req, res) {
 
 app.post('/api/orders/prepare-payment', async function (req, res) {
   try {
+    if (!ensureLoggedIn(req, res, '请先登录后再下单')) return;
     await cleanupExpiredPendingOrders(Date.now());
-    const ownerUsername = String(req.body && req.body.username || '').trim();
+    const ownerUsername = req.currentUser.username;
     const order = await createPendingOrderFromCheckout(ownerUsername, req.body || {});
     res.json(order);
   } catch (error) {
@@ -3320,9 +4206,10 @@ app.post('/api/orders/prepare-payment', async function (req, res) {
 
 app.post('/api/orders/:orderId/pay', async function (req, res) {
   try {
+    if (!ensureLoggedIn(req, res, '请先登录后再支付')) return;
     await cleanupExpiredPendingOrders(Date.now());
     const sourceOrderId = String(req.params.orderId || '').trim();
-    const ownerUsername = String(req.body && (req.body.ownerUsername || req.body.username) || '').trim();
+    const ownerUsername = req.currentUser.username;
     const order = await finalizePendingOrderPayment(ownerUsername, sourceOrderId);
     res.json(order);
   } catch (error) {
@@ -3332,9 +4219,10 @@ app.post('/api/orders/:orderId/pay', async function (req, res) {
 
 app.post('/api/orders/:orderId/cancel-pending', async function (req, res) {
   try {
+    if (!ensureLoggedIn(req, res, '请先登录后再取消订单')) return;
     await cleanupExpiredPendingOrders(Date.now());
     const sourceOrderId = String(req.params.orderId || '').trim();
-    const ownerUsername = String(req.body && (req.body.ownerUsername || req.body.username) || '').trim();
+    const ownerUsername = req.currentUser.username;
     const order = await cancelPendingOrder(ownerUsername, sourceOrderId);
     res.json(order);
   } catch (error) {
@@ -3344,6 +4232,19 @@ app.post('/api/orders/:orderId/cancel-pending', async function (req, res) {
 
 app.get('/api/refunds', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看退款记录')) return;
+    if (hasPagingQuery(req.query)) {
+      const page = await listRefundRequestsPage({
+        page: req.query && req.query.page,
+        pageSize: req.query && req.query.pageSize,
+        status: req.query && req.query.status,
+        orderId: req.query && req.query.orderId,
+        ownerUsername: req.query && req.query.ownerUsername,
+        dateFrom: req.query && req.query.dateFrom,
+        dateTo: req.query && req.query.dateTo
+      });
+      return res.json(page);
+    }
     const refunds = await listRefundRequests({
       status: req.query && req.query.status,
       orderId: req.query && req.query.orderId,
@@ -3359,6 +4260,19 @@ app.get('/api/refunds', async function (req, res) {
 
 app.get('/api/payment-transactions', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看支付流水')) return;
+    if (hasPagingQuery(req.query)) {
+      const page = await listPaymentTransactionsPage({
+        page: req.query && req.query.page,
+        pageSize: req.query && req.query.pageSize,
+        orderId: req.query && req.query.orderId,
+        username: req.query && req.query.username,
+        status: req.query && req.query.status,
+        dateFrom: req.query && req.query.dateFrom,
+        dateTo: req.query && req.query.dateTo
+      });
+      return res.json(page);
+    }
     const list = await listPaymentTransactions({
       orderId: req.query && req.query.orderId,
       username: req.query && req.query.username,
@@ -3374,6 +4288,20 @@ app.get('/api/payment-transactions', async function (req, res) {
 
 app.get('/api/aftersales', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看售后记录')) return;
+    if (hasPagingQuery(req.query)) {
+      const page = await listAftersaleRecordsPage({
+        page: req.query && req.query.page,
+        pageSize: req.query && req.query.pageSize,
+        orderId: req.query && req.query.orderId,
+        username: req.query && req.query.username,
+        status: req.query && req.query.status,
+        type: req.query && req.query.type,
+        dateFrom: req.query && req.query.dateFrom,
+        dateTo: req.query && req.query.dateTo
+      });
+      return res.json(page);
+    }
     const list = await listAftersaleRecords({
       orderId: req.query && req.query.orderId,
       username: req.query && req.query.username,
@@ -3390,6 +4318,21 @@ app.get('/api/aftersales', async function (req, res) {
 
 app.get('/api/inventory-logs', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看库存流水')) return;
+    if (hasPagingQuery(req.query)) {
+      const page = await listInventoryLogsPage({
+        page: req.query && req.query.page,
+        pageSize: req.query && req.query.pageSize,
+        orderId: req.query && req.query.orderId,
+        username: req.query && req.query.username,
+        operatorUsername: req.query && req.query.operatorUsername,
+        actionType: req.query && req.query.actionType,
+        status: req.query && req.query.status,
+        dateFrom: req.query && req.query.dateFrom,
+        dateTo: req.query && req.query.dateTo
+      });
+      return res.json(page);
+    }
     const list = await listInventoryLogs({
       orderId: req.query && req.query.orderId,
       username: req.query && req.query.username,
@@ -3407,8 +4350,9 @@ app.get('/api/inventory-logs', async function (req, res) {
 
 app.post('/api/orders/:orderId/refund-request', async function (req, res) {
   try {
+    if (!ensureLoggedIn(req, res, '请先登录后再申请退款')) return;
     const sourceOrderId = String(req.params.orderId || '').trim();
-    const ownerUsername = String(req.body && req.body.ownerUsername || '').trim();
+    const ownerUsername = req.currentUser.username;
     const reason = String(req.body && req.body.reason || '').trim();
     const refund = await createRefundRequestForOrder(ownerUsername, sourceOrderId, reason);
     res.json(refund);
@@ -3419,6 +4363,7 @@ app.post('/api/orders/:orderId/refund-request', async function (req, res) {
 
 app.post('/api/orders/:orderId/status', async function (req, res) {
   try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权更新订单状态')) return;
     const sourceOrderId = String(req.params.orderId || '').trim();
     const ownerUsername = String(req.body && req.body.ownerUsername || '').trim();
     const status = String(req.body && req.body.status || '').trim();
@@ -3436,7 +4381,8 @@ app.post('/api/orders/:orderId/status', async function (req, res) {
 app.post('/api/refunds/:refundId/reject', async function (req, res) {
   try {
     const refundId = String(req.params.refundId || '').trim();
-    const actorUsername = String(req.body && req.body.actorUsername || '').trim();
+    if (!ensureAccess('admin')(req, res, '当前账号无权驳回退款')) return;
+    const actorUsername = req.currentUser.username;
     const rejectReason = String(req.body && req.body.rejectReason || '').trim();
     const refund = await rejectRefundRequest(refundId, actorUsername, rejectReason);
     res.json(refund);
@@ -3448,7 +4394,8 @@ app.post('/api/refunds/:refundId/reject', async function (req, res) {
 app.post('/api/refunds/:refundId/complete', async function (req, res) {
   try {
     const refundId = String(req.params.refundId || '').trim();
-    const actorUsername = String(req.body && req.body.actorUsername || '').trim();
+    if (!ensureAccess('admin')(req, res, '当前账号无权完成退款')) return;
+    const actorUsername = req.currentUser.username;
     const refund = await completeRefundRequest(refundId, actorUsername);
     res.json(refund);
   } catch (error) {
@@ -3459,22 +4406,58 @@ app.post('/api/refunds/:refundId/complete', async function (req, res) {
 // [API_USERS_AUTH] 用户列表、登录注册、状态落库、角色授权都集中在这里。
 app.get('/api/users', async function (req, res) {
   try {
+    if (!ensureLoggedIn(req, res, '请先登录后再获取用户数据')) return;
     await cleanupExpiredPendingOrders(Date.now());
-    const users = await listUsers();
-    res.json(users.map(publicUserRecord));
+    if (hasPagingQuery(req.query)) {
+      if (!ensureAccess('admin')(req, res, '当前账号无权查看用户列表')) return;
+      const page = await listUserSummariesPage({
+        page: req.query && req.query.page,
+        pageSize: req.query && req.query.pageSize,
+        keyword: req.query && req.query.keyword,
+        roleType: req.query && (req.query.roleType || req.query.role),
+        detailedUsername: req.query && req.query.detailedUsername
+      });
+      return res.json(page);
+    }
+    if (hasAccessLevel(req.currentUser, 'admin')) {
+      const users = await listUsers();
+      return res.json(users.map(selfUserRecord));
+    }
+    res.json([selfUserRecord(req.currentUser)]);
   } catch (error) {
     res.status(500).json({ message: '获取用户失败', error: error.message });
+  }
+});
+
+app.get('/api/admin/light-stats', async function (req, res) {
+  try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看后台统计')) return;
+    await cleanupExpiredPendingOrders(Date.now());
+    res.json(await getAdminLightStats());
+  } catch (error) {
+    res.status(500).json({ message: '获取后台轻量统计失败', error: error.message });
   }
 });
 
 app.post('/api/auth/login', async function (req, res) {
   try {
     const payload = req.body || {};
+    const rateLimitKey = getClientIp(req) + ':' + String(payload.username || '').trim().toLowerCase();
+    const blockedMessage = getRateLimitBlockMessage(rateLimitKey);
+    if (blockedMessage) return res.status(429).json({ message: blockedMessage });
     const user = await getUserByUsername(String(payload.username || '').trim());
-    if (!user || user.password !== String(payload.password || '')) {
+    if (!user || !verifyPassword(user.password, String(payload.password || ''))) {
+      consumeRateLimitFailure(rateLimitKey);
       return res.status(401).json({ message: '用户名或密码错误' });
     }
-    res.json(publicUserRecord(user));
+    if (!isPasswordHash(user.password)) {
+      user.password = hashPassword(String(payload.password || ''));
+      await updateUser(user);
+    }
+    clearRateLimitFailures(rateLimitKey);
+    const sessionId = await createSession(user.username);
+    res.setHeader('Set-Cookie', buildSessionCookieValue(sessionId, req));
+    res.json(selfUserRecord(await getUserByUsername(user.username)));
   } catch (error) {
     res.status(500).json({ message: '登录失败', error: error.message });
   }
@@ -3490,7 +4473,7 @@ app.post('/api/auth/register', async function (req, res) {
     const templates = await getCouponTemplateList();
     await insertUser(normalizeUserRecord({
       username: username,
-      password: password,
+      password: hashPassword(password),
       roles: { isFarmer: false, isAdmin: false, farmerName: username },
       addresses: [],
       coupons: templates.map(buildCouponFromTemplate),
@@ -3502,26 +4485,52 @@ app.post('/api/auth/register', async function (req, res) {
       createdAt: new Date().toLocaleDateString('zh-CN')
     }));
     const created = await getUserByUsername(username);
-    res.json(publicUserRecord(created));
+    const sessionId = await createSession(username);
+    res.setHeader('Set-Cookie', buildSessionCookieValue(sessionId, req));
+    res.json(selfUserRecord(created));
   } catch (error) {
     res.status(500).json({ message: '注册失败', error: error.message });
+  }
+});
+
+app.get('/api/auth/me', async function (req, res) {
+  try {
+    if (!req.currentUser) return res.status(401).json({ message: '当前未登录' });
+    res.json(selfUserRecord(req.currentUser));
+  } catch (error) {
+    res.status(500).json({ message: '获取当前登录用户失败', error: error.message });
+  }
+});
+
+app.post('/api/auth/logout', async function (req, res) {
+  try {
+    if (req.sessionId) await deleteSession(req.sessionId);
+    clearSessionCookie(res, req);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: '退出登录失败', error: error.message });
   }
 });
 
 app.post('/api/users/:username/state', async function (req, res) {
   try {
     const username = String(req.params.username || '').trim();
+    if (!ensureLoggedIn(req, res, '请先登录后再保存资料')) return;
+    if (!canManageTargetUser(req.currentUser, username)) {
+      return res.status(403).json({ message: '当前账号无权保存该用户资料' });
+    }
     const existing = await getUserByUsername(username);
     if (!existing) return res.status(404).json({ message: '用户不存在' });
     const payload = normalizeUserRecord(Object.assign({}, existing, req.body || {}, { username: username, password: existing.password }));
+    if (!hasAccessLevel(req.currentUser, 'admin')) payload.roles = existing.roles;
     await updateUser(payload);
     await syncOrderDerivedRelations(username, existing.orders, payload.orders, normalizeAuditMeta(req.body && req.body._audit, {
-      operatorUsername: username,
-      operatorRole: 'system',
+      operatorUsername: req.currentUser.username,
+      operatorRole: hasAccessLevel(req.currentUser, 'admin') ? 'admin' : 'buyer',
       channel: 'mock_h5'
     }));
     const updated = await getUserByUsername(username);
-    res.json(publicUserRecord(updated));
+    res.json(selfUserRecord(updated));
   } catch (error) {
     res.status(500).json({ message: '保存用户数据失败', error: error.message });
   }
@@ -3529,6 +4538,7 @@ app.post('/api/users/:username/state', async function (req, res) {
 
 app.post('/api/users/:username/role', async function (req, res) {
   try {
+    if (!ensureAccess('superadmin')(req, res, '只有超级管理员可以管理账号授权')) return;
     const username = String(req.params.username || '').trim();
     const existing = await getUserByUsername(username);
     if (!existing) return res.status(404).json({ message: '用户不存在' });
@@ -3539,7 +4549,7 @@ app.post('/api/users/:username/role', async function (req, res) {
       if (JSON.stringify(updatedAdmin.roles) !== JSON.stringify(existing.roles)) {
         await updateUser(updatedAdmin);
       }
-      return res.json(publicUserRecord(updatedAdmin));
+      return res.json(selfUserRecord(updatedAdmin));
     }
     const roleType = String(req.body && req.body.roleType || 'normal');
     existing.roles = { isFarmer: false, isAdmin: false, isSuperAdmin: false, farmerName: username };
@@ -3547,7 +4557,7 @@ app.post('/api/users/:username/role', async function (req, res) {
     if (roleType === 'admin') existing.roles.isAdmin = true;
     await updateUser(existing);
     const updated = await getUserByUsername(username);
-    res.json(publicUserRecord(updated));
+    res.json(selfUserRecord(updated));
   } catch (error) {
     res.status(500).json({ message: '保存用户权限失败', error: error.message });
   }
@@ -3555,6 +4565,7 @@ app.post('/api/users/:username/role', async function (req, res) {
 
 app.delete('/api/users/:username', async function (req, res) {
   try {
+    if (!ensureAccess('superadmin')(req, res, '只有超级管理员可以删除用户')) return;
     const username = String(req.params.username || '').trim();
     if (!username) return res.status(400).json({ message: '用户名不能为空' });
     const result = await deleteUserAccount(username);
@@ -3572,8 +4583,8 @@ app.get(/^(?!\/api).*/, function (req, res) {
 
 initDatabase()
   .then(function () {
-    app.listen(port, function () {
-      console.log('cloud-store server running on port ' + port);
+    app.listen(port, host, function () {
+      console.log('cloud-store server running on ' + host + ':' + port);
     });
   })
   .catch(function (error) {

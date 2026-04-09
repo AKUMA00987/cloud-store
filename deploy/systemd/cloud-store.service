@@ -1,0 +1,20 @@
+[Unit]
+Description=Cloud Store Node Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/cloud-store
+EnvironmentFile=/root/cloud-store/cloud-store.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+StandardOutput=append:/root/cloud-store/logs/app.out.log
+StandardError=append:/root/cloud-store/logs/app.err.log
+
+[Install]
+WantedBy=multi-user.target

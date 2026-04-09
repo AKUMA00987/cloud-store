@@ -208,7 +208,7 @@ async function main() {
     }
   ];
 
-  storage.set('cs_user', 'buyer1');
+  let currentAuthUsername = 'buyer1';
   let prepareCounter = 0;
 
   function getUser(username) {
@@ -301,6 +301,21 @@ async function main() {
       const parsed = new URL(String(url), 'http://127.0.0.1:3000');
       const method = String(options && options.method || 'GET').toUpperCase();
 
+      if (parsed.pathname === '/api/auth/me' && method === 'GET') {
+        const currentUser = getUser(currentAuthUsername);
+        return currentUser ? createJsonResponse(cloneJson(currentUser)) : createJsonResponse({ message: '未登录' }, 401);
+      }
+      if (parsed.pathname === '/api/products' && method === 'GET' && parsed.searchParams.get('page')) {
+        return createJsonResponse({
+          items: cloneJson(products),
+          meta: { page: 1, pageSize: Number(parsed.searchParams.get('pageSize') || products.length || 1), totalCount: products.length, totalPages: 1, hasPrev: false, hasNext: false }
+        });
+      }
+      if (/^\/api\/products\/\d+$/.test(parsed.pathname) && method === 'GET') {
+        const productId = Number(parsed.pathname.split('/').pop() || 0);
+        const product = products.find(function (item) { return Number(item.id || 0) === productId; });
+        return createJsonResponse(cloneJson(product || { message: 'not found' }), product ? 200 : 404);
+      }
       if (parsed.pathname === '/api/products' && method === 'GET') return createJsonResponse(cloneJson(products));
       if (parsed.pathname === '/api/products' && method === 'POST') {
         const payload = JSON.parse(options.body || '{}');
@@ -317,7 +332,13 @@ async function main() {
       if (parsed.pathname === '/api/aftersales') return createJsonResponse([]);
       if (parsed.pathname === '/api/inventory-logs') return createJsonResponse([]);
       if (parsed.pathname === '/api/orders') return createJsonResponse(buildAllOrders());
-      if (parsed.pathname === '/api/users' && method === 'GET') return createJsonResponse(cloneJson(users));
+      if (parsed.pathname === '/api/users' && method === 'GET' && parsed.search) {
+        return createJsonResponse({ items: cloneJson(users), meta: { page: 1, pageSize: users.length || 1, totalCount: users.length, totalPages: 1, hasPrev: false, hasNext: false } });
+      }
+      if (parsed.pathname === '/api/users' && method === 'GET') {
+        const currentListUser = getUser(currentAuthUsername);
+        return createJsonResponse(currentListUser ? [cloneJson(currentListUser)] : [], currentListUser ? 200 : 401);
+      }
 
       const stateMatch = parsed.pathname.match(/^\/api\/users\/([^/]+)\/state$/);
       if (stateMatch && method === 'POST') {
@@ -331,10 +352,10 @@ async function main() {
       if (parsed.pathname === '/api/orders/prepare-payment' && method === 'POST') {
         const payload = JSON.parse(options.body || '{}');
         prepareCounter += 1;
-        const target = getUser(payload.username);
+        const target = getUser(currentAuthUsername);
         const order = {
           id: 'ORD_UNIT_' + prepareCounter,
-          owner: payload.username,
+          owner: currentAuthUsername,
           items: cloneJson(payload.items || []),
           subtotal: Number(payload.subtotal || 0),
           deliveryFee: Number(payload.deliveryFee || 0),
@@ -361,8 +382,7 @@ async function main() {
       const payMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/pay$/);
       if (payMatch && method === 'POST') {
         const orderId = decodeURIComponent(payMatch[1]);
-        const payload = JSON.parse(options.body || '{}');
-        const target = getUser(payload.ownerUsername);
+        const target = getUser(currentAuthUsername);
         const order = (target.orders || []).find(function (item) { return item.id === orderId; });
         order.status = 'paid';
         (order.items || []).forEach(function (item) {
@@ -492,7 +512,7 @@ async function main() {
   assert(!modalHtml.includes('规格价格'), '规格弹窗不应再显示规格价格输入');
 
   exec('user = "admin";');
-  storage.set('cs_user', 'admin');
+  currentAuthUsername = 'admin';
   exec('toggleInventoryTree(1);');
   exec('renderAdminDb();');
   const adminDbHtml = document.getElementById('admin-db').innerHTML;

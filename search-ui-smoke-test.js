@@ -226,14 +226,25 @@ async function main() {
     clearTimeout() { },
     fetch: async function (url) {
       const parsed = new URL(String(url), 'http://127.0.0.1:3000');
+      if (parsed.pathname === '/api/products' && parsed.searchParams.get('page')) {
+        return createJsonResponse({
+          items: products,
+          meta: { page: 1, pageSize: Number(parsed.searchParams.get('pageSize') || products.length || 1), totalCount: products.length, totalPages: 1, hasPrev: false, hasNext: false }
+        });
+      }
       if (parsed.pathname === '/api/products') return createJsonResponse(products);
+      if (parsed.pathname === '/api/auth/me') return createJsonResponse({ message: '未登录' }, 401);
       if (parsed.pathname === '/api/categories') return createJsonResponse(categories);
       if (parsed.pathname === '/api/banners') return createJsonResponse([]);
       if (parsed.pathname === '/api/announcements') return createJsonResponse([]);
       if (parsed.pathname === '/api/coupon-templates') return createJsonResponse([]);
-      if (parsed.pathname === '/api/users') return createJsonResponse([]);
+      if (parsed.pathname === '/api/users') return createJsonResponse([], parsed.search ? 200 : 401);
       if (parsed.pathname === '/api/orders') return createJsonResponse([]);
       if (parsed.pathname === '/api/refunds') return createJsonResponse([]);
+      if (/^\/api\/products\/\d+$/.test(parsed.pathname)) {
+        const productId = Number(parsed.pathname.split('/').pop() || 0);
+        return createJsonResponse(products.find(function (item) { return Number(item.id || 0) === productId; }) || { message: 'not found' }, products.some(function (item) { return Number(item.id || 0) === productId; }) ? 200 : 404);
+      }
       if (parsed.pathname === '/api/products/search') {
         return createJsonResponse(searchProductsByKeyword(parsed.searchParams.get('q')));
       }
