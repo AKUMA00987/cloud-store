@@ -9,9 +9,11 @@ fi
 BACKUP_DIR="$1"
 BASE_DIR="${BASE_DIR:-/root/cloud-store}"
 PM2_APP_NAME="${PM2_APP_NAME:-cloud-store}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-bash "${BASE_DIR}/deploy/scripts/restore-from-backup.sh" "${BACKUP_DIR}"
+bash "${SCRIPT_DIR}/restore-from-backup.sh" "${BACKUP_DIR}"
 pm2 restart "${PM2_APP_NAME}"
 
 echo "pm2 rollback complete from backup: ${BACKUP_DIR}"
+echo "same rollback flow supports staging when BASE_DIR and PM2_APP_NAME point to cloud-store-staging"
 echo "next step: run ${BASE_DIR}/deploy/scripts/check-health.sh"

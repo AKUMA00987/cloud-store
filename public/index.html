@@ -327,6 +327,28 @@
       box-shadow: var(--shadow-raise)
     }
 
+    .auth-sms-row {
+      display: flex;
+      align-items: stretch;
+      gap: 8px
+    }
+
+    .auth-sms-input {
+      min-width: 0;
+      flex: 1
+    }
+
+    .auth-sms-button {
+      flex: 0 0 118px;
+      min-width: 118px;
+      min-height: 48px;
+      padding: 0 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap
+    }
+
     input,
     select,
     textarea {
@@ -507,6 +529,8 @@
     // === STATE / RUNTIME_CACHE ===
     // [STATE_ROOT] 当前登录态、路由态、前端内存缓存集中定义在这里。
     let user = null, cart = [], view = 'home', cat = '', orders = [], member = { levelId: 'normal', points: 0, totalSpent: 0 }, paramId = 0;
+    var authUiState = { loginMode: 'sms', smsCooldowns: {}, timerId: 0 };
+    var runtimeUiState = { env: 'production', label: '正式环境 / production', isStaging: false };
     function createPagingMeta(page, pageSize, totalCount) {
       var currentPage = Math.max(1, Number(page || 1));
       var size = Math.max(1, Number(pageSize || 1));
@@ -544,7 +568,21 @@
     var inventoryLogsMetaState = createPagingMeta(1, 10, 0);
     var adminProductListState = { items: [], loaded: false, meta: createPagingMeta(1, 6, 0), filters: { keyword: '', category: '', status: '' } };
     var adminUserListState = { items: [], loaded: false, meta: createPagingMeta(1, 10, 0), filters: { keyword: '', roleType: '' } };
-    var adminOrderListState = { items: [], loaded: false, meta: createPagingMeta(1, 8, 0), filters: { orderId: '', ownerUsername: '', status: '', dateFrom: '', dateTo: '' } };
+    var adminOrderListState = { items: [], loaded: false, exporting: false, meta: createPagingMeta(1, 8, 0), filters: { orderId: '', ownerUsername: '', status: '', dateFrom: '', dateTo: '' } };
+    var adminFulfillmentState = {
+      items: [],
+      loaded: false,
+      meta: createPagingMeta(1, 8, 0),
+      filters: { orderId: '', ownerUsername: '', status: 'paid' },
+      view: 'queue',
+      selectedOwner: '',
+      selectedOrderId: '',
+      detail: null,
+      draft: { trackingNo: '', carrierCode: '', carrierName: '', selectedOrderItemIds: [] },
+      dirty: false,
+      loading: false,
+      error: ''
+    };
     var adminLightStatsState = { productCount: 0, userCount: 0, orderCount: 0, pendingRefundCount: 0, pendingOrderCount: 0, paidSalesTotal: 0 };
     var couponTemplatesState = [];
     var adminProductExpandState = {};
@@ -552,6 +590,25 @@
     var searchState = { keyword: '', results: [], recentKeywords: [], isLoading: false, searched: false };
     var couponRecipientState = { templateId: '', keyword: '', roleFilter: 'all', selectedUsers: {} };
     var buyerOrderFilterState = { status: '' };
+    var BUYER_LOGISTICS_UPDATED_BADGE_MS = 5000;
+    var buyerLogisticsRefreshState = {
+      lastListFingerprint: '',
+      checkingList: false,
+      listPromptVisible: false,
+      listChangedOrderIds: [],
+      listVisibleChangedOrderIds: [],
+      listChangedCount: 0,
+      listRefreshing: false,
+      detailOrderId: '',
+      checkingDetail: false,
+      detailPromptVisible: false,
+      detailChanged: false,
+      detailRefreshing: false,
+      recentOrderIds: {},
+      recentTimers: {},
+      pendingListCheckPromise: null,
+      pendingDetailCheckPromise: null
+    };
     var adminRefundFilters = { status: 'pending', orderId: '', ownerUsername: '', dateFrom: '', dateTo: '' };
     var adminLedgerState = {
       tab: 'payment',
@@ -562,6 +619,9 @@
     var activeBannerIndex = 0;
     var bannerAutoTimer = null;
     var currentCheckoutOrder = null;
+    var paymentUiState = { showMoreChannels: false };
+    var routeQuery = {};
+    var paymentResultState = { orderId: '', order: null, paymentTransaction: null, awaitingAsyncNotify: false, isLoading: false, error: '' };
     var currentFarmerTab = 'product';
     var currentCategoryEditId = '';
     var selectedVariantState = {};
@@ -654,6 +714,7 @@
     }
     // [ROUTE_APPLY] 只负责把目标路由状态写进 view/hash 并触发渲染，不负责自动保存。
     function applyRouteState(nextView, nextParamId) {
+      if (nextView !== view) clearAuthSmsCooldowns();
       view = nextView;
       paramId = parseInt(nextParamId, 10) || 0;
       location.hash = buildHash(view, paramId);
@@ -698,9 +759,26 @@
         button.classList.toggle('is-active', view === navKey);
       });
     }
+    async function fetchRuntimeMeta() {
+      try {
+        var response = await fetch('/api/runtime-meta');
+        if (!response.ok) return runtimeUiState;
+        var payload = await response.json();
+        runtimeUiState = Object.assign({}, runtimeUiState, {
+          env: payload && payload.env ? String(payload.env) : runtimeUiState.env,
+          label: payload && payload.label ? String(payload.label) : runtimeUiState.label,
+          isStaging: !!(payload && payload.isStaging)
+        });
+      } catch (error) {
+      }
+      return runtimeUiState;
+    }
     function renderPageHeader(title, subtitle, options) {
       var config = Object.assign({ back: false, actionHtml: '' }, options || {});
-      return `<div class="page-header"><div class="flex items-start gap-3 min-w-0 flex-1">${config.back ? '<button onclick="back()" class="page-back"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>' : ''}<div class="page-heading"><div class="page-title">${title}</div></div></div>${config.actionHtml || ''}</div>`;
+      var runtimeChip = runtimeUiState.isStaging
+        ? `<div class="mt-2"><span class="chip-muted" style="background:#FFF5E8;color:#A65A00;border-color:rgba(224,123,57,0.18)">${runtimeUiState.label || '测试环境 / staging'}</span></div>`
+        : '';
+      return `<div class="page-header"><div class="flex items-start gap-3 min-w-0 flex-1">${config.back ? '<button onclick="back()" class="page-back"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>' : ''}<div class="page-heading"><div class="page-title">${title}</div>${runtimeChip}</div></div>${config.actionHtml || ''}</div>`;
     }
     function renderEmptyState(icon, title, description, actionHtml) {
       return `<div class="page-shell"><div class="surface-card p-8 text-center"><div class="text-5xl mb-4">${icon}</div><div class="text-lg font-bold mb-2">${title}</div><div class="text-sm text-gray-500 leading-6">${description}</div>${actionHtml ? `<div class="mt-5">${actionHtml}</div>` : ''}</div></div>`;
@@ -944,6 +1022,7 @@
     function normalizeOrderItemSnapshot(item, index) {
       var payload = item || {};
       return Object.assign({
+        orderItemId: 0,
         id: 0,
         productId: 0,
         name: '',
@@ -958,6 +1037,7 @@
         shippingAddressId: '',
         shippingAddressSnapshot: {}
       }, payload, {
+        orderItemId: Number(payload.orderItemId || 0),
         id: Number(payload.id || payload.productId || index + 1),
         productId: Number(payload.productId || payload.id || 0),
         variantId: payload.variantId ? String(payload.variantId) : '',
@@ -1441,6 +1521,10 @@
       return Object.assign({
         id: record && record.id ? Number(record.id) : undefined,
         username: '',
+        nickname: '',
+        hasPassword: true,
+        phone: '',
+        phoneVerifiedAt: 0,
         roles: { isFarmer: false, isAdmin: false, isSuperAdmin: false, farmerName: '' },
         addresses: [],
         shippingAddresses: [],
@@ -1453,6 +1537,10 @@
         createdAt: new Date().toLocaleDateString('zh-CN')
       }, record || {}, {
         id: record && record.id ? Number(record.id) : undefined,
+        nickname: String(record && record.nickname || '').trim(),
+        hasPassword: !!(record && record.hasPassword),
+        phone: String(record && record.phone || '').replace(/[^\d]/g, ''),
+        phoneVerifiedAt: Number(record && record.phoneVerifiedAt || 0),
         roles: normalizeRoleFlags(record && record.username, record && record.roles),
         addresses: Array.isArray(record && record.addresses) ? record.addresses : [],
         shippingAddresses: Array.isArray(record && record.shippingAddresses) ? record.shippingAddresses : [],
@@ -1554,11 +1642,193 @@
         coupon: payload.coupon ? String(payload.coupon) : '',
         couponId: payload.couponId ? String(payload.couponId) : '',
         trackingNo: payload.trackingNo ? String(payload.trackingNo) : '',
+        shipments: Array.isArray(payload.shipments) ? payload.shipments.map(function (shipment) {
+          return {
+            id: shipment && shipment.id ? String(shipment.id) : '',
+            trackingNo: shipment && shipment.trackingNo ? String(shipment.trackingNo) : '',
+            carrierCode: shipment && shipment.carrierCode ? String(shipment.carrierCode) : '',
+            carrierName: shipment && shipment.carrierName ? String(shipment.carrierName) : '',
+            status: shipment && shipment.status ? String(shipment.status) : 'shipped',
+            logisticsSummary: shipment && shipment.logisticsSummary ? String(shipment.logisticsSummary) : '',
+            logisticsState: shipment && shipment.logisticsState ? String(shipment.logisticsState) : ((shipment && shipment.trackingNo) ? 'no_trace' : 'no_tracking'),
+            lastLogisticsQueryAt: Number(shipment && shipment.lastLogisticsQueryAt || 0),
+            lastLogisticsSuccessAt: Number(shipment && shipment.lastLogisticsSuccessAt || 0),
+            orderItemIds: Array.isArray(shipment && shipment.orderItemIds) ? shipment.orderItemIds.map(function (item) { return Number(item || 0); }).filter(function (item) { return item > 0; }) : [],
+            items: Array.isArray(shipment && shipment.items) ? shipment.items.map(function (item, index) { return normalizeOrderItemSnapshot(item, index); }) : [],
+            createdAt: Number(shipment && shipment.createdAt || 0),
+            updatedAt: Number(shipment && shipment.updatedAt || 0),
+            createdBy: shipment && shipment.createdBy ? String(shipment.createdBy) : '',
+            legacySource: shipment && shipment.legacySource ? String(shipment.legacySource) : ''
+          };
+        }) : [],
+        fulfillmentSummary: payload.fulfillmentSummary && typeof payload.fulfillmentSummary === 'object' ? {
+          shipmentCount: Number(payload.fulfillmentSummary.shipmentCount || 0),
+          assignedItemCount: Number(payload.fulfillmentSummary.assignedItemCount || 0),
+          totalItemCount: Number(payload.fulfillmentSummary.totalItemCount || 0),
+          unassignedItemCount: Number(payload.fulfillmentSummary.unassignedItemCount || 0)
+        } : { shipmentCount: 0, assignedItemCount: 0, totalItemCount: 0, unassignedItemCount: 0 },
         reserveExpiresAt: Number(payload.reserveExpiresAt || 0),
+        availableChannels: Array.isArray(payload.availableChannels) ? payload.availableChannels.map(function (item) { return String(item || '').trim(); }).filter(Boolean) : [],
+        recommendedChannel: payload.recommendedChannel ? String(payload.recommendedChannel) : '',
+        wechatBrowser: !!payload.wechatBrowser,
         inventoryReleased: !!payload.inventoryReleased,
         inventoryReleasedAt: Number(payload.inventoryReleasedAt || 0),
         cancelReason: payload.cancelReason ? String(payload.cancelReason) : ''
       };
+    }
+
+    function truncateShipmentProductText(text, maxLength) {
+      var normalized = String(text || '').trim();
+      if (!normalized) return '';
+      if (normalized.length <= maxLength) return normalized;
+      return normalized.slice(0, Math.max(0, maxLength - 5)) + '.....';
+    }
+
+    function getShipmentProductText(shipment, maxLength) {
+      var itemNames = (shipment && Array.isArray(shipment.items) ? shipment.items : []).map(function (item) {
+        return String(item && item.name || '').trim();
+      }).filter(Boolean);
+      return truncateShipmentProductText(itemNames.join(', '), maxLength || 22);
+    }
+
+    function getShipmentFullProductText(shipment) {
+      var itemNames = (shipment && Array.isArray(shipment.items) ? shipment.items : []).map(function (item) {
+        return String(item && item.name || '').trim();
+      }).filter(Boolean);
+      return itemNames.join(', ');
+    }
+
+    function getShipmentSummaryText(shipment) {
+      var payload = shipment || {};
+      if (payload.logisticsSummary) return String(payload.logisticsSummary);
+      if (payload.logisticsState === 'signed') return '已签收';
+      if (payload.trackingNo) return '已录入单号，等待物流公司返回轨迹';
+      return '待发货，暂未录入物流信息';
+    }
+
+    function getShipmentSummaryTone(shipment) {
+      var state = String(shipment && shipment.logisticsState || '').trim();
+      if (state === 'signed') return 'text-[#2D9D4E]';
+      if (state === 'no_trace') return 'text-[#E07B39]';
+      return 'text-gray-400';
+    }
+
+    function clearBuyerRecentOrderFlag(orderId) {
+      var targetOrderId = String(orderId || '').trim();
+      if (!targetOrderId) return;
+      delete buyerLogisticsRefreshState.recentOrderIds[targetOrderId];
+      if (buyerLogisticsRefreshState.recentTimers[targetOrderId]) {
+        clearTimeout(buyerLogisticsRefreshState.recentTimers[targetOrderId]);
+        delete buyerLogisticsRefreshState.recentTimers[targetOrderId];
+      }
+    }
+
+    function isBuyerOrderRecentlyUpdated(orderId) {
+      var targetOrderId = String(orderId || '').trim();
+      if (!targetOrderId) return false;
+      var updatedAt = Number(buyerLogisticsRefreshState.recentOrderIds[targetOrderId] || 0);
+      return updatedAt > 0 && (Date.now() - updatedAt) < BUYER_LOGISTICS_UPDATED_BADGE_MS;
+    }
+
+    function markBuyerOrdersRecentlyUpdated(orderIds) {
+      (Array.isArray(orderIds) ? orderIds : []).forEach(function (orderId) {
+        var targetOrderId = String(orderId || '').trim();
+        if (!targetOrderId) return;
+        clearBuyerRecentOrderFlag(targetOrderId);
+        buyerLogisticsRefreshState.recentOrderIds[targetOrderId] = Date.now();
+        buyerLogisticsRefreshState.recentTimers[targetOrderId] = setTimeout(function () {
+          clearBuyerRecentOrderFlag(targetOrderId);
+          if (view === 'orders' || view === 'orderDetail') render();
+        }, BUYER_LOGISTICS_UPDATED_BADGE_MS);
+      });
+    }
+
+    function renderRecentlyUpdatedBadge(orderId) {
+      return isBuyerOrderRecentlyUpdated(orderId)
+        ? '<span class="inline-flex items-center rounded-full bg-[#E8F5EC] px-2 py-0.5 text-[11px] font-medium text-[#2D9D4E]">刚刚更新</span>'
+        : '';
+    }
+
+    function renderShipmentCardList(shipments, options) {
+      var list = Array.isArray(shipments) ? shipments : [];
+      var config = Object.assign({ compact: false, emptyText: '暂未录入物流信息', orderId: '', collapseExtra: false }, options || {});
+      if (!list.length) {
+        return '<div class="text-xs text-gray-400 mt-2">' + config.emptyText + '</div>';
+      }
+      var displayList = config.collapseExtra && list.length > 1 ? [list[0]] : list;
+      var extraCount = config.collapseExtra && list.length > 1 ? (list.length - 1) : 0;
+      return '<div class="space-y-2 mt-2">' + displayList.map(function (shipment) {
+        var carrier = shipment && shipment.carrierName ? String(shipment.carrierName) : '物流';
+        var summaryTone = getShipmentSummaryTone(shipment);
+        return '<div class="' + (config.compact ? 'rounded-lg bg-[#F9F7F3] p-2' : 'rounded-xl bg-[#F9F7F3] p-3') + '">'
+          + '<div class="flex items-center justify-between gap-2"><div class="text-xs text-gray-500">' + carrier + '</div>' + renderRecentlyUpdatedBadge(config.orderId) + '</div>'
+          + '<div class="text-sm font-medium text-gray-700 mt-1">快递单号：' + (shipment && shipment.trackingNo ? shipment.trackingNo : '待补充') + '</div>'
+          + '<div class="text-xs text-gray-500 mt-1">商品：' + getShipmentProductText(shipment, config.compact ? 18 : 28) + '</div>'
+          + '<div class="text-xs ' + summaryTone + ' mt-1">物流信息：' + getShipmentSummaryText(shipment) + '</div>'
+          + '</div>';
+      }).join('') + (extraCount > 0 ? '<div class="text-xs text-gray-400 mt-1">还有 ' + extraCount + ' 条</div>' : '') + '</div>';
+    }
+
+    function renderShipmentDetailList(shipments, options) {
+      var list = Array.isArray(shipments) ? shipments : [];
+      var config = Object.assign({ emptyText: '暂未录入物流信息', orderId: '' }, options || {});
+      if (!list.length) {
+        return '<div class="text-sm text-gray-400 mt-2">' + config.emptyText + '</div>';
+      }
+      return '<div class="space-y-3 mt-2">' + list.map(function (shipment) {
+        var carrier = shipment && shipment.carrierName ? String(shipment.carrierName) : '物流';
+        var productText = getShipmentFullProductText(shipment);
+        var summaryTone = getShipmentSummaryTone(shipment);
+        return '<div class="rounded-xl bg-[#F9F7F3] p-4">'
+          + '<div class="flex items-center justify-between gap-2"><div class="text-xs text-gray-500">' + carrier + (shipment && shipment.carrierCode ? ' · ' + shipment.carrierCode : '') + '</div>' + renderRecentlyUpdatedBadge(config.orderId) + '</div>'
+          + '<div class="text-sm font-medium text-gray-700 mt-2">快递单号：' + (shipment && shipment.trackingNo ? shipment.trackingNo : '待补充') + '</div>'
+          + '<div class="text-sm text-gray-600 mt-2">商品名称：' + (productText || '待补充') + '</div>'
+          + '<div class="text-sm ' + summaryTone + ' mt-2">物流信息：' + getShipmentSummaryText(shipment) + '</div>'
+          + '</div>';
+      }).join('') + '</div>';
+    }
+
+    function resetAdminFulfillmentDraft() {
+      adminFulfillmentState.draft = { trackingNo: '', carrierCode: '', carrierName: '', selectedOrderItemIds: [] };
+      adminFulfillmentState.dirty = false;
+      adminFulfillmentState.error = '';
+    }
+
+    function hasAdminFulfillmentDraftChanges() {
+      var draft = adminFulfillmentState.draft || {};
+      return !!String(draft.trackingNo || '').trim()
+        || !!String(draft.carrierCode || '').trim()
+        || !!String(draft.carrierName || '').trim()
+        || (Array.isArray(draft.selectedOrderItemIds) && draft.selectedOrderItemIds.length > 0);
+    }
+
+    function markAdminFulfillmentDraftDirty() {
+      adminFulfillmentState.dirty = hasAdminFulfillmentDraftChanges();
+      return adminFulfillmentState.dirty;
+    }
+
+    function setAdminFulfillmentDraftField(field, value) {
+      adminFulfillmentState.draft[field] = value;
+      markAdminFulfillmentDraftDirty();
+    }
+
+    function toggleAdminFulfillmentItem(orderItemId) {
+      var numericId = Number(orderItemId || 0);
+      if (!(numericId > 0)) return;
+      var selected = Array.isArray(adminFulfillmentState.draft.selectedOrderItemIds) ? adminFulfillmentState.draft.selectedOrderItemIds.slice() : [];
+      if (selected.indexOf(numericId) >= 0) selected = selected.filter(function (item) { return item !== numericId; });
+      else selected.push(numericId);
+      adminFulfillmentState.draft.selectedOrderItemIds = selected;
+      markAdminFulfillmentDraftDirty();
+      renderAdminShip();
+    }
+
+    function setAdminFulfillmentDetail(detail) {
+      adminFulfillmentState.detail = detail ? normalizeOrderSnapshot(detail) : null;
+      adminFulfillmentState.view = detail ? 'detail' : 'queue';
+      adminFulfillmentState.selectedOwner = detail && detail.owner ? detail.owner : '';
+      adminFulfillmentState.selectedOrderId = detail && detail.id ? detail.id : '';
+      resetAdminFulfillmentDraft();
     }
 
     function setAllOrders(list) {
@@ -1576,6 +1846,7 @@
 
     async function fetchBuyerOrdersPage(page) {
       if (!user) return setBuyerOrdersPage({ items: [], meta: createPagingMeta(1, buyerOrdersMeta.pageSize || 8, 0) });
+      buyerLogisticsRefreshState.lastListFingerprint = '';
       var query = {
         ownerUsername: user,
         status: buyerOrderFilterState.status || '',
@@ -1584,7 +1855,202 @@
       };
       var response = await fetch('/api/orders' + buildQueryString(query));
       if (!response.ok) throw new Error('我的订单加载失败');
-      return setBuyerOrdersPage(await response.json());
+      var result = setBuyerOrdersPage(await response.json());
+      if (view === 'orders') beginBuyerOrderListLogisticsCheck();
+      return result;
+    }
+
+    async function fetchBuyerOrderById(orderId) {
+      var targetOrderId = String(orderId || '').trim();
+      if (!targetOrderId) throw new Error('订单标识不完整');
+      var response = await fetch('/api/orders/' + encodeURIComponent(targetOrderId));
+      if (!response.ok) throw new Error('订单详情加载失败');
+      return normalizeOrderSnapshot(await response.json());
+    }
+
+    async function requestBuyerOrderListRefreshCheck(visibleOrderIds) {
+      var response = await fetch('/api/orders/logistics-refresh-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          visibleOrderIds: Array.isArray(visibleOrderIds) ? visibleOrderIds : []
+        })
+      });
+      if (!response.ok) throw new Error('物流刷新检查失败');
+      return response.json();
+    }
+
+    async function requestBuyerOrderDetailRefreshCheck(orderId) {
+      var targetOrderId = String(orderId || '').trim();
+      if (!targetOrderId) throw new Error('订单标识不完整');
+      var response = await fetch('/api/orders/' + encodeURIComponent(targetOrderId) + '/logistics-refresh-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      if (!response.ok) throw new Error('物流刷新检查失败');
+      return response.json();
+    }
+
+    function getBuyerOrderListFingerprint() {
+      return [
+        user || '',
+        buyerOrderFilterState.status || '',
+        Number(buyerOrdersMeta.page || 1),
+        orders.map(function (item) { return String(item && item.id || '').trim(); }).filter(Boolean).join(',')
+      ].join('|');
+    }
+
+    function clearBuyerLogisticsListPrompt() {
+      buyerLogisticsRefreshState.listPromptVisible = false;
+      buyerLogisticsRefreshState.listChangedOrderIds = [];
+      buyerLogisticsRefreshState.listVisibleChangedOrderIds = [];
+      buyerLogisticsRefreshState.listChangedCount = 0;
+    }
+
+    function clearBuyerLogisticsDetailPrompt() {
+      buyerLogisticsRefreshState.detailOrderId = '';
+      buyerLogisticsRefreshState.detailPromptVisible = false;
+      buyerLogisticsRefreshState.detailChanged = false;
+    }
+
+    function updateBuyerOrderCache(order) {
+      var normalized = normalizeOrderSnapshot(order);
+      orders = upsertRecordById(orders.map(normalizeOrderSnapshot), normalized).map(normalizeOrderSnapshot).sort(function (a, b) {
+        return Number(b.time || 0) - Number(a.time || 0);
+      });
+      allOrdersState = upsertRecordById((allOrdersState || []).map(normalizeOrderSnapshot), normalized).map(normalizeOrderSnapshot).sort(function (a, b) {
+        return Number(b.time || 0) - Number(a.time || 0);
+      });
+      if (currentCheckoutOrder && String(currentCheckoutOrder.id || '') === String(normalized.id || '')) {
+        currentCheckoutOrder = normalizeOrderSnapshot(normalized);
+      }
+      if (String(view || '') === 'orderDetail') {
+        var currentOrder = orders[paramId];
+        if (!currentOrder || String(currentOrder.id || '') !== String(normalized.id || '')) {
+          var nextIndex = orders.findIndex(function (item) {
+            return String(item && item.id || '') === String(normalized.id || '');
+          });
+          if (nextIndex >= 0) paramId = nextIndex;
+        }
+      }
+      return normalized;
+    }
+
+    function getCurrentScrollTop() {
+      if (typeof window !== 'undefined' && typeof window.scrollY === 'number') return Number(window.scrollY || 0);
+      return 0;
+    }
+
+    function restoreScrollTop(value) {
+      if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+        window.scrollTo(0, Math.max(0, Number(value || 0)));
+      }
+    }
+
+    function beginBuyerOrderListLogisticsCheck() {
+      if (!user || !orders.length) {
+        clearBuyerLogisticsListPrompt();
+        buyerLogisticsRefreshState.pendingListCheckPromise = Promise.resolve(null);
+        return buyerLogisticsRefreshState.pendingListCheckPromise;
+      }
+      var fingerprint = getBuyerOrderListFingerprint();
+      if (buyerLogisticsRefreshState.checkingList || buyerLogisticsRefreshState.lastListFingerprint === fingerprint) {
+        return buyerLogisticsRefreshState.pendingListCheckPromise || Promise.resolve(null);
+      }
+      buyerLogisticsRefreshState.lastListFingerprint = fingerprint;
+      buyerLogisticsRefreshState.checkingList = true;
+      buyerLogisticsRefreshState.pendingListCheckPromise = requestBuyerOrderListRefreshCheck(orders.map(function (item) {
+        return String(item && item.id || '').trim();
+      })).then(function (payload) {
+        var visibleChangedOrderIds = Array.isArray(payload && payload.visibleChangedOrderIds) ? payload.visibleChangedOrderIds.map(function (item) {
+          return String(item || '').trim();
+        }).filter(Boolean) : [];
+        if (visibleChangedOrderIds.length) {
+          buyerLogisticsRefreshState.listPromptVisible = true;
+          buyerLogisticsRefreshState.listChangedOrderIds = Array.isArray(payload && payload.changedOrderIds) ? payload.changedOrderIds.map(function (item) { return String(item || '').trim(); }).filter(Boolean) : [];
+          buyerLogisticsRefreshState.listVisibleChangedOrderIds = visibleChangedOrderIds;
+          buyerLogisticsRefreshState.listChangedCount = Number(payload && payload.changedCount || visibleChangedOrderIds.length || 0);
+          if (view === 'orders') render();
+          return payload;
+        }
+        clearBuyerLogisticsListPrompt();
+        return payload;
+      }).catch(function () {
+        clearBuyerLogisticsListPrompt();
+        return null;
+      }).finally(function () {
+        buyerLogisticsRefreshState.checkingList = false;
+      });
+      return buyerLogisticsRefreshState.pendingListCheckPromise;
+    }
+
+    function beginBuyerOrderDetailLogisticsCheck() {
+      if (view !== 'orderDetail') {
+        buyerLogisticsRefreshState.pendingDetailCheckPromise = Promise.resolve(null);
+        return buyerLogisticsRefreshState.pendingDetailCheckPromise;
+      }
+      var order = orders[paramId];
+      if (!order || buyerLogisticsRefreshState.checkingDetail && buyerLogisticsRefreshState.detailOrderId === String(order.id || '')) {
+        return buyerLogisticsRefreshState.pendingDetailCheckPromise || Promise.resolve(null);
+      }
+      buyerLogisticsRefreshState.detailOrderId = String(order.id || '');
+      buyerLogisticsRefreshState.checkingDetail = true;
+      buyerLogisticsRefreshState.pendingDetailCheckPromise = requestBuyerOrderDetailRefreshCheck(order.id).then(function (payload) {
+        buyerLogisticsRefreshState.detailPromptVisible = !!(payload && payload.changed);
+        buyerLogisticsRefreshState.detailChanged = !!(payload && payload.changed);
+        if (!buyerLogisticsRefreshState.detailPromptVisible) clearBuyerLogisticsDetailPrompt();
+        if (view === 'orderDetail') render();
+        return payload;
+      }).catch(function () {
+        clearBuyerLogisticsDetailPrompt();
+        return null;
+      }).finally(function () {
+        buyerLogisticsRefreshState.checkingDetail = false;
+      });
+      return buyerLogisticsRefreshState.pendingDetailCheckPromise;
+    }
+
+    async function viewBuyerLogisticsUpdates() {
+      if (buyerLogisticsRefreshState.listRefreshing) return;
+      var changedIds = (buyerLogisticsRefreshState.listVisibleChangedOrderIds || []).slice();
+      if (!changedIds.length) return;
+      buyerLogisticsRefreshState.listRefreshing = true;
+      var scrollTop = getCurrentScrollTop();
+      try {
+        var refreshedOrders = await Promise.all(changedIds.map(function (orderId) {
+          return fetchBuyerOrderById(orderId);
+        }));
+        refreshedOrders.forEach(updateBuyerOrderCache);
+        markBuyerOrdersRecentlyUpdated(changedIds);
+        clearBuyerLogisticsListPrompt();
+        render();
+        restoreScrollTop(scrollTop);
+      } catch (error) {
+        alert(error.message || '物流更新失败');
+      } finally {
+        buyerLogisticsRefreshState.listRefreshing = false;
+      }
+    }
+
+    async function refreshCurrentBuyerOrder() {
+      if (buyerLogisticsRefreshState.detailRefreshing) return;
+      var order = orders[paramId];
+      if (!order) return;
+      buyerLogisticsRefreshState.detailRefreshing = true;
+      var scrollTop = getCurrentScrollTop();
+      try {
+        var refreshed = await fetchBuyerOrderById(order.id);
+        updateBuyerOrderCache(refreshed);
+        markBuyerOrdersRecentlyUpdated([order.id]);
+        clearBuyerLogisticsDetailPrompt();
+        render();
+        restoreScrollTop(scrollTop);
+      } catch (error) {
+        alert(error.message || '物流更新失败');
+      } finally {
+        buyerLogisticsRefreshState.detailRefreshing = false;
+      }
     }
 
     async function fetchAdminOrdersPage(page) {
@@ -1595,6 +2061,58 @@
       var response = await fetch('/api/orders' + buildQueryString(query));
       if (!response.ok) throw new Error('订单列表加载失败');
       return setAdminOrdersPage(await response.json());
+    }
+
+    async function downloadAdminOrderCsv() {
+      if (adminOrderListState.exporting) return;
+      adminOrderListState.exporting = true;
+      if (currentAdminTab === 'od') renderAdminOd();
+      try {
+        var response = await fetch('/api/admin/orders/export' + buildQueryString(buildAdminOrderExportQuery()));
+        if (!response.ok) {
+          var errorPayload = null;
+          try {
+            errorPayload = await response.json();
+          } catch (error) { }
+          throw new Error((errorPayload && errorPayload.message) || '订单导出失败');
+        }
+        var blob = await response.blob();
+        var link = document.createElement('a');
+        var objectUrl = window.URL.createObjectURL(blob);
+        link.href = objectUrl;
+        link.download = parseDownloadFilename(response.headers && response.headers.get ? response.headers.get('content-disposition') : '', 'orders-export.csv');
+        if (typeof link.click === 'function') link.click();
+        if (window.URL && typeof window.URL.revokeObjectURL === 'function') window.URL.revokeObjectURL(objectUrl);
+      } catch (error) {
+        alert(error.message || '订单导出失败');
+      } finally {
+        adminOrderListState.exporting = false;
+        if (currentAdminTab === 'od') renderAdminOd();
+      }
+    }
+
+    async function fetchAdminFulfillmentPage(page) {
+      var query = Object.assign({}, adminFulfillmentState.filters, {
+        page: page || adminFulfillmentState.meta.page || 1,
+        pageSize: adminFulfillmentState.meta.pageSize || 8
+      });
+      var response = await fetch('/api/admin/fulfillment/orders' + buildQueryString(query));
+      if (!response.ok) throw new Error('发货队列加载失败');
+      var normalized = normalizePagedPayload(await response.json(), normalizeOrderSnapshot, adminFulfillmentState.meta);
+      adminFulfillmentState.items = normalized.items;
+      adminFulfillmentState.meta = normalized.meta;
+      adminFulfillmentState.loaded = true;
+      return adminFulfillmentState.items;
+    }
+
+    async function fetchAdminFulfillmentDetail(ownerUsername, orderId) {
+      var response = await fetch('/api/admin/fulfillment/orders/' + encodeURIComponent(String(ownerUsername || '').trim()) + '/' + encodeURIComponent(String(orderId || '').trim()));
+      if (!response.ok) throw new Error('发货详情加载失败');
+      var detail = normalizeOrderSnapshot(await response.json());
+      adminFulfillmentState.detail = detail;
+      adminFulfillmentState.selectedOwner = detail.owner || String(ownerUsername || '').trim();
+      adminFulfillmentState.selectedOrderId = detail.id || String(orderId || '').trim();
+      return detail;
     }
 
     function normalizeRefundRequest(refund) {
@@ -1643,7 +2161,7 @@
         orderId: payload.orderId ? String(payload.orderId) : '',
         amount: Number(payload.amount || 0),
         status: payload.status ? String(payload.status) : 'paid',
-        channel: payload.channel ? String(payload.channel) : 'mock_h5',
+        channel: payload.channel ? String(payload.channel) : '',
         couponId: payload.couponId ? String(payload.couponId) : '',
         couponText: payload.couponText ? String(payload.couponText) : '',
         receiverName: payload.receiverName ? String(payload.receiverName) : '',
@@ -1697,6 +2215,23 @@
         return encodeURIComponent(key) + '=' + encodeURIComponent(String(params[key]).trim());
       });
       return pairs.length ? ('?' + pairs.join('&')) : '';
+    }
+
+    function buildAdminOrderExportQuery() {
+      return Object.assign({}, adminOrderListState.filters);
+    }
+
+    function parseDownloadFilename(disposition, fallbackName) {
+      var source = String(disposition || '');
+      var utf8Match = source.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8Match && utf8Match[1]) {
+        try {
+          return decodeURIComponent(String(utf8Match[1]).trim());
+        } catch (error) { }
+      }
+      var plainMatch = source.match(/filename="?([^";]+)"?/i);
+      if (plainMatch && plainMatch[1]) return String(plainMatch[1]).trim();
+      return fallbackName || 'orders-export.csv';
     }
 
     function normalizePagedPayload(payload, normalizer, fallbackMeta) {
@@ -1910,6 +2445,7 @@
       if (config.orders) {
         if (user) tasks.push(fetchBuyerOrdersPage(1));
         if (adminVisible) tasks.push(fetchAdminOrdersPage(1));
+        if (adminVisible && currentAdminTab === 'ship') tasks.push(fetchAdminFulfillmentPage(1).catch(function () { return []; }));
       }
       if (config.refunds && adminVisible) tasks.push(fetchRefunds(Object.assign({}, adminRefundFilters)));
       if (config.ledgers) {
@@ -1989,11 +2525,15 @@
     // 用户扩展资料统一走服务端 users 表缓存，角色、地址、优惠券都从同一份用户记录读取。
     function getUserMeta(uname) {
       var name = uname || user;
-      if (!name) return { roles: { isFarmer: false, isAdmin: false }, addresses: [], shippingAddresses: [], coupons: [], createdAt: '' };
+      if (!name) return { roles: { isFarmer: false, isAdmin: false }, addresses: [], shippingAddresses: [], coupons: [], createdAt: '', phone: '', phoneVerifiedAt: 0 };
       var record = getUserRecord(name);
-      if (!record) return { roles: { isFarmer: false, isAdmin: false }, addresses: [], shippingAddresses: [], coupons: [], createdAt: '' };
+      if (!record) return { roles: { isFarmer: false, isAdmin: false }, addresses: [], shippingAddresses: [], coupons: [], createdAt: '', phone: '', phoneVerifiedAt: 0, nickname: '', hasPassword: false };
       return {
         roles: record.roles || { isFarmer: false, isAdmin: false },
+        nickname: record.nickname || '',
+        hasPassword: !!record.hasPassword,
+        phone: record.phone || '',
+        phoneVerifiedAt: Number(record.phoneVerifiedAt || 0),
         addresses: record.addresses || [],
         shippingAddresses: record.shippingAddresses || [],
         coupons: record.coupons || [],
@@ -2131,13 +2671,13 @@
       var root = document.getElementById('modal-root');
       if (!root) return;
       var units = normalizeVariantUnits(editing, Number(editing && editing.sortOrder || variants.length), { unit: editing.label }).map(function (unit) { return Object.assign({}, unit); });
-      root.innerHTML = '<div class="fixed inset-0 bg-black/30 z-[80] flex items-end sm:items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-xl p-4 max-h-[90vh] overflow-y-auto"><div class="flex items-center justify-between mb-3"><div><div class="font-bold">' + (index >= 0 ? '修改规格' : '新增规格') + '</div></div><button onclick="closeModal()" class="text-gray-400 text-sm">关闭</button></div><div class="space-y-3"><div><div class="text-sm font-medium text-gray-700 mb-1">规格名称</div><input id="variant-modal-label" value="' + escapeHtml(editing.label || '') + '" placeholder="如：礼盒装 / 大份" class="w-full p-2 border rounded-lg text-sm"></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="flex items-center justify-between mb-2"><div><div class="text-sm font-medium text-gray-700">单位价格与单位库存</div></div><button type="button" onclick="addVariantEditorUnitRow()" class="text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增单位</button></div><div id="variant-unit-list" class="space-y-2">' + units.map(function (unit, unitIndex) { return renderVariantEditorUnitRow(unit, unitIndex); }).join('') + '</div><div class="mt-3 rounded-xl bg-white border border-gray-200 p-3"><div class="text-xs text-gray-400">规格库存汇总</div><div id="variant-modal-stock-summary" class="font-bold text-base mt-1">' + units.reduce(function (sum, unit) { return sum + Number(unit.stock || 0); }, 0) + '</div></div></div></div><button onclick="saveVariantEditor()" class="w-full bg-[#2D9D4E] text-white py-2 rounded-lg text-sm">保存规格</button></div></div>';
+      root.innerHTML = '<div class="fixed inset-0 bg-black/30 z-[80] flex items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden p-4 flex flex-col"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">' + (index >= 0 ? '修改规格' : '新增规格') + '</div><div class="text-xs text-gray-500 mt-1">移动端会优先纵向排布字段，避免来回横向拖动。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div><div class="space-y-3 overflow-y-auto pr-1 flex-1"><div><div class="text-sm font-medium text-gray-700 mb-1">规格名称</div><input id="variant-modal-label" value="' + escapeHtml(editing.label || '') + '" placeholder="如：礼盒装 / 大份" class="w-full p-2 border rounded-lg text-sm"></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-2"><div><div class="text-sm font-medium text-gray-700">单位价格与单位库存</div></div><button type="button" onclick="addVariantEditorUnitRow()" class="w-full sm:w-auto text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增单位</button></div><div id="variant-unit-list" class="space-y-2">' + units.map(function (unit, unitIndex) { return renderVariantEditorUnitRow(unit, unitIndex); }).join('') + '</div><div class="mt-3 rounded-xl bg-white border border-gray-200 p-3"><div class="text-xs text-gray-400">规格库存汇总</div><div id="variant-modal-stock-summary" class="font-bold text-base mt-1">' + units.reduce(function (sum, unit) { return sum + Number(unit.stock || 0); }, 0) + '</div></div></div></div><button onclick="saveVariantEditor()" class="w-full bg-[#2D9D4E] text-white py-2 rounded-lg text-sm mt-3">保存规格</button></div></div>';
     }
 
     function renderVariantEditorUnitRow(unit, index) {
       var payload = createUnitDraft(unit);
       return '<div class="rounded-xl bg-white border border-gray-200 p-3" data-unit-row="' + index + '">'
-        + '<div class="grid grid-cols-3 gap-2">'
+        + '<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">'
         + '<input type="hidden" data-unit-id value="' + escapeHtml(payload.id || '') + '">'
         + '<div><div class="text-xs text-gray-400 mb-1">单位名称</div><input data-unit-label value="' + escapeHtml(payload.label || '') + '" oninput="syncVariantEditorStockSummary()" placeholder="如：盒 / 箱 / 提" class="w-full p-2 border rounded-lg text-sm"></div>'
         + '<div><div class="text-xs text-gray-400 mb-1">单位价格</div><input data-unit-price value="' + Number(payload.price || 0) + '" oninput="syncVariantEditorStockSummary()" type="number" min="0" step="0.01" class="w-full p-2 border rounded-lg text-sm"></div>'
@@ -2793,7 +3333,7 @@
         + '<input id="' + prefix + '-images-json" type="hidden" value=\'' + escapeHtml(JSON.stringify(images)) + '\'>'
         + '<input id="' + prefix + '-cover-image" type="hidden" value="' + escapeHtml(cover) + '">'
         + '<div id="' + prefix + '-images-list" class="space-y-2 mb-2">' + renderProductImageListRows(prefix, images, cover) + '</div>'
-        + '<div class="flex items-center gap-2"><input id="' + prefix + '-img" type="file" accept="image/*" multiple class="flex-1 text-sm text-gray-500"><button type="button" onclick="appendProductImagesFromInput(\'' + prefix + '\')" class="px-3 py-2 rounded-full bg-[#2D9D4E] text-white text-xs">上传并加入列表</button></div>'
+        + '<div class="flex flex-col gap-2 sm:flex-row sm:items-center"><input id="' + prefix + '-img" type="file" accept="image/*" multiple class="w-full min-w-0 text-sm text-gray-500"><button type="button" onclick="appendProductImagesFromInput(\'' + prefix + '\')" class="w-full sm:w-auto shrink-0 px-3 py-2 rounded-full bg-[#2D9D4E] text-white text-xs">上传并加入列表</button></div>'
         + '</div>';
     }
 
@@ -2814,7 +3354,6 @@
           if (isNaN(Number(unit.stock || 0)) || Number(unit.stock || 0) < 0) return '单位库存不能小于 0';
         }
       }
-      if (!payload.harvest) return '请填写采摘日期';
       if (isNaN(payload.dispatchHours) || payload.dispatchHours <= 0) return '发货时效必须大于 0 小时';
       if (!payload.shippingAddressId) return '请为商品选择发货地址';
       if ((payload.tags || []).length > 2) return '每个商品最多展示 2 个标签';
@@ -2863,7 +3402,7 @@
       h += '<div class="mb-3">' + renderFieldLabel('商品分类', '用于前台分类筛选与商品归类，数据来自后台“商品分类”维护') + '<select id="' + prefix + '-cat" class="w-full p-2 border rounded-lg text-sm">' + categoryOptions.map(function (item) { return '<option value="' + item.id + '"' + (item.id === (product.cat || getDefaultCategoryId()) ? ' selected' : '') + '>' + item.name + '</option>'; }).join('') + '</select></div>';
       h += '<div class="mb-3">' + renderFieldLabel('商品标签', '最多点亮 2 个标签，会展示在商品大图和商品卡片上') + '<input id="' + prefix + '-tags" type="hidden" value="' + selectedTags.join(',') + '"><div class="flex flex-wrap gap-2">' + PRODUCT_TAG_OPTIONS.map(function (tag) { var active = selectedTags.indexOf(tag) > -1; return '<button type="button" id="' + prefix + '-tag-' + tag + '" onclick="toggleFormTag(\'' + prefix + '\',\'' + tag + '\')" class="' + (active ? 'px-3 py-2 rounded-full text-xs bg-[#2D9D4E] text-white' : 'px-3 py-2 rounded-full text-xs bg-gray-100 text-gray-500') + '">' + tag + '</button>'; }).join('') + '</div></div>';
       h += '<div class="mb-3"><div class="flex items-center justify-between mb-2"><div>' + renderFieldLabel('规格列表', '单位价格和单位库存是真相；规格默认先展示库存与价格摘要，点击规格可展开单位明细') + '</div><button type="button" onclick="openVariantEditor(\'' + prefix + '\',-1)" class="text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增规格</button></div><input id="' + prefix + '-variants-json" type="hidden" value=\'' + escapeHtml(serializeVariantsForField(normalizedProduct.variants || [])) + '\'><div id="' + prefix + '-variants-panel">' + renderVariantListPanel(prefix, normalizedProduct) + '</div><div class="grid grid-cols-3 gap-2 mt-3"><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">商品总库存</div><div id="' + prefix + '-stock-summary" class="font-bold text-base mt-1">' + Number(normalizedProduct.stock || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认展示价</div><div id="' + prefix + '-price-summary" class="font-bold text-base mt-1">' + fmt(normalizedProduct.price || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认单位</div><div id="' + prefix + '-unit-summary" class="font-bold text-sm mt-1">' + escapeHtml(normalizedProduct.unit || '未设置') + '</div></div></div></div>';
-      h += '<div class="mb-3">' + renderFieldLabel('采摘日期') + '<input id="' + prefix + '-harvest" value="' + (product.harvest || '') + '" placeholder="采摘日期" type="date" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<div class="mb-3">' + renderFieldLabel('采摘日期', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-harvest" value="' + (product.harvest || '') + '" placeholder="采摘日期" type="date" class="w-full p-2 border rounded-lg text-sm"></div>';
       h += '<div class="mb-3">' + renderFieldLabel('发货时效', '填写多少小时内发货') + '<input id="' + prefix + '-dispatch-hours" value="' + Number(product.dispatchHours || 4) + '" placeholder="多少小时内发货" type="number" class="w-full p-2 border rounded-lg text-sm"></div>';
       if (canEditFarmer) h += '<div class="mb-3">' + renderFieldLabel('供货人 / 农户名称', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-farmer" value="' + (product.farmer || '') + '" placeholder="请输入供货人名称（可选）" class="w-full p-2 border rounded-lg text-sm"></div>';
       h += '<div class="mb-3">' + renderFieldLabel('来源产地', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-village" value="' + (product.village || '') + '" placeholder="请输入来源产地（可选）" class="w-full p-2 border rounded-lg text-sm"></div>';
@@ -2879,7 +3418,7 @@
       var expanded = !!options.expanded;
       var category = getCategoryMeta(product.cat || getDefaultCategoryId());
       var tagHtml = getProductTags(product.tags || []).map(renderTagBadge).join('');
-      return '<div class="surface-card p-4 mb-3"><div class="space-y-3"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="w-full text-left flex gap-3 items-start"><img src="' + (product.img || DEFAULT_PRODUCT_IMAGE) + '" class="w-16 h-16 rounded-[18px] object-cover shrink-0"><div class="min-w-0 flex-1"><div class="font-medium text-sm">' + product.name + '</div><div class="text-xs text-gray-500 mt-1">' + renderCategoryInline(category, '来源：' + (product.village || '待补充') + ' · 库存：' + product.stock, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' }) + '</div><div class="text-xs text-gray-500 mt-1">采摘：' + product.harvest + ' · ' + Number(product.dispatchHours || 4) + ' 小时内发货</div><div class="text-xs text-gray-500 mt-1">发货地址：' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '未绑定') + '</div>' + (tagHtml ? '<div class="flex flex-wrap gap-2 mt-2">' + tagHtml + '</div>' : '') + '</div></button><div class="flex items-center justify-between gap-2 flex-wrap"><button onclick="toggleProd(' + product.id + ')" class="text-xs px-2 py-1 rounded-full h-fit ' + tone.badge + ' btn">' + (product.off ? '已下架' : '在售') + '</button><div class="flex items-center gap-2"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="text-xs px-3 py-1 rounded-full border border-gray-200 text-gray-500 btn">' + (expanded ? '收起编辑' : '展开编辑') + '</button><button onclick="confirmDeleteProduct(' + product.id + ',\'' + options.source + '\')" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500 btn">删除商品</button></div></div></div><div class="' + (expanded ? 'mt-3 pt-3 border-t border-gray-100' : 'hidden') + '">' + renderProductFormFields(options.prefix, product, options.canEditFarmer) + '<button onclick="' + options.saveAction + '" class="w-full mt-2 ' + tone.button + ' text-white py-2 rounded-lg text-sm btn">' + options.saveText + '</button></div></div>';
+      return '<div class="surface-card p-4 mb-3"><div class="space-y-3"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="w-full text-left flex gap-3 items-start"><img src="' + (product.img || DEFAULT_PRODUCT_IMAGE) + '" class="w-16 h-16 rounded-[18px] object-cover shrink-0"><div class="min-w-0 flex-1"><div class="font-medium text-sm">' + product.name + '</div><div class="text-xs text-gray-500 mt-1">' + renderCategoryInline(category, '来源：' + (product.village || '待补充') + ' · 库存：' + product.stock, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' }) + '</div><div class="text-xs text-gray-500 mt-1">采摘：' + (product.harvest || '待补充') + ' · ' + Number(product.dispatchHours || 4) + ' 小时内发货</div><div class="text-xs text-gray-500 mt-1">发货地址：' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '未绑定') + '</div>' + (tagHtml ? '<div class="flex flex-wrap gap-2 mt-2">' + tagHtml + '</div>' : '') + '</div></button><div class="flex items-center justify-between gap-2 flex-wrap"><button onclick="toggleProd(' + product.id + ')" class="text-xs px-2 py-1 rounded-full h-fit ' + tone.badge + ' btn">' + (product.off ? '已下架' : '在售') + '</button><div class="flex items-center gap-2"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="text-xs px-3 py-1 rounded-full border border-gray-200 text-gray-500 btn">' + (expanded ? '收起编辑' : '展开编辑') + '</button><button onclick="confirmDeleteProduct(' + product.id + ',\'' + options.source + '\')" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500 btn">删除商品</button></div></div></div><div class="' + (expanded ? 'mt-3 pt-3 border-t border-gray-100' : 'hidden') + '">' + renderProductFormFields(options.prefix, product, options.canEditFarmer) + '<button onclick="' + options.saveAction + '" class="w-full mt-2 ' + tone.button + ' text-white py-2 rounded-lg text-sm btn">' + options.saveText + '</button></div></div>';
     }
 
     function validateAddressPayload(payload) {
@@ -2911,7 +3450,7 @@
       var currentId = (document.getElementById(prefix + '-shipping-address-id') || {}).value || '';
       var root = document.getElementById('modal-root');
       if (!root) return;
-      root.innerHTML = '<div class="fixed inset-0 bg-black/30 z-[80] flex items-end sm:items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-md p-4"><div class="flex items-center justify-between mb-3"><div><div class="font-bold">选择发货地址</div></div><button onclick="closeModal()" class="text-gray-400 text-sm">关闭</button></div><div class="space-y-2 max-h-72 overflow-y-auto">' + list.map(function (item) { return '<button onclick="selectShippingAddressForProduct(\'' + prefix + '\',\'' + item.id + '\')" class="w-full text-left rounded-xl border ' + (currentId === item.id ? 'border-[#2D9D4E] bg-[#E8F5EC]' : 'border-gray-200 bg-[#F9F7F3]') + ' p-3"><div class="font-medium text-sm">' + (item.name || '未命名') + ' · ' + (item.phone || '-') + '</div><div class="text-xs text-gray-500 mt-1">' + (item.full || '未填写地址') + '</div></button>'; }).join('') + '</div></div></div>';
+      root.innerHTML = '<div class="fixed inset-0 bg-black/30 z-[80] flex items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-hidden p-4 flex flex-col"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">选择发货地址</div><div class="text-xs text-gray-500 mt-1">默认在当前视口内打开，直接选择即可绑定到商品。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div><div class="space-y-2 overflow-y-auto pr-1">' + list.map(function (item) { return '<button onclick="selectShippingAddressForProduct(\'' + prefix + '\',\'' + item.id + '\')" class="w-full text-left rounded-xl border ' + (currentId === item.id ? 'border-[#2D9D4E] bg-[#E8F5EC]' : 'border-gray-200 bg-[#F9F7F3]') + ' p-3"><div class="font-medium text-sm">' + (item.name || '未命名') + ' · ' + (item.phone || '-') + '</div><div class="text-xs text-gray-500 mt-1">' + (item.full || '未填写地址') + '</div></button>'; }).join('') + '</div></div></div>';
     }
 
     function selectShippingAddressForProduct(prefix, addressId) {
@@ -3391,6 +3930,7 @@
           couponId: summary.coupon ? summary.coupon.id : '',
           couponText: summary.coupon ? (summary.coupon.name + '（' + getCouponBenefitText(summary.coupon) + '）') : ''
         });
+        paymentUiState.showMoreChannels = false;
         await refreshPersistedEntities({ users: true, orders: true, products: true });
         pushView('payment');
       } catch (checkoutError) {
@@ -3582,17 +4122,48 @@
       return normalizeOrderSnapshot(await response.json());
     }
 
-    async function payPendingOrderOnServer(ownerUsername, orderId) {
-      var response = await fetch('/api/orders/' + encodeURIComponent(orderId) + '/pay', {
+    async function createPaymentLaunchOnServer(orderId, channel) {
+      var normalizedChannel = String(channel || '').trim() || 'alipay_wap';
+      var path = '/api/orders/' + encodeURIComponent(orderId) + '/alipay-wap';
+      var errorText = '支付发起失败';
+      if (normalizedChannel === 'wechat_h5_inapp') {
+        path = '/api/orders/' + encodeURIComponent(orderId) + '/wechat-inapp-h5';
+        errorText = '微信内 H5 支付发起失败';
+      } else if (normalizedChannel === 'wechat_h5_external') {
+        path = '/api/orders/' + encodeURIComponent(orderId) + '/wechat-external-h5';
+        errorText = '微信外 H5 支付发起失败';
+      } else {
+        normalizedChannel = 'alipay_wap';
+        errorText = '支付宝支付发起失败';
+      }
+      var response = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ownerUsername: ownerUsername })
+        body: JSON.stringify({})
       });
       if (!response.ok) {
-        var errorPayload = await response.json().catch(function () { return { message: '待支付订单支付失败' }; });
-        throw new Error((errorPayload && errorPayload.message) || '待支付订单支付失败');
+        var errorPayload = await response.json().catch(function () { return { message: errorText }; });
+        throw new Error((errorPayload && errorPayload.message) || errorText);
       }
-      return normalizeOrderSnapshot(await response.json());
+      return await response.json();
+    }
+
+    async function fetchPaymentStatusOnServer(orderId, options) {
+      var query = buildQueryString({
+        returnCheck: options && options.returnCheck ? '1' : ''
+      });
+      var response = await fetch('/api/orders/' + encodeURIComponent(orderId) + '/payment-status' + query);
+      if (!response.ok) {
+        var errorPayload = await response.json().catch(function () { return { message: '支付状态获取失败' }; });
+        throw new Error((errorPayload && errorPayload.message) || '支付状态获取失败');
+      }
+      var payload = await response.json();
+      return {
+        order: normalizeOrderSnapshot(payload && payload.order || {}),
+        paymentTransaction: payload && payload.paymentTransaction || null,
+        awaitingAsyncNotify: !!(payload && payload.awaitingAsyncNotify),
+        isFinal: !!(payload && payload.isFinal)
+      };
     }
 
     async function cancelPendingOrderOnServer(ownerUsername, orderId) {
@@ -3678,6 +4249,31 @@
       return Object.assign({}, product || {}, { _audit: createAuditMeta(overrides) });
     }
 
+    function submitExternalPostForm(action, params) {
+      if (!action || !params) throw new Error('支付跳转参数不完整');
+      if (!document.body || typeof document.body.appendChild !== 'function') {
+        window.__lastPaymentLaunch = { action: action, params: params };
+        return;
+      }
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = action;
+      form.style.display = 'none';
+      Object.keys(params).forEach(function (key) {
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = params[key];
+        form.appendChild(input);
+      });
+      document.body.appendChild(form);
+      if (typeof form.submit === 'function') {
+        form.submit();
+        return;
+      }
+      window.__lastPaymentLaunch = { action: action, params: params };
+    }
+
     function loadData() {
       localStorage.removeItem('cs_user');
       updateCartBadge();
@@ -3705,18 +4301,21 @@
         case 'category': app.innerHTML = category(); break;
         case 'cart': app.innerHTML = cartPage(); break;
         case 'profile': app.innerHTML = profile(); break;
+        case 'security': app.innerHTML = accountSecurityPage(); break;
         case 'search': app.innerHTML = search(); break;
         case 'product': app.innerHTML = product(paramId); break;
         case 'orders': app.innerHTML = ordersPage(); break;
         case 'orderDetail': app.innerHTML = orderDetail(paramId); break;
         case 'confirmOrder': app.innerHTML = confirmOrderPage(); break;
         case 'payment': app.innerHTML = paymentPage(); break;
+        case 'paymentResult': app.innerHTML = paymentResultPage(); break;
         case 'member': app.innerHTML = memberCenter(); break;
         case 'address': app.innerHTML = addressPage(); break;
         case 'coupon': app.innerHTML = couponPage(); break;
         case 'trace': app.innerHTML = tracePage(paramId); break;
         case 'login': app.innerHTML = loginPage(); break;
         case 'register': app.innerHTML = registerPage(); break;
+        case 'forgotPassword': app.innerHTML = forgotPasswordPage(); break;
         default: app.innerHTML = home();
       }
       if (view === 'home') scheduleBannerAutoRotation();
@@ -3949,7 +4548,7 @@ ${p.farmer ? `<div class="soft-card p-4 mb-4">
 </div></div>`: ''}
 <div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">📦 配送信息</div>
-<div class="text-sm text-gray-500">采摘日期: ${p.harvest}</div>
+<div class="text-sm text-gray-500">采摘日期: ${p.harvest || '待补充'}</div>
 <div class="text-sm text-gray-500">${p.dispatchHours || 4}小时内发货</div>
 </div>
 <div class="flex gap-3">
@@ -4022,10 +4621,90 @@ ${validationError ? `<div class="text-xs text-[#E07B39] mb-3">${validationError}
 </div></div>`;
     }
 
+    function detectWechatBrowser() {
+      var ua = String((window.navigator && window.navigator.userAgent) || (typeof navigator !== 'undefined' && navigator.userAgent) || '').toLowerCase();
+      return ua.indexOf('micromessenger') >= 0;
+    }
+
+    function getAvailablePaymentChannels(order) {
+      var snapshot = normalizeOrderSnapshot(order || {});
+      var channels = snapshot.availableChannels && snapshot.availableChannels.length
+        ? snapshot.availableChannels.slice()
+        : (detectWechatBrowser() ? ['wechat_h5_inapp', 'alipay_wap'] : ['alipay_wap', 'wechat_h5_external']);
+      channels.sort(function (left, right) {
+        if (left === 'alipay_wap') return -1;
+        if (right === 'alipay_wap') return 1;
+        return 0;
+      });
+      return channels;
+    }
+
+    function getRecommendedPaymentChannel(order) {
+      var snapshot = normalizeOrderSnapshot(order || {});
+      var channels = getAvailablePaymentChannels(snapshot);
+      if (channels.indexOf('alipay_wap') >= 0) return 'alipay_wap';
+      if (snapshot.recommendedChannel && channels.indexOf(snapshot.recommendedChannel) >= 0) return snapshot.recommendedChannel;
+      return channels[0] || 'alipay_wap';
+    }
+
+    function getPaymentChannelLabel(channel) {
+      if (channel === 'wechat_h5_inapp' || channel === 'wechat_h5_external') return '微信支付';
+      return '支付宝支付';
+    }
+
+    function getPaymentResultChannelLabel(channel) {
+      if (channel === 'wechat_h5_inapp') return '微信内 H5 支付';
+      if (channel === 'wechat_h5_external') return '微信外 H5 支付';
+      if (channel === 'alipay_wap') return '支付宝手机网站支付';
+      return '待确认';
+    }
+
+    function toggleMorePaymentChannels() {
+      paymentUiState.showMoreChannels = !paymentUiState.showMoreChannels;
+      render();
+    }
+
+    async function startPaymentChannel(channel) {
+      if (!user || !currentCheckoutOrder) return;
+      if (currentCheckoutOrder.status !== 'pending' || currentCheckoutOrder.inventoryReleased || isPendingOrderExpired(currentCheckoutOrder)) {
+        alert('订单已超时取消，不能继续支付');
+        return;
+      }
+      try {
+        var launch = await createPaymentLaunchOnServer(currentCheckoutOrder.id, channel);
+        paymentResultState = {
+          orderId: currentCheckoutOrder.id,
+          order: normalizeOrderSnapshot(Object.assign({}, currentCheckoutOrder, {
+            availableChannels: launch.availableChannels || currentCheckoutOrder.availableChannels || [],
+            recommendedChannel: launch.recommendedChannel || channel || currentCheckoutOrder.recommendedChannel || ''
+          })),
+          paymentTransaction: launch.paymentTransaction || null,
+          awaitingAsyncNotify: true,
+          isLoading: false,
+          error: ''
+        };
+        paymentUiState.showMoreChannels = false;
+        submitExternalPostForm(launch.gateway, launch.params || {});
+      } catch (error) {
+        alert(error.message || '支付发起失败');
+      }
+    }
+
+    async function startRecommendedPayment() {
+      return startPaymentChannel(getRecommendedPaymentChannel(currentCheckoutOrder));
+    }
+
+    async function startSecondaryPaymentChannel(channel) {
+      return startPaymentChannel(channel);
+    }
+
     function paymentPage() {
       if (!currentCheckoutOrder) return renderEmptyState('💳', '暂无待支付订单', '待支付订单创建后会在这里展示支付时效和锁定中的商品。', `<button onclick="go('cart')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回购物车</button>`);
       var reserveText = getPendingOrderReserveText(currentCheckoutOrder);
       var expired = isPendingOrderExpired(currentCheckoutOrder) || currentCheckoutOrder.status !== 'pending';
+      var availableChannels = getAvailablePaymentChannels(currentCheckoutOrder);
+      var recommendedChannel = getRecommendedPaymentChannel(currentCheckoutOrder);
+      var secondaryChannels = availableChannels.filter(function (item) { return item !== recommendedChannel; });
       return `<div class="page-shell compact">
 ${renderPageHeader('支付订单', expired ? '这笔待支付订单已超时取消。' : '进入支付即已锁定库存，请在有效期内完成支付。', { back: true })}
 <div class="surface-card p-4 mb-4">
@@ -4033,7 +4712,7 @@ ${renderPageHeader('支付订单', expired ? '这笔待支付订单已超时取�
 <div class="font-bold mt-1">${currentCheckoutOrder.id}</div>
 <div class="mt-4 text-xs text-gray-500">应付金额</div>
 <div class="text-3xl font-bold text-[#2D9D4E] mt-1">${fmt(currentCheckoutOrder.total)}</div>
-<div class="text-xs ${expired ? 'text-[#E07B39]' : 'text-gray-400'} mt-2">${reserveText || '测试阶段先用按钮模拟 H5 支付完成，后续接入微信 / 支付宝支付。'}</div>
+<div class="text-xs ${expired ? 'text-[#E07B39]' : 'text-gray-400'} mt-2">${reserveText || '订单已创建，支付结果以支付宝异步通知为准。'}</div>
 </div>
 <div class="surface-card p-4 mb-4">
 <div class="font-bold mb-3">收货地址</div>
@@ -4044,7 +4723,47 @@ ${renderPageHeader('支付订单', expired ? '这笔待支付订单已超时取�
 <div class="space-y-3">${(currentCheckoutOrder.items || []).map(function (item) { return `<div class="rounded-xl bg-[#F9F7F3] p-3"><div class="flex gap-3"><img src="${item.img}" class="w-12 h-12 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm">${item.name}</div><div class="text-xs text-gray-500 mt-1">${item.variantLabel || '默认规格'} / ${item.unit || item.unitLabel || '默认单位'} × ${item.qty}</div><div class="text-xs text-gray-500 mt-2">发货地址：${getAddressSummary(item.shippingAddressSnapshot)}</div></div><div class="text-sm font-bold text-[#2D9D4E]">${fmt(item.price * item.qty)}</div></div></div>`; }).join('')}</div>
 </div>
 ${expired ? `<div class="bg-[#FFF7ED] text-[#E07B39] rounded-xl p-4 text-sm mb-3">订单已超时取消，请返回订单列表或购物车重新下单。</div>` : ''}
-<button onclick="completeMockPayment()" class="w-full ${expired ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#E07B39]'} text-white py-3 rounded-xl font-medium btn">${expired ? '订单已超时取消' : '确认已完成支付'}</button>
+${!expired ? `<div class="soft-card p-4 mb-3 text-sm text-gray-500">${recommendedChannel === 'alipay_wap' ? '当前默认推荐支付宝支付；如需微信支付，可从“更多支付方式”进入，回跳后仍以服务端异步通知确认结果。' : (recommendedChannel === 'wechat_h5_external' ? '当前环境默认推荐微信外 H5 支付；回跳后仍以服务端异步通知确认结果。' : '当前环境默认推荐微信支付；回跳后仍会以服务端异步通知确认结果。')}</div>` : ''}
+<button onclick="startRecommendedPayment()" class="w-full ${expired ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#1677FF]'} text-white py-3 rounded-xl font-medium btn">${expired ? '订单已超时取消' : getPaymentChannelLabel(recommendedChannel)}</button>
+${!expired && secondaryChannels.length ? `<button onclick="toggleMorePaymentChannels()" class="w-full mt-2 py-3 rounded-xl border border-gray-200 text-gray-500 btn">更多支付方式</button>` : ''}
+${!expired && secondaryChannels.length && paymentUiState.showMoreChannels ? `<div class="surface-card p-3 mb-3 mt-2">${secondaryChannels.map(function (channel) { return `<button onclick="startSecondaryPaymentChannel('${channel}')" class="w-full py-3 rounded-xl border border-gray-200 text-gray-600 btn ${channel === secondaryChannels[0] ? '' : 'mt-2'}">${getPaymentChannelLabel(channel)}${channel === 'wechat_h5_external' ? '（微信外 H5）' : (channel === 'wechat_h5_inapp' ? '（微信内 H5）' : '（支付宝 H5）')}</button>`; }).join('')}</div>` : ''}
+${!expired ? `<button onclick="openPaymentResultPage(currentCheckoutOrder.id)" class="w-full mt-2 py-3 rounded-xl border border-gray-200 text-gray-500 btn">我已返回，查看支付结果</button>` : ''}
+</div>`;
+    }
+
+    function paymentResultPage() {
+      var orderId = routeQuery.orderId || paymentResultState.orderId || '';
+      if (!orderId) {
+        return renderEmptyState('💳', '暂无支付结果', '请从待支付订单进入支付宝后，再返回这里确认结果。', `<button onclick="go('orders')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回订单列表</button>`);
+      }
+      var resultOrder = paymentResultState.order && String(paymentResultState.order.id || '') === String(orderId) ? paymentResultState.order : null;
+      var tx = paymentResultState.paymentTransaction || null;
+      var awaiting = !!paymentResultState.awaitingAsyncNotify;
+      var paid = resultOrder && resultOrder.status === 'paid';
+      var cancelled = resultOrder && (resultOrder.status === 'cancelled' || resultOrder.inventoryReleased);
+      var title = paymentResultState.isLoading ? '正在确认支付结果' : (paid ? '支付结果已确认' : (cancelled ? '订单已取消或超时' : '支付结果确认中'));
+      var desc = paymentResultState.error
+        ? paymentResultState.error
+        : (paymentResultState.isLoading
+          ? '正在向服务端查询支付异步通知结果，请稍候。'
+          : (paid
+            ? '支付回调已被服务端确认，订单已进入待发货。'
+            : (awaiting
+              ? '你已从支付渠道返回，当前仍在等待服务端异步通知确认，请稍后刷新。'
+              : '如果刚完成支付但这里还未变更，请稍后再刷新一次。')));
+      return `<div class="page-shell compact">
+${renderPageHeader('支付结果', desc, { back: true })}
+<div class="surface-card p-4 mb-4">
+<div class="text-xs text-gray-500">订单号</div>
+<div class="font-bold mt-1">${orderId}</div>
+<div class="mt-4 text-xs text-gray-500">当前状态</div>
+<div class="text-2xl font-bold mt-1 ${paid ? 'text-[#2D9D4E]' : (cancelled ? 'text-[#E07B39]' : 'text-[#1677FF]')}">${title}</div>
+${resultOrder ? `<div class="text-sm text-gray-500 mt-3">订单状态：${getOrderStatusLabel(resultOrder.status)}</div>` : ''}
+${tx ? `<div class="text-sm text-gray-500 mt-1">支付渠道：${getPaymentResultChannelLabel(tx.channel)}</div>` : ''}
+${tx && tx.gatewayTradeNo ? `<div class="text-sm text-gray-500 mt-1">${tx.channel === 'alipay_wap' ? '支付宝交易号' : '微信交易号'}：${tx.gatewayTradeNo}</div>` : ''}
+</div>
+<button onclick="syncPaymentResultStatus({ orderId: '${orderId}', returnCheck: false, force: true })" class="w-full bg-[#1677FF] text-white py-3 rounded-xl font-medium btn">${paymentResultState.isLoading ? '查询中...' : '刷新支付结果'}</button>
+<button onclick="go('orders')" class="w-full mt-2 py-3 rounded-xl border border-gray-200 text-gray-500 btn">返回订单列表</button>
 </div>`;
     }
 
@@ -4057,27 +4776,57 @@ ${renderPageHeader('功能说明', '当前版本聚焦交易闭环与后台可�
 </div></div>`;
     }
 
+    function isBuyerOrderPendingRefresh(orderId) {
+      var targetOrderId = String(orderId || '').trim();
+      if (!targetOrderId) return false;
+      return (buyerLogisticsRefreshState.listVisibleChangedOrderIds || []).some(function (item) {
+        return String(item || '').trim() === targetOrderId;
+      });
+    }
+
+    function renderBuyerOrderRefreshStrip() {
+      if (!buyerLogisticsRefreshState.listPromptVisible || !(buyerLogisticsRefreshState.listVisibleChangedOrderIds || []).length) return '';
+      var changedCount = Number(buyerLogisticsRefreshState.listChangedCount || buyerLogisticsRefreshState.listVisibleChangedOrderIds.length || 0);
+      return '<div class="surface-card p-3 mb-3 border border-[#CDE8D6] bg-[#F3FBF5]">'
+        + '<div class="flex items-center justify-between gap-3">'
+        + '<div><div class="text-sm font-medium text-[#2C3A2D]">物流信息有更新</div><div class="text-xs text-gray-500 mt-1">' + changedCount + ' 笔订单查到新的物流结果</div></div>'
+        + '<button onclick="event.stopPropagation();viewBuyerLogisticsUpdates()" class="shrink-0 min-h-[44px] px-4 py-2 rounded-xl bg-[#2D9D4E] text-white text-sm btn">' + (buyerLogisticsRefreshState.listRefreshing ? '更新中...' : '查看更新') + '</button>'
+        + '</div></div>';
+    }
+
+    function renderBuyerOrderCard(order, index) {
+      var o = normalizeOrderSnapshot(order);
+      var p = o.items[0];
+      var latestRefund = getLatestRefundRequest(o.id, user);
+      var shouldShowShipmentList = o.status === 'paid' || o.status === 'shipped' || o.status === 'done' || (Array.isArray(o.shipments) && o.shipments.length > 0);
+      var shouldShowRefreshHint = isBuyerOrderPendingRefresh(o.id);
+      return '<div id="buyer-order-card-' + o.id + '" class="surface-card p-3.5" onclick="pushView(\'orderDetail\',' + index + ')">'
+        + '<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">订单号: ' + o.id + '</span><span class="' + getOrderStatusTone(o.status) + '">' + getOrderStatusLabel(o.status) + '</span></div>'
+        + '<div class="flex gap-3"><img src="' + p.img + '" class="w-14 h-14 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm line-clamp-1">' + p.name + (o.items.length > 1 ? ('等' + o.items.length + '件') : '') + '</div><div class="text-xs text-gray-500 mt-1">' + o.items.length + '件 · 实付<span class="text-[#2D9D4E] font-bold">' + fmt(o.total) + '</span></div></div></div>'
+        + (shouldShowRefreshHint ? '<div class="mt-2 rounded-xl bg-[#F3FBF5] px-3 py-2 text-xs text-[#2D9D4E]">物流信息有更新</div>' : '')
+        + (shouldShowShipmentList ? '<div class="mt-2"><div class="text-xs font-medium text-gray-500">物流卡片</div>' + renderShipmentCardList(o.shipments, { compact: true, emptyText: o.status === 'paid' ? '待发货，暂未录入物流信息' : '暂未录入物流信息', orderId: o.id, collapseExtra: true }) + '</div>' : '')
+        + (o.status === 'pending' ? '<div class="text-xs ' + (isPendingOrderExpired(o) ? 'text-[#E07B39]' : 'text-gray-400') + ' mt-2">' + getPendingOrderReserveText(o) + '</div>' : '')
+        + (latestRefund && latestRefund.status === 'pending' ? '<div class="text-xs text-[#E07B39] mt-2">退款原因：' + (latestRefund.reason || '未填写') + '</div>' : '')
+        + (latestRefund && latestRefund.status === 'rejected' ? '<div class="text-xs text-red-500 mt-2">最近退款申请已被驳回' + (latestRefund.rejectReason ? '：' + latestRefund.rejectReason : '') + '</div>' : '')
+        + (o.status === 'pending' ? '<div class="mt-3 flex gap-2"><button onclick="event.stopPropagation();payOrder(' + index + ')" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">去支付</button><button onclick="event.stopPropagation();cancelOrder(' + index + ')" class="flex-1 py-2 rounded-lg border border-gray-200 text-gray-500 text-sm">取消订单</button></div>' : '')
+        + (o.status === 'paid' || o.status === 'shipped' ? '<div class="mt-3 flex gap-2"><button onclick="event.stopPropagation();requestRefund(' + index + ')" class="flex-1 py-2 rounded-lg border border-[#E07B39] text-[#E07B39] text-sm">' + (o.status === 'shipped' ? '申请退款' : '取消订单并退款') + '</button></div>' : '')
+        + '<div class="text-xs text-gray-400 mt-2">' + new Date(o.time).toLocaleDateString('zh-CN') + '</div></div>';
+    }
+
+    function renderBuyerOrderDetailRefreshStrip(orderId) {
+      if (!buyerLogisticsRefreshState.detailPromptVisible || String(buyerLogisticsRefreshState.detailOrderId || '') !== String(orderId || '')) return '';
+      return '<div class="surface-card p-3 mb-4 border border-[#CDE8D6] bg-[#F3FBF5]"><div class="flex items-center justify-between gap-3"><div><div class="text-sm font-medium text-[#2C3A2D]">当前订单物流信息有更新</div><div class="text-xs text-gray-500 mt-1">确认后只刷新当前订单，不会打乱列表筛选和页码。</div></div><button onclick="refreshCurrentBuyerOrder()" class="shrink-0 min-h-[44px] px-4 py-2 rounded-xl bg-[#2D9D4E] text-white text-sm btn">' + (buyerLogisticsRefreshState.detailRefreshing ? '更新中...' : '刷新当前订单') + '</button></div></div>';
+    }
+
     function ordersPage() {
       if (!user) return renderEmptyState('📋', '登录后查看订单', '订单、退款和待支付状态都会统一沉淀在这里。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">登录</button>`);
       if (buyerOrdersMeta.totalCount === 0) return renderEmptyState('📦', '暂无订单', '先去首页逛逛，下单后这里会展示待支付、发货和退款状态。', `<button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">去逛逛</button>`);
       return `<div class="page-shell compact">
 ${renderPageHeader('我的订单', '统一查看待支付、发货、退款和完成状态。', { back: true })}
 <div class="surface-card p-3 mb-3"><div class="flex items-center gap-2"><select id="buyer-order-status-filter" class="flex-1 p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ${buyerOrderFilterState.status === 'pending' ? 'selected' : ''}>待支付</option><option value="paid" ${buyerOrderFilterState.status === 'paid' ? 'selected' : ''}>待发货</option><option value="shipped" ${buyerOrderFilterState.status === 'shipped' ? 'selected' : ''}>已发货</option><option value="done" ${buyerOrderFilterState.status === 'done' ? 'selected' : ''}>已完成</option><option value="cancelled" ${buyerOrderFilterState.status === 'cancelled' ? 'selected' : ''}>已取消</option><option value="refunded" ${buyerOrderFilterState.status === 'refunded' ? 'selected' : ''}>已退款</option></select><button onclick="applyBuyerOrderFilters()" class="px-4 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm btn">筛选</button></div></div>
+${renderBuyerOrderRefreshStrip()}
 <div class="space-y-3">
-${orders.map((o, i) => {
-        const p = o.items[0];
-        var latestRefund = getLatestRefundRequest(o.id, user);
-        return `<div class="surface-card p-3.5" onclick="pushView('orderDetail',${i})">
-<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">订单号: ${o.id}</span><span class="${getOrderStatusTone(o.status)}">${getOrderStatusLabel(o.status)}</span></div>
-<div class="flex gap-3"><img src="${p.img}" class="w-14 h-14 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm line-clamp-1">${p.name}${o.items.length > 1 ? `等${o.items.length}件` : ''}</div><div class="text-xs text-gray-500 mt-1">${o.items.length}件 · 实付<span class="text-[#2D9D4E] font-bold">${fmt(o.total)}</span></div></div></div>
-${o.trackingNo ? `<div class="text-xs text-gray-400 mt-2">物流编号：${o.trackingNo}</div>` : ''}
-${o.status === 'pending' ? `<div class="text-xs ${isPendingOrderExpired(o) ? 'text-[#E07B39]' : 'text-gray-400'} mt-2">${getPendingOrderReserveText(o)}</div>` : ''}
-${latestRefund && latestRefund.status === 'pending' ? `<div class="text-xs text-[#E07B39] mt-2">退款原因：${latestRefund.reason || '未填写'}</div>` : ''}
-${latestRefund && latestRefund.status === 'rejected' ? `<div class="text-xs text-red-500 mt-2">最近退款申请已被驳回${latestRefund.rejectReason ? '：' + latestRefund.rejectReason : ''}</div>` : ''}
-${o.status === 'pending' ? `<div class="mt-3 flex gap-2"><button onclick="event.stopPropagation();payOrder(${i})" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">去支付</button><button onclick="event.stopPropagation();cancelOrder(${i})" class="flex-1 py-2 rounded-lg border border-gray-200 text-gray-500 text-sm">取消订单</button></div>` : ''}
-${o.status === 'paid' || o.status === 'shipped' ? `<div class="mt-3 flex gap-2"><button onclick="event.stopPropagation();requestRefund(${i})" class="flex-1 py-2 rounded-lg border border-[#E07B39] text-[#E07B39] text-sm">${o.status === 'shipped' ? '申请退款' : '取消订单并退款'}</button></div>` : ''}
-<div class="text-xs text-gray-400 mt-2">${new Date(o.time).toLocaleDateString('zh-CN')}</div></div>`;
-      }).join('')}
+${orders.map(function (o, i) { return renderBuyerOrderCard(o, i); }).join('')}
 </div>
 ${renderPager(buyerOrdersMeta, 'changeBuyerOrderPage')}
 </div>`;
@@ -4088,15 +4837,17 @@ ${renderPager(buyerOrdersMeta, 'changeBuyerOrderPage')}
       if (!o) return renderEmptyState('📦', '订单不存在', '这笔订单可能已被刷新或删除，请返回订单列表重新查看。', `<button onclick="go('orders')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回订单列表</button>`);
       var addrText = o.address ? (o.address.name + ' · ' + o.address.phone + ' · ' + o.address.full) : '暂无地址信息';
       var latestRefund = getLatestRefundRequest(o.id, user);
+      var shouldShowShipmentDetail = o.status === 'paid' || o.status === 'shipped' || o.status === 'done' || (Array.isArray(o.shipments) && o.shipments.length > 0);
       return `<div class="page-shell compact">
 ${renderPageHeader('订单详情', '商品、地址、物流、退款和待支付时效都在这里集中展示。', { back: true })}
+${renderBuyerOrderDetailRefreshStrip(o.id)}
 <div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">订单状态</div>
 <div class="${getOrderStatusTone(o.status)} font-bold">${getOrderStatusLabel(o.status)}</div>
 <div class="text-sm text-gray-500 mt-1">订单号: ${o.id}</div>
 <div class="text-sm text-gray-500">下单时间: ${new Date(o.time).toLocaleString('zh-CN')}</div>
 ${o.status === 'pending' ? `<div class="text-sm ${isPendingOrderExpired(o) ? 'text-[#E07B39]' : 'text-gray-500'}">${getPendingOrderReserveText(o)}</div>` : ''}
-${o.trackingNo ? `<div class="text-sm text-gray-500">物流编号: ${o.trackingNo}</div>` : ''}
+${o.fulfillmentSummary && o.fulfillmentSummary.shipmentCount ? `<div class="text-sm text-gray-500">已录运单：${o.fulfillmentSummary.shipmentCount} 个</div>` : ''}
 </div>
 ${latestRefund ? `<div class="surface-card p-4 mb-4"><div class="font-medium mb-2">退款处理</div><div class="${getRefundStatusTone(latestRefund.status)} font-bold">${getRefundStatusLabel(latestRefund.status)}</div><div class="text-sm text-gray-500 mt-2">退款原因：${latestRefund.reason || '未填写'}</div>${latestRefund.rejectReason ? `<div class="text-sm text-red-500 mt-2">驳回原因：${latestRefund.rejectReason}</div>` : ''}${latestRefund.completedAt ? `<div class="text-sm text-gray-500 mt-2">完成时间：${new Date(latestRefund.completedAt).toLocaleString('zh-CN')}</div>` : ''}</div>` : ''}
 <div class="surface-card p-4 mb-4">
@@ -4108,9 +4859,9 @@ ${o.items.map(i => `<div class="flex gap-3 py-2 border-b last:border-0">
 </div>`).join('')}
 <div class="flex justify-between font-bold mt-3 pt-3 border-t"><span>实付金额</span><span class="text-[#2D9D4E]">${fmt(o.total)}</span></div>
 </div>
-${o.status === 'shipped' ? `<div class="soft-card p-4 mb-4">
+${shouldShowShipmentDetail ? `<div class="soft-card p-4 mb-4">
 <div class="font-medium text-[#2D9D4E] mb-2">📍 物流信息</div>
-<div class="text-sm text-gray-600">物流编号：${o.trackingNo || '待补充'}</div>
+${renderShipmentDetailList(o.shipments, { emptyText: o.status === 'paid' ? '待发货，暂未录入物流信息' : '暂未录入物流信息', orderId: o.id })}
 </div>`: ''}
 <div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">收货地址</div>
@@ -4137,28 +4888,200 @@ ${renderPageHeader('溯源档案', '当前阶段只展示来源信息，不扩�
 <div class="surface-card p-4 space-y-3">
 <div><div class="text-sm text-gray-500 mb-1">来源产地</div><div class="font-medium">${p.village || '待补充'}</div></div>
 <div><div class="text-sm text-gray-500 mb-1">种植 / 供货人</div><div class="font-medium">${p.farmer || '待补充'}</div></div>
-<div><div class="text-sm text-gray-500 mb-1">采摘日期</div><div class="font-medium">${p.harvest}</div></div>
+<div><div class="text-sm text-gray-500 mb-1">采摘日期</div><div class="font-medium">${p.harvest || '待补充'}</div></div>
 <div><div class="text-sm text-gray-500 mb-1">发货时效</div><div class="font-medium">${p.dispatchHours || 4}小时内发货</div></div>
 </div></div>`;
     }
 
+    function maskPhoneNumber(value) {
+      var digits = String(value || '').replace(/[^\d]/g, '');
+      if (digits.length !== 11) return digits;
+      return digits.slice(0, 3) + '****' + digits.slice(-4);
+    }
+
+    function getCurrentUserDisplayName(meta, uname) {
+      var payload = meta || getUserMeta(uname);
+      if (payload.nickname) return payload.nickname;
+      if (payload.phone) return maskPhoneNumber(payload.phone);
+      return uname || user || '';
+    }
+
+    function setLoginMode(mode) {
+      var draft = captureAuthFieldValues(['login-phone', 'login-code', 'login-password']);
+      authUiState.loginMode = mode === 'password' ? 'password' : 'sms';
+      if (view === 'login') rerenderAuthViewWithDraft(draft);
+    }
+
+    function clearAuthSmsCooldownTimer() {
+      if (authUiState.timerId) {
+        clearTimeout(authUiState.timerId);
+        authUiState.timerId = 0;
+      }
+    }
+
+    function clearAuthSmsCooldowns() {
+      authUiState.smsCooldowns = {};
+      clearAuthSmsCooldownTimer();
+    }
+
+    function getAuthSmsCooldownState(key) {
+      var cooldown = authUiState.smsCooldowns && authUiState.smsCooldowns[key];
+      if (!cooldown) return { active: false, remainingSeconds: 0 };
+      var remainingSeconds = Math.max(0, Math.ceil((Number(cooldown.deadlineAt || 0) - Date.now()) / 1000));
+      if (remainingSeconds <= 0) {
+        delete authUiState.smsCooldowns[key];
+        return { active: false, remainingSeconds: 0 };
+      }
+      return { active: true, remainingSeconds: remainingSeconds };
+    }
+
+    function getAuthSmsButtonId(cooldownKey) {
+      return 'auth-sms-button-' + String(cooldownKey || 'default');
+    }
+
+    function captureAuthFieldValues(fieldIds) {
+      var draft = {};
+      (fieldIds || []).forEach(function (fieldId) {
+        var element = $(fieldId);
+        if (!element) return;
+        draft[fieldId] = String(element.value || '');
+      });
+      return draft;
+    }
+
+    function restoreAuthFieldValues(draft) {
+      Object.keys(draft || {}).forEach(function (fieldId) {
+        var element = $(fieldId);
+        if (!element) return;
+        element.value = draft[fieldId];
+      });
+    }
+
+    function rerenderAuthViewWithDraft(draft) {
+      render();
+      restoreAuthFieldValues(draft);
+      updateVisibleAuthSmsButtons();
+    }
+
+    function getAuthSmsButtonUi(cooldownKey) {
+      var cooldown = getAuthSmsCooldownState(cooldownKey);
+      return {
+        disabled: cooldown.active,
+        label: cooldown.active ? ('重新发送(' + cooldown.remainingSeconds + 's)') : '发送验证码',
+        className: 'auth-sms-button rounded-xl text-sm btn ' + (cooldown.active
+          ? 'bg-gray-100 text-gray-400'
+          : 'bg-[#E8F5EC] text-[#2D9D4E]')
+      };
+    }
+
+    function updateAuthSmsButtonDom(cooldownKey) {
+      var button = $(getAuthSmsButtonId(cooldownKey));
+      if (!button) return;
+      var ui = getAuthSmsButtonUi(cooldownKey);
+      button.className = ui.className;
+      button.textContent = ui.label;
+      button.disabled = !!ui.disabled;
+    }
+
+    function updateVisibleAuthSmsButtons() {
+      ['login', 'register', 'forgotPassword'].forEach(function (cooldownKey) {
+        updateAuthSmsButtonDom(cooldownKey);
+      });
+    }
+
+    function scheduleAuthSmsCooldownRender() {
+      clearAuthSmsCooldownTimer();
+      var currentKeys = Object.keys(authUiState.smsCooldowns || {});
+      if (!currentKeys.length) return;
+      authUiState.timerId = setTimeout(function () {
+        authUiState.timerId = 0;
+        updateVisibleAuthSmsButtons();
+        var activeKeys = Object.keys(authUiState.smsCooldowns || {}).filter(function (key) {
+          return getAuthSmsCooldownState(key).active;
+        });
+        if (!activeKeys.length) return;
+        scheduleAuthSmsCooldownRender();
+      }, 1000);
+    }
+
+    function applyAuthSmsCooldown(key, payload) {
+      var cooldownSeconds = Math.max(0, Number(payload && payload.resendAfterSeconds || 0));
+      if (!cooldownSeconds) return;
+      authUiState.smsCooldowns[key] = {
+        deadlineAt: Number(payload && payload.sentAt || Date.now()) + cooldownSeconds * 1000
+      };
+      updateVisibleAuthSmsButtons();
+      scheduleAuthSmsCooldownRender();
+    }
+
+    function buildAuthSmsButton(handlerName, cooldownKey) {
+      var ui = getAuthSmsButtonUi(cooldownKey);
+      return '<button id="' + getAuthSmsButtonId(cooldownKey) + '" onclick="' + handlerName + '()" ' + (ui.disabled ? 'disabled' : '') + ' class="' + ui.className + '">' + ui.label + '</button>';
+    }
+
+    async function requestSmsCode(phone, purpose) {
+      var response = await fetch('/api/auth/send-sms-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: String(phone || '').trim(), purpose: purpose || 'bind_phone' })
+      });
+      var payload = await response.json().catch(function () { return { message: '验证码发送失败' }; });
+      if (!response.ok) throw new Error((payload && payload.message) || '验证码发送失败');
+      if (payload && payload.debugCode) {
+        alert('当前为调试模式，验证码：' + payload.debugCode);
+      } else {
+        alert((payload && payload.message) || '验证码已发送');
+      }
+      return payload || {};
+    }
+
     function loginPage() {
-      return `<div class="page-shell compact"><div class="auth-card max-w-sm mx-auto p-6"><div class="text-center"><div class="text-4xl mb-4">🌾</div><div class="font-bold text-2xl">日精月华</div><div class="text-center text-gray-500 text-sm mt-3 mb-6">登录后管理订单、地址和优惠券</div></div><input id="lu" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3 bg-white/80"><input id="lp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4 bg-white/80"><button onclick="doLogin()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">登录</button><div class="text-center mt-4 text-sm text-gray-500">没有账号? <button onclick="go('register')" class="text-[#2D9D4E] font-medium">立即注册</button></div></div></div>`;
+      var smsMode = authUiState.loginMode !== 'password';
+      return `<div class="page-shell compact"><div class="auth-card max-w-sm mx-auto p-6"><div class="text-center"><div class="text-4xl mb-4">🌾</div><div class="font-bold text-2xl">日精月华</div><div class="text-center text-gray-500 text-sm mt-3 mb-6">默认使用手机号和短信验证码登录，减少重复注册和登录成本。</div></div><div class="grid grid-cols-2 gap-2 mb-4"><button onclick="setLoginMode('sms')" class="p-3 rounded-xl text-sm font-medium btn ${smsMode ? 'bg-[#2D9D4E] text-white' : 'bg-[#F5F0E8] text-gray-500'}">验证码登录</button><button onclick="setLoginMode('password')" class="p-3 rounded-xl text-sm font-medium btn ${smsMode ? 'bg-[#F5F0E8] text-gray-500' : 'bg-[#2D9D4E] text-white'}">密码登录</button></div><input id="login-phone" type="${smsMode ? 'tel' : 'text'}" placeholder="${smsMode ? '手机号' : '手机号或管理员账号'}" class="w-full p-3 border border-gray-200 rounded-xl mb-3 bg-white/80">${smsMode ? `<div class="auth-sms-row mb-4"><input id="login-code" type="text" placeholder="短信验证码" class="auth-sms-input p-3 border border-gray-200 rounded-xl bg-white/80">${buildAuthSmsButton('sendLoginSmsCode', 'login')}</div><button onclick="doSmsLoginOrRegister()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">验证码登录</button><div class="text-xs text-gray-400 mt-3">未注册手机号会在验证通过后自动创建账号。</div>` : `<input id="login-password" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4 bg-white/80"><button onclick="doPhonePasswordLogin()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">账号密码登录</button><div class="text-xs text-gray-400 mt-3">支持已绑定手机号账号，以及管理员账号密码登录。</div>`}<div class="flex items-center justify-between gap-3 mt-4 text-sm"><button onclick="go('forgotPassword')" class="text-gray-400">忘记密码</button><button onclick="go('register')" class="text-[#2D9D4E] font-medium">立即注册</button></div></div></div>`;
     }
 
     function registerPage() {
-      return `<div class="page-shell compact"><div class="auth-card max-w-sm mx-auto p-6"><div class="text-center"><div class="text-4xl mb-4">🌱</div><div class="font-bold text-2xl">加入日精月华</div><div class="text-center text-gray-500 text-sm mt-3 mb-6">注册后即可下单、配置地址与使用优惠券</div></div><input id="ru" type="text" placeholder="用户名" class="w-full p-3 border border-gray-200 rounded-xl mb-3 bg-white/80"><input id="rp" type="password" placeholder="密码" class="w-full p-3 border border-gray-200 rounded-xl mb-4 bg-white/80"><button onclick="doRegister()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">注册并登录</button><div class="text-center mt-4 text-sm text-gray-500">已有账号? <button onclick="go('login')" class="text-[#2D9D4E] font-medium">立即登录</button></div></div></div>`;
+      return `<div class="page-shell compact"><div class="auth-card max-w-sm mx-auto p-6"><div class="text-center"><div class="text-4xl mb-4">🌱</div><div class="font-bold text-2xl">手机号注册</div><div class="text-center text-gray-500 text-sm mt-3 mb-6">注册只保留手机号验证码路线，验证成功后自动登录并发放新人优惠券。</div></div><input id="register-phone" type="tel" placeholder="手机号" class="w-full p-3 border border-gray-200 rounded-xl mb-3 bg-white/80"><div class="auth-sms-row mb-4"><input id="register-code" type="text" placeholder="短信验证码" class="auth-sms-input p-3 border border-gray-200 rounded-xl bg-white/80">${buildAuthSmsButton('sendRegisterSmsCode', 'register')}</div><button onclick="doRegisterBySms()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">注册并登录</button><div class="text-xs text-gray-400 mt-3">如果手机号已经存在，会直接登录原账号。</div><div class="text-center mt-4 text-sm text-gray-500">已有账号? <button onclick="go('login')" class="text-[#2D9D4E] font-medium">立即登录</button></div></div></div>`;
+    }
+
+    function forgotPasswordPage() {
+      return `<div class="page-shell compact"><div class="surface-card max-w-sm mx-auto p-6"><div class="flex items-center justify-between gap-3 mb-4"><div><div class="font-bold text-xl">找回密码</div><div class="text-sm text-gray-400 mt-1">通过已绑定手机号和短信验证码重置密码</div></div><button onclick="go('login')" class="chip-muted">返回登录</button></div><div class="space-y-3"><input id="fp-phone" type="tel" placeholder="已绑定手机号" class="w-full p-3 border border-gray-200 rounded-xl bg-white/80"><div class="auth-sms-row"><input id="fp-code" type="text" placeholder="短信验证码" class="auth-sms-input p-3 border border-gray-200 rounded-xl bg-white/80">${buildAuthSmsButton('sendForgotPasswordCode', 'forgotPassword')}</div><input id="fp-password" type="password" placeholder="新密码（至少 6 位）" class="w-full p-3 border border-gray-200 rounded-xl bg-white/80"><input id="fp-password-confirm" type="password" placeholder="再次输入新密码" class="w-full p-3 border border-gray-200 rounded-xl bg-white/80"><button onclick="resetPasswordBySms()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">确认重置密码</button></div></div></div>`;
     }
 
     // === ACTIONS ===
-    async function doLogin() {
-      const u = $('lu').value.trim(), p = $('lp').value;
-      if (!u || !p) { alert('请填写用户名和密码'); return; }
+    async function sendLoginSmsCode() {
+      var phone = (($('login-phone') || {}).value || '').trim();
+      if (!phone) { alert('请先填写手机号'); return; }
+      try {
+        var payload = await requestSmsCode(phone, 'login_or_register');
+        applyAuthSmsCooldown('login', payload);
+        if (view === 'login') rerenderAuthViewWithDraft({ 'login-phone': phone });
+      } catch (error) {
+        alert(error.message || '验证码发送失败');
+      }
+    }
+
+    async function sendRegisterSmsCode() {
+      var phone = (($('register-phone') || {}).value || '').trim();
+      if (!phone) { alert('请先填写手机号'); return; }
+      try {
+        var payload = await requestSmsCode(phone, 'login_or_register');
+        applyAuthSmsCooldown('register', payload);
+        if (view === 'register') rerenderAuthViewWithDraft({ 'register-phone': phone });
+      } catch (error) {
+        alert(error.message || '验证码发送失败');
+      }
+    }
+
+    async function doPhonePasswordLogin() {
+      const identity = (($('login-phone') || {}).value || '').trim();
+      const password = (($('login-password') || {}).value || '');
+      if (!identity || !password) { alert('请填写手机号或管理员账号和密码'); return; }
       try {
         var response = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: u, password: p })
+          body: JSON.stringify({ phone: identity, username: identity, password: password })
         });
         if (!response.ok) {
           var errorPayload = await response.json().catch(function () { return { message: '登录失败' }; });
@@ -4175,29 +5098,165 @@ ${renderPageHeader('溯源档案', '当前阶段只展示来源信息，不扩�
       }
     }
 
-    async function doRegister() {
-      const u = $('ru').value.trim(), p = $('rp').value;
-      if (!u || !p) { alert('请填写用户名和密码'); return; }
-      if (u.length < 3) { alert('用户名至少3个字符'); return; }
+    async function doSmsLoginOrRegister() {
+      const phone = (($('login-phone') || {}).value || '').trim();
+      const code = (($('login-code') || {}).value || '').trim();
+      if (!phone || !code) { alert('请填写手机号和验证码'); return; }
       try {
-        var response = await fetch('/api/auth/register', {
+        var response = await fetch('/api/auth/login-sms', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: u, password: p })
+          body: JSON.stringify({ phone: phone, code: code })
         });
         if (!response.ok) {
-          var errorPayload = await response.json().catch(function () { return { message: '注册失败' }; });
-          alert((errorPayload && errorPayload.message) || '注册失败');
+          var errorPayload = await response.json().catch(function () { return { message: '登录失败' }; });
+          alert((errorPayload && errorPayload.message) || '登录失败');
           return;
         }
+        var createdUser = await fetchCurrentUserSession();
+        if (!createdUser) throw new Error('登录后状态未建立');
+        await fetchUsers();
+        await fetchBuyerOrdersPage(1);
+        alert('登录成功');
+        go('home');
+      } catch (error) {
+        alert(error.message || '登录失败');
+      }
+    }
+
+    async function doRegisterBySms() {
+      const phone = (($('register-phone') || {}).value || '').trim();
+      const code = (($('register-code') || {}).value || '').trim();
+      if (!phone || !code) { alert('请填写手机号和验证码'); return; }
+      try {
+        var response = await fetch('/api/auth/login-sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, code: code })
+        });
+        var payload = await response.json().catch(function () { return { message: '注册失败' }; });
+        if (!response.ok) throw new Error((payload && payload.message) || '注册失败');
         var createdUser = await fetchCurrentUserSession();
         if (!createdUser) throw new Error('注册后登录状态未建立');
         await fetchUsers();
         await fetchBuyerOrdersPage(1);
-        alert('注册成功！已发放新人优惠券');
+        alert(payload && payload.autoRegistered === false ? '该手机号已存在，已直接登录' : '注册成功！已发放新人优惠券');
         go('home');
       } catch (error) {
         alert(error.message || '注册失败');
+      }
+    }
+
+    async function sendForgotPasswordCode() {
+      var phone = (($('fp-phone') || {}).value || '').trim();
+      if (!phone) { alert('请先填写已绑定手机号'); return; }
+      try {
+        var draft = captureAuthFieldValues(['fp-phone', 'fp-code', 'fp-password', 'fp-password-confirm']);
+        var payload = await requestSmsCode(phone, 'reset_password');
+        applyAuthSmsCooldown('forgotPassword', payload);
+        if (view === 'forgotPassword') rerenderAuthViewWithDraft(draft);
+      } catch (error) {
+        alert(error.message || '验证码发送失败');
+      }
+    }
+
+    async function resetPasswordBySms() {
+      var phone = (($('fp-phone') || {}).value || '').trim();
+      var code = (($('fp-code') || {}).value || '').trim();
+      var password = (($('fp-password') || {}).value || '');
+      var confirmPassword = (($('fp-password-confirm') || {}).value || '');
+      if (!phone || !code || !password || !confirmPassword) { alert('请完整填写手机号、验证码和新密码'); return; }
+      if (password.length < 6) { alert('新密码至少 6 位'); return; }
+      if (password !== confirmPassword) { alert('两次输入的新密码不一致'); return; }
+      try {
+        var response = await fetch('/api/auth/forgot-password/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, code: code, newPassword: password })
+        });
+        var payload = await response.json().catch(function () { return { message: '密码重置失败' }; });
+        if (!response.ok) throw new Error((payload && payload.message) || '密码重置失败');
+        alert((payload && payload.message) || '密码重置成功，请重新登录');
+        go('login');
+      } catch (error) {
+        alert(error.message || '密码重置失败');
+      }
+    }
+
+    async function changePasswordFromProfile() {
+      var meta = getUserMeta();
+      var currentPassword = (($('security-current-password') || {}).value || '');
+      var newPassword = (($('security-new-password') || {}).value || '');
+      var confirmPassword = (($('security-confirm-password') || {}).value || '');
+      if (!newPassword || !confirmPassword || (meta.hasPassword && !currentPassword)) { alert(meta.hasPassword ? '请完整填写当前密码和新密码' : '请完整填写新密码'); return; }
+      if (newPassword.length < 6) { alert('新密码至少 6 位'); return; }
+      if (newPassword !== confirmPassword) { alert('两次输入的新密码不一致'); return; }
+      try {
+        var response = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPassword: currentPassword, newPassword: newPassword })
+        });
+        var payload = await response.json().catch(function () { return { message: '密码修改失败' }; });
+        if (!response.ok) throw new Error((payload && payload.message) || '密码修改失败');
+        await fetchCurrentUserSession();
+        await fetchUsers();
+        alert((payload && payload.message) || '密码修改成功');
+        if ($('security-current-password')) $('security-current-password').value = '';
+        if ($('security-new-password')) $('security-new-password').value = '';
+        if ($('security-confirm-password')) $('security-confirm-password').value = '';
+      } catch (error) {
+        alert(error.message || '密码修改失败');
+      }
+    }
+
+    async function sendBindPhoneCode() {
+      if (!user) { alert('请先登录'); return; }
+      var phone = (($('security-phone') || {}).value || '').trim();
+      if (!phone) { alert('请先填写手机号'); return; }
+      try {
+        await requestSmsCode(phone, 'bind_phone');
+      } catch (error) {
+        alert(error.message || '验证码发送失败');
+      }
+    }
+
+    async function bindPhoneFromProfile() {
+      if (!user) { alert('请先登录'); return; }
+      var phone = (($('security-phone') || {}).value || '').trim();
+      var code = (($('security-phone-code') || {}).value || '').trim();
+      if (!phone || !code) { alert('请填写手机号和验证码'); return; }
+      try {
+        var response = await fetch('/api/auth/bind-phone', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, code: code })
+        });
+        var payload = await response.json().catch(function () { return { message: '手机号绑定失败' }; });
+        if (!response.ok) throw new Error((payload && payload.message) || '手机号绑定失败');
+        await fetchCurrentUserSession();
+        await fetchUsers();
+        alert((payload && payload.message) || '手机号绑定成功');
+        if ($('security-phone-code')) $('security-phone-code').value = '';
+        go('security');
+      } catch (error) {
+        alert(error.message || '手机号绑定失败');
+      }
+    }
+
+    async function editNicknameFromProfile() {
+      if (!user) { alert('请先登录'); return; }
+      var meta = getUserMeta();
+      var nextNickname = (window.prompt ? window.prompt('请输入新的昵称', meta.nickname || '') : (meta.nickname || ''));
+      if (nextNickname == null) return;
+      nextNickname = String(nextNickname || '').trim();
+      try {
+        await saveUserMetaWithFeedback(user, { nickname: nextNickname }, '昵称保存失败', function () {
+          render();
+        });
+        alert(nextNickname ? '昵称修改成功' : '已恢复为默认展示名');
+      } catch (error) {
+        alert(error.message || '昵称保存失败');
       }
     }
 
@@ -4211,14 +5270,50 @@ ${renderPageHeader('溯源档案', '当前阶段只展示来源信息，不扩�
       var address = getSelectedAddress(meta);
       var availableCoupon = (meta.coupons || []).filter(function (item) { return !item.used; }).length;
       var orderCount = Number(buyerOrdersMeta.totalCount || (orders ? orders.length : 0));
+      var phoneStatus = meta.phone ? maskPhoneNumber(meta.phone) : '未绑定';
+      var displayName = getCurrentUserDisplayName(meta, user);
       var h = '<div class="page-shell compact">';
       h += renderPageHeader('我的', '把订单、地址、优惠券和后台入口都收在这里。');
-      h += '<div class="hero-card mb-4"><div class="p-4 relative z-[1]"><div class="flex items-center gap-3 mb-3"><div class="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center text-2xl">🌾</div><div class="flex-1"><div class="flex items-center gap-2 flex-wrap"><div class="font-bold text-lg">' + user + '</div>' + getRoleBadgeHtml({ roles: role }) + '</div><div class="text-xs text-white/75 mt-1">注册时间：' + (meta.createdAt || '待记录') + '</div></div></div><div class="grid grid-cols-2 gap-3"><div class="bg-white/12 rounded-2xl p-3"><div class="text-xs text-white/70">累计消费</div><div class="text-xl font-bold mt-1">¥' + Number(member.totalSpent || 0).toFixed(2) + '</div></div><div class="bg-white/12 rounded-2xl p-3"><div class="text-xs text-white/70">可用优惠券</div><div class="text-xl font-bold mt-1">' + availableCoupon + ' 张</div></div></div></div></div>';
-      h += '<div class="surface-card divide-y mb-4"><button onclick="go(\'orders\')" class="w-full p-4 flex justify-between"><span>我的订单</span><span class="text-gray-400">' + orderCount + '笔 ›</span></button><button onclick="go(\'address\')" class="w-full p-4 flex justify-between"><span>收货地址</span><span class="text-gray-400">' + (address ? address.name + ' ›' : '去添加 ›') + '</span></button><button onclick="go(\'coupon\')" class="w-full p-4 flex justify-between"><span>优惠券</span><span class="text-gray-400">' + availableCoupon + '张可用 ›</span></button></div>';
+      h += '<div class="hero-card mb-4"><div class="p-4 relative z-[1]"><div class="flex items-center gap-3 mb-3"><div class="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center text-2xl">🌾</div><div class="flex-1"><div class="flex items-center gap-2 flex-wrap"><div class="font-bold text-lg">' + displayName + '</div>' + getRoleBadgeHtml({ roles: role }) + '</div><div class="text-xs text-white/75 mt-1">注册时间：' + (meta.createdAt || '待记录') + '</div><div class="text-xs text-white/75 mt-1">绑定手机：' + phoneStatus + '</div><div class="text-xs text-white/75 mt-1">昵称：' + (meta.nickname || '未设置，默认显示脱敏手机号') + '</div></div><button onclick="event.stopPropagation();editNicknameFromProfile()" class="chip-muted bg-white/15 text-white border border-white/20">修改昵称</button></div><div class="grid grid-cols-2 gap-3"><div class="bg-white/12 rounded-2xl p-3"><div class="text-xs text-white/70">累计消费</div><div class="text-xl font-bold mt-1">¥' + Number(member.totalSpent || 0).toFixed(2) + '</div></div><div class="bg-white/12 rounded-2xl p-3"><div class="text-xs text-white/70">可用优惠券</div><div class="text-xl font-bold mt-1">' + availableCoupon + ' 张</div></div></div></div></div>';
+      h += '<div class="surface-card divide-y mb-4"><button onclick="go(\'orders\')" class="w-full p-4 flex justify-between"><span>我的订单</span><span class="text-gray-400">' + orderCount + '笔 ›</span></button><button onclick="go(\'address\')" class="w-full p-4 flex justify-between"><span>收货地址</span><span class="text-gray-400">' + (address ? address.name + ' ›' : '去添加 ›') + '</span></button><button onclick="go(\'coupon\')" class="w-full p-4 flex justify-between"><span>优惠券</span><span class="text-gray-400">' + availableCoupon + '张可用 ›</span></button><button onclick="go(\'security\')" class="w-full p-4 flex justify-between"><span>账号安全</span><span class="text-gray-400">' + phoneStatus + ' ›</span></button></div>';
       h += farmerBtn;
       h += adminBtn;
       h += '<button onclick="logout()" class="w-full p-3 bg-gray-100 rounded-xl text-gray-500 btn">退出登录</button></div>';
       return h;
+    }
+
+    function accountSecurityPage() {
+      if (!user) return renderEmptyState('🔐', '请先登录', '登录后才能修改密码和绑定手机号。', `<button onclick="go('login')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">去登录</button>`);
+      var meta = getUserMeta();
+      var phoneLabel = meta.phone ? maskPhoneNumber(meta.phone) : '未绑定手机号';
+      var passwordActionText = meta.hasPassword ? '修改密码' : '设置登录密码';
+      var passwordSubmitText = meta.hasPassword ? '保存新密码' : '设置登录密码';
+      return `<div class="page-shell compact">
+${renderPageHeader('账号安全', '在这里维护登录密码，并确认手机号已自动绑定到当前账号。', { back: true })}
+<div class="surface-card p-4 mb-4">
+<div class="flex items-center justify-between gap-3">
+<div>
+<div class="font-bold">已绑定手机号</div>
+<div class="text-sm text-gray-400 mt-1">${phoneLabel}</div>
+<div class="text-xs text-gray-400 mt-1">${meta.phone ? '手机号已自动绑定，可直接用于验证码登录和找回密码。' : '首次验证码登录成功后会自动绑定手机号，并用于后续找回密码。'}</div>
+</div>
+${meta.phoneVerifiedAt ? `<div class="chip-muted">已验证</div>` : `<div class="chip-muted">未绑定</div>`}
+</div>
+</div>
+<div class="surface-card p-4 mb-4">
+<div class="font-bold mb-2">手机号说明</div>
+<div class="text-sm text-gray-500 leading-6">当前阶段不再提供手动修改手机号入口。账号使用验证码登录成功后会自动绑定手机号，后续找回密码也默认走这条已绑定手机号链路。</div>
+</div>
+<div class="surface-card p-4 mb-4">
+<div class="font-bold mb-3">${passwordActionText}</div>
+<div class="space-y-3">
+${meta.hasPassword ? `<input id="security-current-password" type="password" placeholder="当前密码" class="w-full p-3 border border-gray-200 rounded-xl bg-white/80">` : `<div class="rounded-xl bg-[#F5F0E8] text-gray-500 text-sm p-3">当前账号尚未设置登录密码，设置后即可切换到手机号 + 密码登录。</div>`}
+<input id="security-new-password" type="password" placeholder="新密码（至少 6 位）" class="w-full p-3 border border-gray-200 rounded-xl bg-white/80">
+<input id="security-confirm-password" type="password" placeholder="再次输入新密码" class="w-full p-3 border border-gray-200 rounded-xl bg-white/80">
+<button onclick="changePasswordFromProfile()" class="w-full bg-[#2D9D4E] text-white p-3 rounded-xl font-medium btn">${passwordSubmitText}</button>
+</div>
+</div>
+</div>`;
     }
 
     function getAddressEditorUi(scope) {
@@ -4488,6 +5583,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       } catch (e) { }
       applyCurrentUserRecord(null);
       currentCheckoutOrder = null;
+      paymentUiState.showMoreChannels = false;
       currentFarmerTab = 'product';
       closeModal();
       updateCartBadge();
@@ -4545,49 +5641,63 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       }
     }
 
-    async function completeMockPayment() {
-      if (!user || !currentCheckoutOrder) return;
-      if (currentCheckoutOrder.status !== 'pending' || currentCheckoutOrder.inventoryReleased || isPendingOrderExpired(currentCheckoutOrder)) {
-        alert('订单已超时取消，不能继续支付');
-        return;
-      }
-      var meta = getUserMeta();
+    function openPaymentResultPage(orderId) {
+      var targetOrderId = String(orderId || '').trim();
+      if (!targetOrderId) return;
+      location.hash = '/paymentResult?orderId=' + encodeURIComponent(targetOrderId);
+      scrollPageToTop();
+    }
+
+    async function startAlipayWapPayment() {
+      return startPaymentChannel('alipay_wap');
+    }
+
+    async function syncPaymentResultStatus(options) {
+      var config = Object.assign({ orderId: '', returnCheck: false, force: false }, options || {});
+      var orderId = String(config.orderId || routeQuery.orderId || paymentResultState.orderId || '').trim();
+      if (!orderId) return;
+      if (paymentResultState.isLoading && !config.force) return;
+      paymentResultState = Object.assign({}, paymentResultState, {
+        orderId: orderId,
+        isLoading: true,
+        error: ''
+      });
+      render();
       try {
-        var paidOrder = await payPendingOrderOnServer(user, currentCheckoutOrder.id);
-        orders = upsertRecordById(orders.map(normalizeOrderSnapshot), paidOrder).map(normalizeOrderSnapshot).sort(function (a, b) {
+        var statusPayload = await fetchPaymentStatusOnServer(orderId, { returnCheck: !!config.returnCheck });
+        paymentResultState = {
+          orderId: orderId,
+          order: statusPayload.order,
+          paymentTransaction: statusPayload.paymentTransaction,
+          awaitingAsyncNotify: !!statusPayload.awaitingAsyncNotify,
+          isLoading: false,
+          error: ''
+        };
+        orders = upsertRecordById(orders.map(normalizeOrderSnapshot), statusPayload.order).map(normalizeOrderSnapshot).sort(function (a, b) {
           return Number(b.time || 0) - Number(a.time || 0);
         });
-        addPoints(paidOrder.subtotal || currentCheckoutOrder.subtotal || 0);
-        if (currentCheckoutOrder.couponId) {
-          meta.coupons = (meta.coupons || []).map(function (item) {
-            return item.id === currentCheckoutOrder.couponId ? Object.assign({}, item, { used: true }) : item;
-          });
-          meta.selectedCouponId = '';
+        if (currentCheckoutOrder && String(currentCheckoutOrder.id || '') === orderId) {
+          currentCheckoutOrder = normalizeOrderSnapshot(statusPayload.order);
         }
-        cart = [];
-        updateCartBadge();
-        await persistUserState(user, Object.assign({}, meta, {
-          cart: [],
-          orders: orders,
-          member: member
-        }));
-        await refreshPersistedEntities({ users: true, orders: true, products: true });
-        currentCheckoutOrder = null;
-        alert('支付成功，订单已进入待发货');
-        go('orders');
-      } catch (saveError) {
-        alert(saveError.message || '订单支付失败');
-        await refreshPersistedEntities({ users: true, orders: true, products: true });
-        var refreshedOrder = orders.find(function (item) { return item.id === currentCheckoutOrder.id; });
-        currentCheckoutOrder = refreshedOrder ? normalizeOrderSnapshot(refreshedOrder) : null;
-        return;
+        if (statusPayload.order && statusPayload.order.status === 'paid') {
+          cart = [];
+          updateCartBadge();
+          await refreshPersistedEntities({ users: true, orders: true, products: true });
+        }
+      } catch (error) {
+        paymentResultState = Object.assign({}, paymentResultState, {
+          isLoading: false,
+          error: error.message || '支付状态获取失败'
+        });
       }
+      render();
     }
 
     function payOrder(idx) {
       var order = orders[idx];
       if (!order) return;
       currentCheckoutOrder = normalizeOrderSnapshot(order);
+      paymentUiState.showMoreChannels = false;
       pushView('payment');
     }
 
@@ -4681,13 +5791,28 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
 
     function applyRouteFromHash() {
       var hash = location.hash.slice(1) || '/';
-      var parts = hash.split('/').filter(Boolean);
+      var splitIndex = hash.indexOf('?');
+      var pathname = splitIndex >= 0 ? hash.slice(0, splitIndex) : hash;
+      var search = splitIndex >= 0 ? hash.slice(splitIndex + 1) : '';
+      routeQuery = {};
+      if (search) {
+        search.split('&').forEach(function (part) {
+          if (!part) return;
+          var pair = part.split('=');
+          var key = decodeURIComponent(pair[0] || '').trim();
+          if (!key) return;
+          routeQuery[key] = decodeURIComponent(pair.slice(1).join('=') || '');
+        });
+      }
+      var parts = pathname.split('/').filter(Boolean);
       view = parts[0] || 'home';
       paramId = parseInt(parts[1]) || 0;
     }
 
     function handleRouteChange() {
+      var previousView = view;
       applyRouteFromHash();
+      if (previousView !== view) clearAuthSmsCooldowns();
       if (view === 'admin') {
         if (canAccessAdminPanel()) { showAdminPanel(); }
         else if (!user) { go('login'); }
@@ -4704,7 +5829,17 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         document.getElementById('admin-panel') && document.getElementById('admin-panel').classList.add('hidden');
         document.getElementById('farmer-panel') && document.getElementById('farmer-panel').classList.add('hidden');
       }
+      if (view !== 'orders') buyerLogisticsRefreshState.lastListFingerprint = '';
+      if (view !== 'orderDetail') clearBuyerLogisticsDetailPrompt();
       render();
+      if (view === 'orders') beginBuyerOrderListLogisticsCheck();
+      if (view === 'orderDetail') beginBuyerOrderDetailLogisticsCheck();
+      if (view === 'paymentResult') {
+        syncPaymentResultStatus({
+          orderId: routeQuery.orderId || paymentResultState.orderId || '',
+          returnCheck: true
+        });
+      }
     }
 
     // [BOOTSTRAP] 页面刷新后的初始化顺序、首屏兜底数据和重新拉库都从 initApp 进入。
@@ -4717,6 +5852,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       setBanners(BANNERS);
       setAnnouncements(ANNOUNCEMENTS);
       setCouponTemplates(createDefaultCouponTemplates());
+      await fetchRuntimeMeta();
       try {
         await fetchCurrentUserSession();
       } catch (userError) {
@@ -5083,6 +6219,140 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         alert(error.message || '订单列表翻页失败');
       });
     }
+    function applyAdminOrderFilters() {
+      adminOrderListState.filters.orderId = (document.getElementById('admin-order-filter-order') || {}).value || '';
+      adminOrderListState.filters.ownerUsername = (document.getElementById('admin-order-filter-owner') || {}).value || '';
+      adminOrderListState.filters.status = (document.getElementById('admin-order-filter-status') || {}).value || '';
+      adminOrderListState.filters.dateFrom = (document.getElementById('admin-order-filter-date-from') || {}).value || '';
+      adminOrderListState.filters.dateTo = (document.getElementById('admin-order-filter-date-to') || {}).value || '';
+      adminOrderListState.meta = createPagingMeta(1, adminOrderListState.meta.pageSize || 8, 0);
+      loadAdminOrderWorkspace(1).catch(function (error) {
+        alert(error.message || '订单列表加载失败');
+      });
+    }
+    function resetAdminOrderFilters() {
+      adminOrderListState.filters = { orderId: '', ownerUsername: '', status: '', dateFrom: '', dateTo: '' };
+      adminOrderListState.meta = createPagingMeta(1, adminOrderListState.meta.pageSize || 8, 0);
+      renderAdminOd();
+      loadAdminOrderWorkspace(1).catch(function (error) {
+        alert(error.message || '订单列表加载失败');
+      });
+    }
+    async function loadAdminFulfillmentWorkspace(page) {
+      adminFulfillmentState.loading = true;
+      try {
+        if (adminFulfillmentState.view === 'detail' && adminFulfillmentState.selectedOwner && adminFulfillmentState.selectedOrderId) {
+          await fetchAdminFulfillmentDetail(adminFulfillmentState.selectedOwner, adminFulfillmentState.selectedOrderId);
+        } else {
+          await fetchAdminFulfillmentPage(page || adminFulfillmentState.meta.page || 1);
+          if (adminFulfillmentState.view !== 'addresses') adminFulfillmentState.view = 'queue';
+        }
+        if (currentAdminTab === 'ship') renderAdminShip();
+      } finally {
+        adminFulfillmentState.loading = false;
+      }
+    }
+    function changeAdminFulfillmentPage(page) {
+      adminFulfillmentState.meta = createPagingMeta(page, adminFulfillmentState.meta.pageSize || 8, adminFulfillmentState.meta.totalCount || 0);
+      loadAdminFulfillmentWorkspace(page).catch(function (error) {
+        alert(error.message || '发货队列翻页失败');
+      });
+    }
+    function switchAdminFulfillmentView(view) {
+      if (view === adminFulfillmentState.view) {
+        renderAdminShip();
+        return;
+      }
+      if (adminFulfillmentState.view === 'detail' && adminFulfillmentState.dirty && hasAdminFulfillmentDraftChanges()) {
+        if (!confirm('当前发货详情里还有未提交内容，确认离开吗？')) return;
+      }
+      if (view === 'queue') {
+        setAdminFulfillmentDetail(null);
+        adminFulfillmentState.meta = createPagingMeta(1, adminFulfillmentState.meta.pageSize || 8, adminFulfillmentState.meta.totalCount || 0);
+        loadAdminFulfillmentWorkspace(1).catch(function (error) {
+          alert(error.message || '发货队列加载失败');
+        });
+        return;
+      }
+      adminFulfillmentState.view = view === 'addresses' ? 'addresses' : 'queue';
+      renderAdminShip();
+    }
+    function openAdminFulfillmentDetail(ownerUsername, orderId) {
+      if (adminFulfillmentState.view === 'detail' && adminFulfillmentState.dirty && hasAdminFulfillmentDraftChanges()) {
+        if (!confirm('当前发货详情里还有未提交内容，确认切换订单吗？')) return;
+      }
+      adminFulfillmentState.view = 'detail';
+      adminFulfillmentState.selectedOwner = String(ownerUsername || '').trim();
+      adminFulfillmentState.selectedOrderId = String(orderId || '').trim();
+      adminFulfillmentState.error = '';
+      if (currentAdminTab !== 'ship') {
+        switchAdminTab('ship');
+        return;
+      }
+      loadAdminFulfillmentWorkspace().catch(function (error) {
+        alert(error.message || '发货详情加载失败');
+      });
+    }
+    function applyAdminFulfillmentFilters() {
+      adminFulfillmentState.filters.orderId = (document.getElementById('admin-fulfillment-order-id') || {}).value || '';
+      adminFulfillmentState.filters.ownerUsername = (document.getElementById('admin-fulfillment-owner') || {}).value || '';
+      adminFulfillmentState.filters.status = (document.getElementById('admin-fulfillment-status') || {}).value || 'paid';
+      adminFulfillmentState.meta = createPagingMeta(1, adminFulfillmentState.meta.pageSize || 8, 0);
+      adminFulfillmentState.view = 'queue';
+      loadAdminFulfillmentWorkspace(1).catch(function (error) {
+        alert(error.message || '发货队列加载失败');
+      });
+    }
+    function resetAdminFulfillmentFilters() {
+      adminFulfillmentState.filters = { orderId: '', ownerUsername: '', status: 'paid' };
+      adminFulfillmentState.meta = createPagingMeta(1, adminFulfillmentState.meta.pageSize || 8, 0);
+      adminFulfillmentState.view = 'queue';
+      renderAdminShip();
+      loadAdminFulfillmentWorkspace(1).catch(function (error) {
+        alert(error.message || '发货队列加载失败');
+      });
+    }
+    async function submitAdminFulfillmentShipment() {
+      var detail = adminFulfillmentState.detail;
+      if (!detail) return;
+      var payload = {
+        trackingNo: String((document.getElementById('admin-fulfillment-tracking') || {}).value || '').trim(),
+        carrierCode: String((document.getElementById('admin-fulfillment-carrier-code') || {}).value || '').trim(),
+        carrierName: String((document.getElementById('admin-fulfillment-carrier-name') || {}).value || '').trim(),
+        orderItemIds: (adminFulfillmentState.draft.selectedOrderItemIds || []).slice()
+      };
+      if (!payload.trackingNo) {
+        alert('请先填写快递单号');
+        return;
+      }
+      if (!payload.orderItemIds.length) {
+        alert('请至少勾选一条商品');
+        return;
+      }
+      try {
+        adminFulfillmentState.loading = true;
+        var response = await fetch('/api/admin/fulfillment/orders/' + encodeURIComponent(detail.owner) + '/' + encodeURIComponent(detail.id) + '/shipments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        var saved = await response.json().catch(function () { return { message: '发货保存失败' }; });
+        if (!response.ok) throw new Error((saved && saved.message) || '发货保存失败');
+        setAdminFulfillmentDetail(saved);
+        await Promise.all([
+          fetchAdminOrdersPage(adminOrderListState.meta.page || 1),
+          fetchBuyerOrdersPage(buyerOrdersMeta.page || 1).catch(function () { return []; }),
+          fetchAllOrders().catch(function () { return []; })
+        ]);
+        renderAdminShip();
+        if (currentAdminTab === 'od') renderAdminOd();
+        alert('发货信息已保存');
+      } catch (error) {
+        alert(error.message || '发货保存失败');
+      } finally {
+        adminFulfillmentState.loading = false;
+      }
+    }
     async function loadAdminAuthWorkspace(page) {
       await Promise.all([fetchAdminUsersPage(page || adminUserListState.meta.page || 1), fetchAdminLightStats()]);
       if (currentAdminTab === 'auth' || currentAdminTab === 'db') {
@@ -5248,6 +6518,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       else if (tab === 'pd') loadAdminProductWorkspace().catch(function (error) { console.error(error); });
       else if (tab === 'od') loadAdminOrderWorkspace().catch(function (error) { console.error(error); });
       else if (tab === 'auth') loadAdminAuthWorkspace().catch(function (error) { console.error(error); });
+      else if (tab === 'ship') loadAdminFulfillmentWorkspace().catch(function (error) { console.error(error); });
     }
     function switchAdminTab(tab) {
       return enqueueNavigation(function () {
@@ -5398,28 +6669,106 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     }
     function renderAdminOd() {
       var allOrders = (adminOrderListState.items && adminOrderListState.items.length ? adminOrderListState.items : getAllOrders()) || [];
-      if (!allOrders.length) { document.getElementById('admin-od').innerHTML = "<div class='text-center py-8 text-gray-400'>暂无订单</div>"; return; }
-      var h = '<div class="mb-3"><div class="font-bold">订单管理</div></div>';
-      h += allOrders.map(function (o) {
-        var latestRefund = getLatestRefundRequest(o.id, o.owner);
-        var statusControl = o.status === 'refund_pending'
-          ? '<div class="flex gap-2"><button onclick="completeRefundFromAdmin(\'' + (latestRefund ? latestRefund.id : '') + '\')" class="px-3 py-1 rounded-full bg-[#2D9D4E] text-white text-xs">退款完成</button><button onclick="rejectRefundFromAdmin(\'' + (latestRefund ? latestRefund.id : '') + '\')" class="px-3 py-1 rounded-full bg-red-50 text-red-500 text-xs">驳回退款</button></div>'
-          : ['refunded', 'done', 'cancelled'].indexOf(o.status) >= 0
-            ? '<span class="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-500">' + getOrderStatusLabel(o.status) + '</span>'
-            : '<select onchange="updOrder(\'' + o.owner + '\',\'' + o.id + '\',this.value)" class="text-xs p-1 border rounded"><option value="pending" ' + (o.status === 'pending' ? 'selected' : '') + '>待付款</option><option value="paid" ' + (o.status === 'paid' ? 'selected' : '') + '>待发货</option><option value="shipped" ' + (o.status === 'shipped' ? 'selected' : '') + '>已发货</option><option value="done" ' + (o.status === 'done' ? 'selected' : '') + '>已完成</option><option value="cancelled" ' + (o.status === 'cancelled' ? 'selected' : '') + '>已取消</option></select>';
-        return '<div class="bg-white rounded-xl p-3 shadow mb-2"><div class="flex justify-between mb-1 gap-3"><span class="text-xs text-gray-500">' + o.id + ' · ' + o.owner + (o.ownerDeleted ? '（已删除）' : '') + '</span>' + statusControl + '</div><div class="text-xs ' + getOrderStatusTone(o.status) + ' mb-2">' + getOrderStatusLabel(o.status) + '</div>' + (latestRefund ? '<div class="text-xs ' + getRefundStatusTone(latestRefund.status) + ' mb-2">退款申请：' + getRefundStatusLabel(latestRefund.status) + '</div><div class="text-xs text-gray-500 mb-2">退款原因：' + (latestRefund.reason || '未填写') + '</div>' + (latestRefund.rejectReason ? '<div class="text-xs text-red-500 mb-2">驳回原因：' + latestRefund.rejectReason + '</div>' : '') : '') + '<div class="text-xs text-gray-500 mb-2">收货地址：' + getAddressSummary(o.address) + '</div>' + (o.trackingNo ? '<div class="text-xs text-gray-500 mb-2">物流编号：' + o.trackingNo + '</div>' : '') + '<div class="space-y-2">' + o.items.map(function (i) { return '<div class="rounded-lg bg-[#F9F7F3] p-2"><div class="text-sm">' + i.name + ' × ' + i.qty + '</div><div class="text-xs text-gray-500 mt-1">' + (i.variantLabel || '默认规格') + ' / ' + (i.unit || i.unitLabel || '默认单位') + '</div><div class="text-xs text-gray-500 mt-1">发货地址：' + getAddressSummary(i.shippingAddressSnapshot) + '</div></div>'; }).join("") + '</div><div class="text-right font-bold text-[#2D9D4E] mt-2">¥' + o.total.toFixed(2) + '</div></div>';
-      }).join('');
+      var h = '<div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">订单管理</div><div class="text-xs text-gray-500 mt-1">这里只保留查看、筛选、导出和跳转工作台；退款与发货都去独立工作区处理。</div></div></div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="font-bold mb-3">订单筛选</div><div class="grid grid-cols-2 gap-2"><input id="admin-order-filter-order" value="' + (adminOrderListState.filters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="admin-order-filter-owner" value="' + (adminOrderListState.filters.ownerUsername || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="admin-order-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ' + (adminOrderListState.filters.status === 'pending' ? 'selected' : '') + '>待付款</option><option value="paid" ' + (adminOrderListState.filters.status === 'paid' ? 'selected' : '') + '>待发货</option><option value="shipped" ' + (adminOrderListState.filters.status === 'shipped' ? 'selected' : '') + '>已发货</option><option value="done" ' + (adminOrderListState.filters.status === 'done' ? 'selected' : '') + '>已完成</option><option value="cancelled" ' + (adminOrderListState.filters.status === 'cancelled' ? 'selected' : '') + '>已取消</option><option value="refund_pending" ' + (adminOrderListState.filters.status === 'refund_pending' ? 'selected' : '') + '>退款中</option><option value="refunded" ' + (adminOrderListState.filters.status === 'refunded' ? 'selected' : '') + '>已退款</option></select><input id="admin-order-filter-date-from" type="date" value="' + (adminOrderListState.filters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="admin-order-filter-date-to" type="date" value="' + (adminOrderListState.filters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div><div class="grid grid-cols-3 gap-2 mt-3"><button onclick="applyAdminOrderFilters()" class="py-2 rounded-lg bg-[#2D9D4E] text-white text-sm btn">查询订单</button><button onclick="resetAdminOrderFilters()" class="py-2 rounded-lg border text-sm btn">重置</button><button onclick="downloadAdminOrderCsv()" ' + (adminOrderListState.exporting ? 'disabled ' : '') + 'class="py-2 rounded-lg border text-sm btn ' + (adminOrderListState.exporting ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'text-[#2D9D4E] border-[#2D9D4E]') + '">' + (adminOrderListState.exporting ? '导出中...' : '导出 CSV') + '</button></div></div>';
+      if (!allOrders.length) {
+        h += "<div class='bg-white rounded-xl p-4 shadow text-center text-gray-400 text-sm'>当前筛选下暂无订单</div>";
+      } else {
+        h += allOrders.map(function (o) {
+          var latestRefund = getLatestRefundRequest(o.id, o.owner);
+          var jumpButtons = '<div class="grid grid-cols-2 gap-2 mt-3">'
+            + '<button onclick="event.stopPropagation();openAdminFulfillmentDetail(\'' + o.owner + '\',\'' + o.id + '\')" class="py-2 rounded-lg border border-[#2D9D4E] text-[#2D9D4E] text-xs">' + (o.status === 'paid' ? '去发货' : '查看详情') + '</button>'
+            + '<button onclick="event.stopPropagation();switchAdminTab(\'refund\')" class="py-2 rounded-lg border border-[#E07B39] text-[#E07B39] text-xs">' + (latestRefund ? '去退款工作台' : '去退款工作台') + '</button>'
+            + '</div>';
+          return '<div class="bg-white rounded-xl p-3 shadow mb-3 cursor-pointer" onclick="openAdminFulfillmentDetail(\'' + o.owner + '\',\'' + o.id + '\')">'
+            + '<div class="flex justify-between mb-1 gap-3"><div><div class="text-xs text-gray-500">' + o.id + ' · ' + o.owner + (o.ownerDeleted ? '（已删除）' : '') + '</div><div class="text-xs ' + getOrderStatusTone(o.status) + ' mt-1">' + getOrderStatusLabel(o.status) + '</div></div><div class="text-right text-xs text-gray-400">' + formatDateTimeLabel(o.time) + '</div></div>'
+            + (latestRefund ? '<div class="text-xs ' + getRefundStatusTone(latestRefund.status) + ' mb-2">退款申请：' + getRefundStatusLabel(latestRefund.status) + '</div>' : '')
+            + '<div class="text-xs text-gray-500 mb-2">收货地址：' + getAddressSummary(o.address) + '</div>'
+            + '<div class="space-y-2">' + o.items.map(function (i) { return '<div class="rounded-lg bg-[#F9F7F3] p-2"><div class="text-sm">' + i.name + ' × ' + i.qty + '</div><div class="text-xs text-gray-500 mt-1">' + (i.variantLabel || '默认规格') + ' / ' + (i.unit || i.unitLabel || '默认单位') + '</div><div class="text-xs text-gray-500 mt-1">发货地址：' + getAddressSummary(i.shippingAddressSnapshot) + '</div></div>'; }).join("") + '</div>'
+            + renderShipmentCardList(o.shipments, { compact: true, emptyText: o.status === 'paid' ? '待发货，暂未录入物流信息' : '暂未录入物流信息' })
+            + jumpButtons
+            + '<div class="text-right font-bold text-[#2D9D4E] mt-3">¥' + o.total.toFixed(2) + '</div>'
+            + '</div>';
+        }).join('');
+      }
       if (adminOrderListState.loaded) h += renderPager(adminOrderListState.meta, 'changeAdminOrderPage');
       document.getElementById('admin-od').innerHTML = h;
     }
     function renderAdminShip() {
       var meta = getUserMeta();
       var list = meta.shippingAddresses || [];
-      var h = '<div class="mb-3"><div class="font-bold">发货地址维护</div><div class="text-xs text-gray-500 mt-1">商品会绑定这里维护的发货地址快照。</div></div>';
-      h += '<div class="space-y-3 mb-4">' + (list.length ? list.map(function (item) {
-        return renderAddressItemCard('admin', item);
-      }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400 shadow">' + getAddressEditorUi('admin').emptyText + '</div>') + '</div>';
-      h += renderAddressCreateCard('admin');
+      var view = adminFulfillmentState.view || 'queue';
+      var queueItems = adminFulfillmentState.items || [];
+      var pendingCount = queueItems.length;
+      var oldestOrder = queueItems[0] || null;
+      var partialCount = queueItems.filter(function (item) {
+        var summary = item.fulfillmentSummary || {};
+        return Number(summary.assignedItemCount || 0) > 0 && Number(summary.unassignedItemCount || 0) > 0;
+      }).length;
+      var h = '<div class="space-y-4">';
+      h += '<div class="workspace-banner"><div class="text-xs text-white/75 mb-2">履约工作台</div><div class="text-xl font-bold">把待发货队列、发货详情和发货地址分到同一个工作区里</div><div class="text-sm text-white/80 mt-2">默认只看待发货订单，先消化老订单；全量订单页只负责查看、筛选和跳转。</div></div>';
+      h += '<div class="grid grid-cols-2 gap-2 surface-card p-2"><button onclick="switchAdminFulfillmentView(\'queue\')" class="py-2 rounded-lg text-sm btn ' + (view !== 'addresses' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">待发货</button><button onclick="switchAdminFulfillmentView(\'addresses\')" class="py-2 rounded-lg text-sm btn ' + (view === 'addresses' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">发货地址</button></div>';
+      if (view === 'addresses') {
+        h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-1">发货地址维护</div><div class="text-xs text-gray-500">商品会绑定这里维护的发货地址快照。</div></div>';
+        h += '<div class="space-y-3">' + (list.length ? list.map(function (item) {
+          return renderAddressItemCard('admin', item);
+        }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400 shadow">' + getAddressEditorUi('admin').emptyText + '</div>') + '</div>';
+        h += renderAddressCreateCard('admin');
+        h += '</div>';
+        document.getElementById('admin-ship').innerHTML = h;
+        return;
+      }
+      if (view === 'detail' && adminFulfillmentState.detail) {
+        var detail = adminFulfillmentState.detail;
+        var summary = detail.fulfillmentSummary || { shipmentCount: 0, assignedItemCount: 0, totalItemCount: detail.items.length, unassignedItemCount: detail.items.length };
+        var assignedMap = (detail.shipments || []).reduce(function (result, shipment) {
+          (shipment.orderItemIds || []).forEach(function (id) { result[Number(id || 0)] = true; });
+          return result;
+        }, {});
+        var canSubmit = detail.status === 'paid' && Number(summary.unassignedItemCount || 0) > 0;
+        h += '<div class="flex items-center justify-between gap-3"><div><div class="font-bold">发货详情</div><div class="text-xs text-gray-500 mt-1">' + detail.id + ' · ' + detail.owner + '</div></div><button onclick="switchAdminFulfillmentView(\'queue\')" class="px-3 py-2 rounded-full border text-xs">返回队列</button></div>';
+        h += '<div class="grid grid-cols-2 gap-3"><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">收货信息</div><div class="font-medium mt-2">' + getAddressSummary(detail.address) + '</div><div class="text-xs text-gray-400 mt-2">状态：<span class="' + getOrderStatusTone(detail.status) + '">' + getOrderStatusLabel(detail.status) + '</span></div></div><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">履约摘要</div><div class="text-sm mt-2 text-gray-600">已录运单：' + Number(summary.shipmentCount || 0) + ' 条</div><div class="text-sm mt-1 text-gray-600">已分配商品：' + Number(summary.assignedItemCount || 0) + ' / ' + Number(summary.totalItemCount || 0) + '</div><div class="text-sm mt-1 text-gray-600">剩余待发：' + Number(summary.unassignedItemCount || 0) + ' 条</div></div></div>';
+        h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-3">商品清单</div><div class="space-y-2">' + detail.items.map(function (item) {
+          var checked = (adminFulfillmentState.draft.selectedOrderItemIds || []).indexOf(Number(item.orderItemId || 0)) >= 0;
+          var assigned = !!assignedMap[Number(item.orderItemId || 0)];
+          return '<label class="flex gap-3 rounded-xl ' + (assigned ? 'bg-gray-100' : 'bg-[#F9F7F3]') + ' p-3">'
+            + '<input type="checkbox" ' + (assigned ? 'disabled ' : '') + (checked ? 'checked ' : '') + 'onchange="toggleAdminFulfillmentItem(' + Number(item.orderItemId || 0) + ')">'
+            + '<div class="flex-1"><div class="text-sm font-medium">' + item.name + ' × ' + item.qty + '</div><div class="text-xs text-gray-500 mt-1">' + (item.variantLabel || '默认规格') + ' / ' + (item.unit || item.unitLabel || '默认单位') + '</div><div class="text-xs text-gray-500 mt-1">发货地址：' + getAddressSummary(item.shippingAddressSnapshot) + '</div></div>'
+            + '<div class="text-xs ' + (assigned ? 'text-[#2D9D4E]' : 'text-gray-400') + '">' + (assigned ? '已绑定运单' : '待分配') + '</div>'
+            + '</label>';
+        }).join('') + '</div></div>';
+        h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-2">已录运单</div>' + renderShipmentDetailList(detail.shipments, { emptyText: '暂未录入物流信息' }) + '</div>';
+        h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-3">新增运单</div>';
+        if (!canSubmit) {
+          h += '<div class="text-sm text-gray-400">当前订单没有可继续发货的商品，详情页只读展示完整履约信息。</div>';
+        } else {
+          h += '<div class="grid grid-cols-2 gap-2"><input id="admin-fulfillment-tracking" value="' + (adminFulfillmentState.draft.trackingNo || '') + '" oninput="setAdminFulfillmentDraftField(\'trackingNo\', this.value)" class="p-2 border rounded-lg text-sm" placeholder="快递单号"><input id="admin-fulfillment-carrier-name" value="' + (adminFulfillmentState.draft.carrierName || '') + '" oninput="setAdminFulfillmentDraftField(\'carrierName\', this.value)" class="p-2 border rounded-lg text-sm" placeholder="快递公司"><input id="admin-fulfillment-carrier-code" value="' + (adminFulfillmentState.draft.carrierCode || '') + '" oninput="setAdminFulfillmentDraftField(\'carrierCode\', this.value)" class="p-2 border rounded-lg text-sm" placeholder="快递代码"></div>';
+          h += '<div class="text-xs text-gray-400 mt-3">先勾选本次随单发出的商品，再填写快递单号；一个订单可以重复录入多条运单。</div>';
+          h += '<button onclick="submitAdminFulfillmentShipment()" class="w-full mt-3 py-3 rounded-xl bg-[#2D9D4E] text-white text-sm btn">' + (adminFulfillmentState.loading ? '保存中...' : '保存发货信息') + '</button>';
+        }
+        h += '</div>';
+        h += '</div>';
+        document.getElementById('admin-ship').innerHTML = h;
+        return;
+      }
+      h += '<div class="grid grid-cols-3 gap-3"><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">待发货订单</div><div class="text-2xl font-bold text-[#2D9D4E] mt-2">' + pendingCount + '</div></div><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">已录部分运单</div><div class="text-2xl font-bold text-[#E07B39] mt-2">' + partialCount + '</div></div><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">最老订单</div><div class="text-sm font-bold text-gray-700 mt-2">' + (oldestOrder ? formatDateTimeLabel(oldestOrder.time) : '暂无') + '</div></div></div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="font-bold mb-3">待发货筛选</div><div class="grid grid-cols-2 gap-2"><input id="admin-fulfillment-order-id" value="' + (adminFulfillmentState.filters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="admin-fulfillment-owner" value="' + (adminFulfillmentState.filters.ownerUsername || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="admin-fulfillment-status" class="p-2 border rounded-lg text-sm"><option value="paid" ' + (adminFulfillmentState.filters.status === 'paid' ? 'selected' : '') + '>待发货</option><option value="shipped" ' + (adminFulfillmentState.filters.status === 'shipped' ? 'selected' : '') + '>已发货</option><option value="done" ' + (adminFulfillmentState.filters.status === 'done' ? 'selected' : '') + '>已完成</option></select></div><div class="flex gap-2 mt-3"><button onclick="applyAdminFulfillmentFilters()" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">查询队列</button><button onclick="resetAdminFulfillmentFilters()" class="flex-1 py-2 rounded-lg border text-sm">重置</button></div></div>';
+      if (!queueItems.length) {
+        h += '<div class="bg-white rounded-xl p-4 shadow text-sm text-gray-400">当前筛选下没有匹配的发货订单</div>';
+      } else {
+        h += queueItems.map(function (order) {
+          var summary = order.fulfillmentSummary || {};
+          return '<div class="bg-white rounded-xl p-4 shadow">'
+            + '<div class="flex items-center justify-between gap-3"><div><div class="font-bold">' + order.id + '</div><div class="text-xs text-gray-500 mt-1">' + order.owner + (order.ownerDeleted ? '（已删除）' : '') + ' · ' + formatDateTimeLabel(order.time) + '</div></div><button onclick="openAdminFulfillmentDetail(\'' + order.owner + '\',\'' + order.id + '\')" class="px-3 py-2 rounded-full bg-[#2D9D4E] text-white text-xs btn">进入详情发货</button></div>'
+            + '<div class="text-xs text-gray-500 mt-2">收货地址：' + getAddressSummary(order.address) + '</div>'
+            + '<div class="text-xs text-gray-500 mt-1">履约进度：' + Number(summary.assignedItemCount || 0) + ' / ' + Number(summary.totalItemCount || 0) + ' 条商品已分配</div>'
+            + '<div class="space-y-2 mt-3">' + order.items.map(function (item) { return '<div class="rounded-lg bg-[#F9F7F3] p-2"><div class="text-sm">' + item.name + ' × ' + item.qty + '</div><div class="text-xs text-gray-500 mt-1">' + (item.variantLabel || '默认规格') + ' / ' + (item.unit || item.unitLabel || '默认单位') + '</div><div class="text-xs text-gray-500 mt-1">发货地址：' + getAddressSummary(item.shippingAddressSnapshot) + '</div></div>'; }).join('') + '</div>'
+            + renderShipmentCardList(order.shipments, { compact: true, emptyText: '暂未录入物流信息' })
+            + '</div>';
+        }).join('');
+        h += renderPager(adminFulfillmentState.meta, 'changeAdminFulfillmentPage');
+      }
+      h += '</div>';
       document.getElementById('admin-ship').innerHTML = h;
     }
     function renderAdminAuth() {
@@ -5800,7 +7149,13 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
 
       if (adminPanelVisible) {
         if (currentAdminTab === 'ship') {
-          shouldRefreshUsers = await persistShippingAddressDraft('admin', { silentIncomplete: true }) || shouldRefreshUsers;
+          if (adminFulfillmentState.view === 'addresses') {
+            shouldRefreshUsers = await persistShippingAddressDraft('admin', { silentIncomplete: true }) || shouldRefreshUsers;
+          } else if (adminFulfillmentState.view === 'detail' && adminFulfillmentState.dirty && hasAdminFulfillmentDraftChanges()) {
+            if (!confirm('当前发货详情里还有未提交内容，确认离开吗？')) {
+              throw new Error('已取消离开发货详情');
+            }
+          }
         } else if (currentAdminTab === 'pd') {
           if (isElementVisible('add-prod-form')) {
             shouldRefreshProducts = await saveNewProduct({ alertInvalid: false, alertSuccess: false, rerenderAfterSave: false }) || shouldRefreshProducts;

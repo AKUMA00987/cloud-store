@@ -78,6 +78,7 @@ async function main() {
   const fetchCalls = [];
   const storage = new Map();
   const document = createDocument();
+  const navigatorState = { userAgent: 'Mozilla/5.0 Chrome/124 Safari/537.36' };
 
   [
     'app',
@@ -180,6 +181,7 @@ async function main() {
 
   let currentAuthUsername = 'buyer1';
   let prepareCounter = 0;
+  const paymentTransactions = {};
 
   function getUser(username) {
     return users.find(function (item) { return item.username === username; }) || null;
@@ -218,6 +220,18 @@ async function main() {
     syncProductStocks(product);
   }
 
+  function getPaymentRuntimeMeta(preferredChannel) {
+    const wechatBrowser = /micromessenger/i.test(String(navigatorState.userAgent || ''));
+    const availableChannels = wechatBrowser
+      ? ['alipay_wap', 'wechat_h5_inapp']
+      : ['alipay_wap', 'wechat_h5_external'];
+    return {
+      availableChannels: availableChannels,
+      recommendedChannel: availableChannels.indexOf(String(preferredChannel || '')) >= 0 ? String(preferredChannel || '') : availableChannels[0],
+      wechatBrowser: wechatBrowser
+    };
+  }
+
   const sandbox = {
     console,
     Math,
@@ -251,8 +265,10 @@ async function main() {
       scrollTo() { },
       open() { },
       history: { back() { } },
-      prompt() { return ''; }
+      prompt() { return ''; },
+      navigator: navigatorState
     },
+    navigator: navigatorState,
     document,
     lucide: { createIcons() { } },
     FileReader: undefined,
@@ -309,7 +325,7 @@ async function main() {
       if (parsed.pathname === '/api/orders/prepare-payment' && method === 'POST') {
         prepareCounter += 1;
         const owner = getUser(currentAuthUsername);
-        const order = {
+        const order = Object.assign({
           id: 'ORD_PENDING_' + prepareCounter,
           owner: currentAuthUsername,
           items: cloneJson(payload.items || []),
@@ -327,21 +343,98 @@ async function main() {
           inventoryReleased: false,
           inventoryReleasedAt: 0,
           cancelReason: ''
-        };
+        }, getPaymentRuntimeMeta(''));
         owner.orders = [order].concat(owner.orders || []);
+        paymentTransactions[order.id] = {
+          id: currentAuthUsername + ':' + order.id,
+          orderId: order.id,
+          status: 'pending',
+          channel: '',
+          externalTradeNo: currentAuthUsername + ':' + order.id,
+          gatewayTradeNo: '',
+          returnCheckedAt: 0
+        };
         (payload.items || []).forEach(function (item) {
           setProductUnitStock(item.productId || item.id, item.variantId, item.unitId, -Number(item.qty || 0));
         });
         return createJsonResponse(cloneJson(order));
       }
 
-      const payMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/pay$/);
-      if (payMatch && method === 'POST') {
-        const orderId = decodeURIComponent(payMatch[1]);
+      const alipayLaunchMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/alipay-wap$/);
+      if (alipayLaunchMatch && method === 'POST') {
+        const orderId = decodeURIComponent(alipayLaunchMatch[1]);
+        const transaction = paymentTransactions[orderId];
+        if (transaction) transaction.channel = 'alipay_wap';
+        return createJsonResponse({
+          orderId: orderId,
+          channel: 'alipay_wap',
+          availableChannels: getPaymentRuntimeMeta('alipay_wap').availableChannels,
+          recommendedChannel: 'alipay_wap',
+          gateway: 'https://openapi.alipay.com/gateway.do',
+          method: 'POST',
+          params: {
+            method: 'alipay.trade.wap.pay',
+            return_url: 'https://putiguoguo.com/#/paymentResult?orderId=' + encodeURIComponent(orderId)
+          },
+          paymentTransaction: cloneJson(transaction || {})
+        });
+      }
+
+      const wechatInAppLaunchMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/wechat-inapp-h5$/);
+      if (wechatInAppLaunchMatch && method === 'POST') {
+        const orderId = decodeURIComponent(wechatInAppLaunchMatch[1]);
+        const transaction = paymentTransactions[orderId];
+        if (transaction) transaction.channel = 'wechat_h5_inapp';
+        return createJsonResponse({
+          orderId: orderId,
+          channel: 'wechat_h5_inapp',
+          availableChannels: getPaymentRuntimeMeta('wechat_h5_inapp').availableChannels,
+          recommendedChannel: 'wechat_h5_inapp',
+          gateway: 'https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi',
+          method: 'POST',
+          params: {
+            trade_type: 'JSAPI',
+            redirect_url: 'https://putiguoguo.com/#/paymentResult?orderId=' + encodeURIComponent(orderId)
+          },
+          paymentTransaction: cloneJson(transaction || {})
+        });
+      }
+
+      const wechatExternalLaunchMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/wechat-external-h5$/);
+      if (wechatExternalLaunchMatch && method === 'POST') {
+        const orderId = decodeURIComponent(wechatExternalLaunchMatch[1]);
+        const transaction = paymentTransactions[orderId];
+        if (transaction) transaction.channel = 'wechat_h5_external';
+        return createJsonResponse({
+          orderId: orderId,
+          channel: 'wechat_h5_external',
+          availableChannels: getPaymentRuntimeMeta('wechat_h5_external').availableChannels,
+          recommendedChannel: 'wechat_h5_external',
+          gateway: 'https://api.mch.weixin.qq.com/v3/pay/transactions/h5',
+          method: 'POST',
+          params: {
+            trade_type: 'H5',
+            redirect_url: 'https://putiguoguo.com/#/paymentResult?orderId=' + encodeURIComponent(orderId)
+          },
+          paymentTransaction: cloneJson(transaction || {})
+        });
+      }
+
+      const paymentStatusMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/payment-status$/);
+      if (paymentStatusMatch && method === 'GET') {
+        const orderId = decodeURIComponent(paymentStatusMatch[1]);
         const owner = getUser(currentAuthUsername);
         const order = (owner.orders || []).find(function (item) { return item.id === orderId; });
-        Object.assign(order, { status: 'paid', cancelReason: '', inventoryReleased: false });
-        return createJsonResponse(cloneJson(order));
+        const transaction = paymentTransactions[orderId] || null;
+        if (transaction && parsed.searchParams.get('returnCheck')) {
+          transaction.returnCheckedAt = Date.now();
+        }
+        return createJsonResponse({
+          order: cloneJson(order ? Object.assign({}, order, getPaymentRuntimeMeta(transaction && transaction.channel)) : {}),
+          paymentTransaction: cloneJson(transaction || {}),
+          awaitingAsyncNotify: !!(order && order.status === 'pending' && transaction && ['alipay_wap', 'wechat_h5_inapp', 'wechat_h5_external'].indexOf(transaction.channel) >= 0 && transaction.status === 'pending'),
+          isFinal: !!(order && (order.status !== 'pending' || order.inventoryReleased))
+        }, order ? 200 : 404);
       }
 
       const cancelMatch = parsed.pathname.match(/^\/api\/orders\/([^/]+)\/cancel-pending$/);
@@ -355,6 +448,7 @@ async function main() {
           inventoryReleasedAt: Date.now(),
           cancelReason: 'buyer_pending_cancel'
         });
+        if (paymentTransactions[orderId]) paymentTransactions[orderId].status = 'cancelled';
         (order.items || []).forEach(function (item) {
           setProductUnitStock(item.productId || item.id, item.variantId, item.unitId, Number(item.qty || 0));
         });
@@ -403,16 +497,95 @@ async function main() {
   assert(prepareCall.body.items[0].unitLabel === '袋装', '待支付下单应带上单位名称');
   assert(exec('currentCheckoutOrder && currentCheckoutOrder.items[0].unitId') === 'large-bag', '待支付订单快照应保留单位 ID');
   assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 3, '进入支付后应立即预占单位库存');
+  assert(exec("paymentPage().indexOf('支付宝支付') >= 0") === true, '非微信环境下主按钮应默认推荐支付宝支付');
+  assert(exec("paymentPage().indexOf('更多支付方式') >= 0") === true, '非微信环境下应提供更多支付方式入口');
 
-  await execAsync('await completeMockPayment();');
+  await execAsync('await startRecommendedPayment();');
+  await flush(4);
+  const alipayCall = fetchCalls.find(function (item) {
+    return /\/api\/orders\/ORD_PENDING_1\/alipay-wap$/.test(item.path) && item.method === 'POST';
+  });
+  assert(alipayCall, '非微信环境默认支付应请求服务端发起支付宝 WAP 支付');
+  assert(fetchCalls.every(function (item) { return !/\/pay$/.test(item.path); }), '支付 UI 默认主路径不应再调用 /pay mock 支付接口');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.method') === 'alipay.trade.wap.pay', '支付宝主按钮应准备支付宝手机网站支付表单');
+
+  getUser('buyer1').orders[0].status = 'paid';
+  getUser('buyer1').cart = [];
+  paymentTransactions['ORD_PENDING_1'].status = 'paid';
+  paymentTransactions['ORD_PENDING_1'].channel = 'alipay_wap';
+  paymentTransactions['ORD_PENDING_1'].gatewayTradeNo = '202604120000000001';
+  await execAsync('await syncPaymentResultStatus({ orderId: "ORD_PENDING_1", returnCheck: true, force: true });');
   await flush(6);
-  assert(exec('cart.length') === 0, '支付成功后应清空购物车');
-  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 3, '支付成功后不应二次扣减单位库存');
+  assert(exec('paymentResultState.order && paymentResultState.order.status') === 'paid', '支付宝支付结果页应通过只读查询拿到已支付状态');
+  assert(exec("paymentResultPage().indexOf('支付宝手机网站支付') >= 0") === true, '支付结果页应展示支付宝渠道文案');
+  assert(exec('cart.length') === 0, '支付结果确认后应清空购物车');
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 3, '支付宝支付成功后不应二次扣减单位库存');
+
+  exec('window.navigator.userAgent = navigator.userAgent = "Mozilla/5.0 MicroMessenger"; cart = [normalizeCartStateItem({ id: 1, productId: 1, name: "高山青菜", variantId: "veg-large", variantLabel: "大份", unitId: "large-bag", unitLabel: "袋装", unit: "袋装", price: 26, img: "https://example.com/veg.jpg", qty: 1 })]; updateCartBadge();');
+  await execAsync('await confirmCheckout();');
+  await flush(4);
+  assert(exec("paymentPage().indexOf('支付宝支付') >= 0") === true, '微信环境下主按钮仍应默认推荐支付宝支付');
+  assert(exec("paymentPage().indexOf('更多支付方式') >= 0") === true, '微信环境下仍应保留更多支付方式入口');
+
+  await execAsync('await startRecommendedPayment();');
+  await flush(4);
+  const wechatEnvAlipayCall = fetchCalls.find(function (item) {
+    return /\/api\/orders\/ORD_PENDING_2\/alipay-wap$/.test(item.path) && item.method === 'POST';
+  });
+  assert(wechatEnvAlipayCall, '微信环境主按钮应继续请求服务端发起支付宝 WAP 支付');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.method') === 'alipay.trade.wap.pay', '微信环境的支付宝主按钮应准备支付宝手机网站支付表单');
+
+  await execAsync('toggleMorePaymentChannels();');
+  await flush(2);
+  assert(exec("paymentPage().indexOf('微信支付（微信内 H5）') >= 0") === true, '微信环境的更多支付方式中应展示微信内 H5');
+
+  await execAsync('await startSecondaryPaymentChannel("wechat_h5_inapp");');
+  await flush(4);
+  const wechatInAppCall = fetchCalls.find(function (item) {
+    return /\/api\/orders\/ORD_PENDING_2\/wechat-inapp-h5$/.test(item.path) && item.method === 'POST';
+  });
+  assert(wechatInAppCall, '微信环境应能从更多支付方式发起微信内 H5 支付');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.trade_type') === 'JSAPI', '微信内 H5 支付应准备 JSAPI 合约参数');
+
+  getUser('buyer1').orders.find(function (item) { return item.id === 'ORD_PENDING_2'; }).status = 'paid';
+  getUser('buyer1').cart = [];
+  paymentTransactions['ORD_PENDING_2'].status = 'paid';
+  paymentTransactions['ORD_PENDING_2'].channel = 'wechat_h5_inapp';
+  paymentTransactions['ORD_PENDING_2'].gatewayTradeNo = 'wx202604120000000001';
+  await execAsync('await syncPaymentResultStatus({ orderId: "ORD_PENDING_2", returnCheck: true, force: true });');
+  await flush(6);
+  assert(exec("paymentResultPage().indexOf('微信内 H5 支付') >= 0") === true, '支付结果页应展示微信内 H5 渠道文案');
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 2, '第二笔支付成功后库存应继续保持预占后的结果');
+
+  exec('window.navigator.userAgent = navigator.userAgent = "Mozilla/5.0 Chrome/124 Safari/537.36"; cart = [normalizeCartStateItem({ id: 1, productId: 1, name: "高山青菜", variantId: "veg-large", variantLabel: "大份", unitId: "large-bag", unitLabel: "袋装", unit: "袋装", price: 26, img: "https://example.com/veg.jpg", qty: 1 })]; updateCartBadge();');
+  await execAsync('await confirmCheckout();');
+  await flush(4);
+  await execAsync('toggleMorePaymentChannels();');
+  await flush(2);
+  assert(exec("paymentPage().indexOf('微信支付（微信外 H5）') >= 0") === true, '非微信环境的更多支付方式中应展示微信外 H5');
+
+  await execAsync('await startSecondaryPaymentChannel("wechat_h5_external");');
+  await flush(4);
+  const wechatExternalCall = fetchCalls.find(function (item) {
+    return /\/api\/orders\/ORD_PENDING_3\/wechat-external-h5$/.test(item.path) && item.method === 'POST';
+  });
+  assert(wechatExternalCall, '更多支付方式应能发起微信外 H5 支付');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.trade_type') === 'H5', '微信外 H5 支付应准备 H5 合约参数');
+
+  getUser('buyer1').orders.find(function (item) { return item.id === 'ORD_PENDING_3'; }).status = 'paid';
+  getUser('buyer1').cart = [];
+  paymentTransactions['ORD_PENDING_3'].status = 'paid';
+  paymentTransactions['ORD_PENDING_3'].channel = 'wechat_h5_external';
+  paymentTransactions['ORD_PENDING_3'].gatewayTradeNo = 'wx202604120000000002';
+  await execAsync('await syncPaymentResultStatus({ orderId: "ORD_PENDING_3", returnCheck: true, force: true });');
+  await flush(6);
+  assert(exec("paymentResultPage().indexOf('微信外 H5 支付') >= 0") === true, '支付结果页应展示微信外 H5 渠道文案');
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 1, '三笔支付完成后库存应反映真实锁定结果');
 
   exec('cart = [normalizeCartStateItem({ id: 1, productId: 1, name: "高山青菜", variantId: "veg-large", variantLabel: "大份", unitId: "large-box", unitLabel: "箱装", unit: "箱装", price: 26, img: "https://example.com/veg.jpg", qty: 1 })]; updateCartBadge();');
   await execAsync('await confirmCheckout();');
   await flush(4);
-  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).stock === 1, '第二笔待支付订单应预占对应单位库存');
+  assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).stock === 1, '第四笔待支付订单应预占对应单位库存');
 
   await execAsync('await cancelOrder(0);');
   await flush(6);

@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
 const vm = require('vm');
 const sqlite3 = require('sqlite3').verbose();
@@ -18,7 +19,7 @@ const disableDefaultSeedMarkerPath = path.resolve(
   process.env.CLOUD_STORE_DISABLE_SAMPLE_DATA_FILE || path.join(__dirname, '.disable-default-seed')
 );
 const disableDefaultSampleData =
-  /^(1|true|yes|on)$/i.test(String(process.env.CLOUD_STORE_DISABLE_SAMPLE_DATA || '').trim()) ||
+  parseEnvFlag(process.env.CLOUD_STORE_DISABLE_SAMPLE_DATA) ||
   fs.existsSync(disableDefaultSeedMarkerPath);
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 fs.mkdirSync(uploadRootPath, { recursive: true });
@@ -29,12 +30,66 @@ const SESSION_REFRESH_MS = 12 * 60 * 60 * 1000;
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const AUTH_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX_FAILURES = 8;
+const PASSWORD_MIN_LENGTH = 6;
+const SMS_CODE_LENGTH = 6;
+const SMS_CODE_TTL_MS = 5 * 60 * 1000;
+const SMS_CODE_RESEND_MS = 60 * 1000;
+const SMS_CODE_SHORT_WINDOW_MS = 10 * 60 * 1000;
+const SMS_CODE_SHORT_LIMIT = 5;
+const ALIPAY_GATEWAY_DEFAULT = 'https://openapi.alipay.com/gateway.do';
+const ALIPAY_WAP_METHOD = 'alipay.trade.wap.pay';
+const ALIPAY_CHARSET = 'utf-8';
+const ALIPAY_SIGN_TYPE = 'RSA2';
+const ALIPAY_VERSION = '1.0';
+const ALIPAY_TIMEOUT_EXPRESS = '10m';
+const WECHAT_PAY_H5_GATEWAY_DEFAULT = 'https://api.mch.weixin.qq.com/v3/pay/transactions/h5';
+const WECHAT_PAY_JSAPI_GATEWAY_DEFAULT = 'https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi';
+const LOGISTICS_THROTTLE_MS = 2 * 60 * 60 * 1000;
 const authAttemptBuckets = new Map();
+
+function parseEnvFlag(value) {
+  return /^(1|true|yes|on)$/i.test(String(value || '').trim());
+}
+
+function isProductionRuntime() {
+  return String(process.env.NODE_ENV || '').trim() === 'production';
+}
+
+function isLocalMockPaymentEnabled() {
+  return parseEnvFlag(process.env.CS_ENABLE_LOCAL_MOCK_PAYMENT) && !isProductionRuntime();
+}
+
+function getRuntimeEnv() {
+  return String(process.env.CLOUD_STORE_RUNTIME_ENV || '').trim().toLowerCase() || 'production';
+}
+
+function isStagingRuntime() {
+  return getRuntimeEnv() === 'staging';
+}
+
+function getRuntimeLabel() {
+  const explicitLabel = String(process.env.CLOUD_STORE_RUNTIME_LABEL || '').trim();
+  if (explicitLabel) return explicitLabel;
+  return isStagingRuntime() ? '测试环境 / staging' : '正式环境 / production';
+}
+
+function getRuntimeMeta(req) {
+  return {
+    env: getRuntimeEnv(),
+    label: getRuntimeLabel(),
+    isStaging: isStagingRuntime(),
+    host: host,
+    port: port,
+    publicBaseUrl: buildPublicBaseUrl(req),
+    paths: {
+      database: path.basename(dbPath),
+      uploads: path.basename(uploadRootPath)
+    }
+  };
+}
 
 app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ limit: '12mb', extended: true }));
-app.use(express.static(publicPath));
-app.use('/uploads', express.static(uploadRootPath));
 
 function setSecurityHeaders(req, res) {
   res.setHeader('X-Frame-Options', 'DENY');
@@ -46,6 +101,9 @@ function setSecurityHeaders(req, res) {
     'Content-Security-Policy',
     "default-src 'self' https: data: blob:; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
   );
+  if (isStagingRuntime()) {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  }
 }
 
 app.use(function (req, res, next) {
@@ -53,10 +111,15 @@ app.use(function (req, res, next) {
   next();
 });
 
+app.use(express.static(publicPath));
+app.use('/uploads', express.static(uploadRootPath));
+
 app.get('/healthz', function (req, res) {
+  const runtimeMeta = getRuntimeMeta(req);
   res.json({
     ok: true,
     service: 'cloud-store',
+    runtime: runtimeMeta,
     host: host,
     port: port,
     storage: {
@@ -65,6 +128,10 @@ app.get('/healthz', function (req, res) {
     },
     now: new Date().toISOString()
   });
+});
+
+app.get('/api/runtime-meta', function (req, res) {
+  res.json(getRuntimeMeta(req));
 });
 
 // [SERVER_DB_HELPERS] 所有 SQLite 增删改查 Promise 封装都从这里往下查。
@@ -321,6 +388,286 @@ function clearSessionCookie(res, req) {
   res.setHeader('Set-Cookie', buildSessionCookieValue('', req) + '; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
 }
 
+function normalizePemEnvValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return raw.replace(/\\n/g, '\n');
+}
+
+function buildPublicBaseUrl(req) {
+  const forwardedProto = String(req && req.headers && req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const scheme = forwardedProto || (req && req.secure ? 'https' : 'http');
+  const hostHeader = String(req && req.headers && req.headers.host || '').split(',')[0].trim();
+  return hostHeader ? (scheme + '://' + hostHeader) : '';
+}
+
+function getAlipayConfig(req) {
+  const enabled = parseEnvFlag(process.env.ALIPAY_ENABLED);
+  const explicitPublicBaseUrl = String(process.env.CLOUD_STORE_PUBLIC_BASE_URL || '').trim();
+  const explicitReturnUrl = String(process.env.ALIPAY_RETURN_URL || '').trim();
+  const explicitNotifyUrl = String(process.env.ALIPAY_NOTIFY_URL || '').trim();
+  const allowDerivedCallbacks = !enabled || isLocalMockPaymentEnabled();
+  const publicBaseUrl = explicitPublicBaseUrl || (allowDerivedCallbacks ? buildPublicBaseUrl(req) : '');
+  const returnUrl = explicitReturnUrl || (allowDerivedCallbacks && publicBaseUrl ? (publicBaseUrl + '/#/paymentResult') : '');
+  const notifyUrl = explicitNotifyUrl || (allowDerivedCallbacks && publicBaseUrl ? (publicBaseUrl + '/api/payments/alipay/notify') : '');
+  return {
+    enabled: enabled,
+    appId: String(process.env.ALIPAY_APP_ID || '').trim(),
+    gateway: String(process.env.ALIPAY_GATEWAY || '').trim() || ALIPAY_GATEWAY_DEFAULT,
+    privateKey: normalizePemEnvValue(process.env.ALIPAY_PRIVATE_KEY),
+    publicKey: normalizePemEnvValue(process.env.ALIPAY_PUBLIC_KEY),
+    sellerId: String(process.env.ALIPAY_SELLER_ID || '').trim(),
+    returnUrl: returnUrl,
+    notifyUrl: notifyUrl,
+    publicBaseUrl: publicBaseUrl,
+    charset: ALIPAY_CHARSET,
+    signType: ALIPAY_SIGN_TYPE,
+    version: ALIPAY_VERSION
+  };
+}
+
+function assertAlipayReady(config) {
+  if (!config.enabled) {
+    throw new Error('支付宝 WAP 支付未启用，请先在 cloud-store.env 中设置 ALIPAY_ENABLED=true');
+  }
+  if (!config.appId || !config.privateKey || !config.publicKey) {
+    throw new Error('支付宝配置不完整，请先补齐 AppId、公钥和私钥');
+  }
+  const missingKeys = [];
+  if (!config.publicBaseUrl) missingKeys.push('CLOUD_STORE_PUBLIC_BASE_URL');
+  if (!config.returnUrl) missingKeys.push('ALIPAY_RETURN_URL');
+  if (!config.notifyUrl) missingKeys.push('ALIPAY_NOTIFY_URL');
+  if (missingKeys.length) {
+    throw new Error('支付宝公网回调配置缺失，请先在 cloud-store.env 中补齐 ' + missingKeys.join('、'));
+  }
+}
+
+function formatAlipayTimestamp(value) {
+  const date = new Date(Number(value || Date.now()));
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  const second = String(date.getSeconds()).padStart(2, '0');
+  return year + '-' + month + '-' + day + ' ' + hour + ':' + minute + ':' + second;
+}
+
+function buildAlipaySignContent(params, options) {
+  const config = Object.assign({ excludeSignType: false }, options || {});
+  return Object.keys(params || {})
+    .filter(function (key) {
+      const value = params[key];
+      if (key === 'sign') return false;
+      if (config.excludeSignType && key === 'sign_type') return false;
+      return value !== null && value !== undefined && value !== '';
+    })
+    .sort()
+    .map(function (key) {
+      return key + '=' + String(params[key]);
+    })
+    .join('&');
+}
+
+function signAlipayParams(params, privateKey) {
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(buildAlipaySignContent(params, { excludeSignType: false }), 'utf8');
+  return signer.sign(privateKey, 'base64');
+}
+
+function verifyAlipaySignature(params, publicKey) {
+  const payload = Object.assign({}, params || {});
+  const sign = String(payload.sign || '').replace(/ /g, '+').trim();
+  if (!sign) return false;
+  delete payload.sign;
+  const verifier = crypto.createVerify('RSA-SHA256');
+  verifier.update(buildAlipaySignContent(payload, { excludeSignType: true }), 'utf8');
+  return verifier.verify(publicKey, sign, 'base64');
+}
+
+function formatCurrencyAmount(value) {
+  return Number(value || 0).toFixed(2);
+}
+
+function buildAlipayOutTradeNo(ownerUsername, sourceOrderId) {
+  return buildPaymentTransactionId(ownerUsername, sourceOrderId);
+}
+
+function parseAlipayOutTradeNo(value) {
+  const raw = String(value || '').trim();
+  const separatorIndex = raw.indexOf(':');
+  if (!raw || separatorIndex <= 0) return null;
+  return {
+    ownerUsername: raw.slice(0, separatorIndex),
+    sourceOrderId: raw.slice(separatorIndex + 1)
+  };
+}
+
+function buildAlipayOrderSubject(order) {
+  const normalizedOrder = normalizeOrderRecord(order);
+  const firstItem = normalizeOrderItem(normalizedOrder.items[0], 0);
+  const base = firstItem && firstItem.name ? firstItem.name : '日精月华订单';
+  const suffix = normalizedOrder.items.length > 1 ? ('等' + normalizedOrder.items.length + '件商品') : '';
+  return (base + suffix).slice(0, 64);
+}
+
+function buildAlipayReturnUrl(config, order) {
+  const base = String(config && config.returnUrl || '').trim();
+  if (!base) return '';
+  const separator = base.indexOf('?') >= 0 ? '&' : '?';
+  return base + separator + 'orderId=' + encodeURIComponent(String(order && order.id || ''));
+}
+
+function buildAlipayWapRequest(order, paymentTransaction, config) {
+  const normalizedOrder = normalizeOrderRecord(order);
+  const payment = normalizePaymentTransaction(paymentTransaction);
+  const bizContent = {
+    out_trade_no: payment.externalTradeNo || buildAlipayOutTradeNo(normalizedOrder.owner, normalizedOrder.id),
+    total_amount: formatCurrencyAmount(normalizedOrder.total),
+    subject: buildAlipayOrderSubject(normalizedOrder),
+    product_code: 'QUICK_WAP_WAY',
+    quit_url: (config && config.publicBaseUrl ? (config.publicBaseUrl + '/#/orders') : '')
+  };
+  const params = {
+    app_id: config.appId,
+    method: ALIPAY_WAP_METHOD,
+    format: 'JSON',
+    charset: config.charset,
+    sign_type: config.signType,
+    timestamp: formatAlipayTimestamp(Date.now()),
+    version: config.version,
+    notify_url: config.notifyUrl,
+    return_url: buildAlipayReturnUrl(config, normalizedOrder),
+    biz_content: JSON.stringify(Object.assign(bizContent, {
+      timeout_express: ALIPAY_TIMEOUT_EXPRESS
+    }))
+  };
+  if (config.sellerId) params.seller_id = config.sellerId;
+  params.sign = signAlipayParams(params, config.privateKey);
+  return {
+    gateway: config.gateway,
+    method: 'POST',
+    params: params
+  };
+}
+
+function isWechatBrowser(req) {
+  const userAgent = String(req && req.headers && (req.headers['user-agent'] || req.headers['User-Agent']) || '').toLowerCase();
+  return userAgent.indexOf('micromessenger') >= 0;
+}
+
+function getPaymentChannelRuntimeMeta(req, options) {
+  const config = Object.assign({ preferredChannel: '' }, options || {});
+  const availableChannels = [];
+  const alipayEnabled = parseEnvFlag(process.env.ALIPAY_ENABLED);
+  const wechatEnabled = parseEnvFlag(process.env.WECHAT_PAY_ENABLED);
+  const wechatBrowser = isWechatBrowser(req);
+  if (wechatEnabled && wechatBrowser) availableChannels.push('wechat_h5_inapp');
+  if (alipayEnabled) availableChannels.push('alipay_wap');
+  if (wechatEnabled && !wechatBrowser) availableChannels.push('wechat_h5_external');
+  const recommendedChannel = availableChannels.indexOf(config.preferredChannel) >= 0
+    ? config.preferredChannel
+    : (availableChannels[0] || '');
+  return {
+    availableChannels: availableChannels,
+    recommendedChannel: recommendedChannel,
+    wechatBrowser: wechatBrowser
+  };
+}
+
+function withPaymentRuntimeMeta(order, req, options) {
+  return Object.assign({}, normalizeOrderRecord(order), getPaymentChannelRuntimeMeta(req, options));
+}
+
+function getWechatPayConfig(req) {
+  const enabled = parseEnvFlag(process.env.WECHAT_PAY_ENABLED);
+  const explicitPublicBaseUrl = String(process.env.CLOUD_STORE_PUBLIC_BASE_URL || '').trim();
+  const publicBaseUrl = explicitPublicBaseUrl || ((!enabled || isLocalMockPaymentEnabled()) ? buildPublicBaseUrl(req) : '');
+  const inAppReturnUrl = String(process.env.WECHAT_PAY_INAPP_RETURN_URL || '').trim() || (publicBaseUrl ? (publicBaseUrl + '/#/paymentResult') : '');
+  const externalReturnUrl = String(process.env.WECHAT_PAY_EXTERNAL_RETURN_URL || '').trim() || (publicBaseUrl ? (publicBaseUrl + '/#/paymentResult') : '');
+  return {
+    enabled: enabled,
+    appId: String(process.env.WECHAT_PAY_APP_ID || '').trim(),
+    mchId: String(process.env.WECHAT_PAY_MCH_ID || '').trim(),
+    apiV3Key: String(process.env.WECHAT_PAY_API_V3_KEY || '').trim(),
+    privateKey: normalizePemEnvValue(process.env.WECHAT_PAY_PRIVATE_KEY),
+    certSerialNo: String(process.env.WECHAT_PAY_CERT_SERIAL_NO || '').trim(),
+    notifyUrl: String(process.env.WECHAT_PAY_NOTIFY_URL || '').trim(),
+    publicBaseUrl: publicBaseUrl,
+    inAppReturnUrl: inAppReturnUrl,
+    externalReturnUrl: externalReturnUrl,
+    h5Gateway: String(process.env.WECHAT_PAY_H5_GATEWAY || '').trim() || WECHAT_PAY_H5_GATEWAY_DEFAULT,
+    jsapiGateway: String(process.env.WECHAT_PAY_JSAPI_GATEWAY || '').trim() || WECHAT_PAY_JSAPI_GATEWAY_DEFAULT
+  };
+}
+
+function assertWechatPayReady(config, channel) {
+  if (!config.enabled) {
+    throw new Error('微信支付未启用，请先在 cloud-store.env 中设置 WECHAT_PAY_ENABLED=true');
+  }
+  const missingKeys = [];
+  if (!config.appId) missingKeys.push('WECHAT_PAY_APP_ID');
+  if (!config.mchId) missingKeys.push('WECHAT_PAY_MCH_ID');
+  if (!config.apiV3Key) missingKeys.push('WECHAT_PAY_API_V3_KEY');
+  if (!config.privateKey) missingKeys.push('WECHAT_PAY_PRIVATE_KEY');
+  if (!config.certSerialNo) missingKeys.push('WECHAT_PAY_CERT_SERIAL_NO');
+  if (!config.notifyUrl) missingKeys.push('WECHAT_PAY_NOTIFY_URL');
+  if (channel === 'wechat_h5_inapp' && !config.inAppReturnUrl) missingKeys.push('WECHAT_PAY_INAPP_RETURN_URL');
+  if (channel === 'wechat_h5_external' && !config.externalReturnUrl) missingKeys.push('WECHAT_PAY_EXTERNAL_RETURN_URL');
+  if (missingKeys.length) {
+    throw new Error('微信支付配置不完整，请先在 cloud-store.env 中补齐 ' + missingKeys.join('、'));
+  }
+}
+
+function buildWechatReturnUrl(baseUrl, order) {
+  const base = String(baseUrl || '').trim();
+  if (!base) return '';
+  const separator = base.indexOf('?') >= 0 ? '&' : '?';
+  return base + separator + 'orderId=' + encodeURIComponent(String(order && order.id || ''));
+}
+
+function buildWechatLaunchRequest(order, paymentTransaction, config, channel, req) {
+  const normalizedOrder = normalizeOrderRecord(order);
+  const payment = normalizePaymentTransaction(paymentTransaction);
+  const externalTradeNo = payment.externalTradeNo || buildAlipayOutTradeNo(normalizedOrder.owner, normalizedOrder.id);
+  const commonParams = {
+    appid: config.appId,
+    mchid: config.mchId,
+    description: buildAlipayOrderSubject(normalizedOrder),
+    out_trade_no: externalTradeNo,
+    notify_url: config.notifyUrl,
+    amount: {
+      total: Math.round(Number(normalizedOrder.total || 0) * 100),
+      currency: 'CNY'
+    }
+  };
+  if (channel === 'wechat_h5_inapp') {
+    return {
+      gateway: config.jsapiGateway,
+      method: 'POST',
+      params: Object.assign({}, commonParams, {
+        trade_type: 'JSAPI',
+        redirect_url: buildWechatReturnUrl(config.inAppReturnUrl, normalizedOrder),
+        payer: {
+          openid: String(req && req.headers && req.headers['x-wechat-openid'] || '').trim() || 'mock-openid-for-contract'
+        }
+      })
+    };
+  }
+  return {
+    gateway: config.h5Gateway,
+    method: 'POST',
+    params: Object.assign({}, commonParams, {
+      trade_type: 'H5',
+      redirect_url: buildWechatReturnUrl(config.externalReturnUrl, normalizedOrder),
+      scene_info: {
+        payer_client_ip: getClientIp(req),
+        h5_info: { type: 'Wap' }
+      }
+    })
+  };
+}
+
 function getClientIp(req) {
   const forwardedFor = String(req && req.headers && req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return forwardedFor || String(req && req.ip || 'unknown');
@@ -351,6 +698,224 @@ function getRateLimitBlockMessage(key) {
     return '登录失败次数过多，请在 ' + waitMinutes + ' 分钟后重试';
   }
   return '';
+}
+
+function normalizePhoneNumber(value) {
+  return String(value || '').replace(/[^\d]/g, '').trim();
+}
+
+function isValidChinaMainlandPhone(value) {
+  return /^1\d{10}$/.test(normalizePhoneNumber(value));
+}
+
+function maskPhoneNumber(value) {
+  const normalized = normalizePhoneNumber(value);
+  if (!isValidChinaMainlandPhone(normalized)) return '';
+  return normalized.slice(0, 3) + '****' + normalized.slice(-4);
+}
+
+function generateSmsVerificationCode() {
+  return String(Math.floor(Math.random() * 900000) + 100000);
+}
+
+function normalizeSmsPurpose(value) {
+  const normalized = String(value || '').trim();
+  if (normalized === 'reset_password') return 'reset_password';
+  if (normalized === 'login_or_register') return 'login_or_register';
+  return 'bind_phone';
+}
+
+function getSmsPurposeLabel(value) {
+  const normalized = normalizeSmsPurpose(value);
+  if (normalized === 'reset_password') return '找回密码';
+  if (normalized === 'login_or_register') return '登录或注册';
+  return '绑定手机号';
+}
+
+function validateNewPassword(value) {
+  const password = String(value || '');
+  if (!password) return '请填写新密码';
+  if (password.length < PASSWORD_MIN_LENGTH) return '新密码至少 6 位';
+  return '';
+}
+
+function percentEncodeAliyun(value) {
+  return encodeURIComponent(String(value || ''))
+    .replace(/\+/g, '%20')
+    .replace(/\*/g, '%2A')
+    .replace(/%7E/g, '~');
+}
+
+function buildAliyunRpcSignedUrl(params, accessKeyId, accessKeySecret, host) {
+  const publicParams = Object.assign({}, params, {
+    AccessKeyId: accessKeyId,
+    Format: 'JSON',
+    SignatureMethod: 'HMAC-SHA1',
+    SignatureNonce: generateToken(16),
+    SignatureVersion: '1.0',
+    Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    Version: '2017-05-25'
+  });
+  const canonicalized = Object.keys(publicParams)
+    .sort()
+    .map(function (key) {
+      return percentEncodeAliyun(key) + '=' + percentEncodeAliyun(publicParams[key]);
+    })
+    .join('&');
+  const stringToSign = 'GET&%2F&' + percentEncodeAliyun(canonicalized);
+  const signature = crypto
+    .createHmac('sha1', String(accessKeySecret || '') + '&')
+    .update(stringToSign)
+    .digest('base64');
+  return String(host || 'https://dypnsapi.aliyuncs.com/')
+    .replace(/\?+$/, '')
+    + '/?' + canonicalized + '&Signature=' + percentEncodeAliyun(signature);
+}
+
+function getAliyunSmsConfig(purpose) {
+  const normalizedPurpose = normalizeSmsPurpose(purpose);
+  const accessKeyId = String(process.env.ALIYUN_SMS_ACCESS_KEY_ID || '').trim();
+  const accessKeySecret = String(process.env.ALIYUN_SMS_ACCESS_KEY_SECRET || '').trim();
+  const signName = String(process.env.ALIYUN_SMS_SIGN_NAME || '').trim();
+  const bindTemplateCode = String(process.env.ALIYUN_SMS_TEMPLATE_CODE_BIND_PHONE || process.env.ALIYUN_SMS_TEMPLATE_CODE || '').trim();
+  const resetTemplateCode = String(process.env.ALIYUN_SMS_TEMPLATE_CODE_RESET_PASSWORD || process.env.ALIYUN_SMS_TEMPLATE_CODE || '').trim();
+  const loginTemplateCode = String(process.env.ALIYUN_SMS_TEMPLATE_CODE_LOGIN_OR_REGISTER || process.env.ALIYUN_SMS_TEMPLATE_CODE_LOGIN || bindTemplateCode).trim();
+  const templateCode = normalizedPurpose === 'reset_password'
+    ? resetTemplateCode
+    : (normalizedPurpose === 'login_or_register' ? loginTemplateCode : bindTemplateCode);
+  const schemeName = String(process.env.ALIYUN_SMS_SCHEME_NAME || '').trim();
+  const provider = String(process.env.CS_SMS_PROVIDER || '').trim().toLowerCase();
+  const hasAliyunConfig = !!(accessKeyId && accessKeySecret && signName && templateCode);
+  const inferredProvider = provider || (hasAliyunConfig ? 'aliyun' : (isProductionRuntime() ? 'aliyun' : 'mock'));
+  return {
+    provider: inferredProvider,
+    accessKeyId: accessKeyId,
+    accessKeySecret: accessKeySecret,
+    signName: signName,
+    templateCode: templateCode,
+    schemeName: schemeName
+  };
+}
+
+function shouldExposeSmsDebugCode(config) {
+  const explicit = String(process.env.CS_SMS_DEBUG_CODES || '').trim().toLowerCase();
+  if (explicit) return parseEnvFlag(explicit);
+  return false;
+}
+
+async function sendAliyunSms(phone, code, purpose) {
+  const config = getAliyunSmsConfig(purpose);
+  if (config.provider !== 'aliyun') {
+    return {
+      provider: 'mock',
+      deliveryStatus: 'mock',
+      messageId: 'mock_' + Date.now(),
+      debugCode: code
+    };
+  }
+  if (!config.accessKeyId || !config.accessKeySecret || !config.signName || !config.templateCode) {
+    throw new Error('阿里云号码认证短信认证配置不完整，请先补齐 AccessKey、赠送签名和赠送模板编号');
+  }
+  const debugMode = shouldExposeSmsDebugCode(config);
+  const templateParam = {
+    code: '##code##',
+    min: String(Math.max(1, Math.ceil(SMS_CODE_TTL_MS / 60000)))
+  };
+  const requestParams = {
+    Action: 'SendSmsVerifyCode',
+    PhoneNumber: phone,
+    CountryCode: '86',
+    SignName: config.signName,
+    TemplateCode: config.templateCode,
+    TemplateParam: JSON.stringify(templateParam),
+    OutId: 'cloud_store_' + normalizeSmsPurpose(purpose) + '_' + Date.now(),
+    CodeLength: 6,
+    ValidTime: Math.ceil(SMS_CODE_TTL_MS / 1000),
+    DuplicatePolicy: 1,
+    Interval: Math.ceil(SMS_CODE_RESEND_MS / 1000),
+    CodeType: 1,
+    AutoRetry: 1,
+    ReturnVerifyCode: debugMode ? 'true' : 'false'
+  };
+  if (config.schemeName) requestParams.SchemeName = config.schemeName;
+  const requestUrl = buildAliyunRpcSignedUrl(requestParams, config.accessKeyId, config.accessKeySecret, 'https://dypnsapi.aliyuncs.com');
+  const responseText = await new Promise(function (resolve, reject) {
+    https.get(requestUrl, function (response) {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', function (chunk) { body += chunk; });
+      response.on('end', function () {
+        if (response.statusCode >= 400) {
+          reject(new Error('阿里云短信请求失败：HTTP ' + response.statusCode + ' ' + body));
+          return;
+        }
+        resolve(body);
+      });
+    }).on('error', reject);
+  });
+  let payload = {};
+  try {
+    payload = JSON.parse(responseText || '{}');
+  } catch (error) {
+    throw new Error('阿里云号码认证短信认证返回结果无法解析');
+  }
+  if (String(payload.Code || '').trim() !== 'OK') {
+    throw new Error('阿里云号码认证短信发送失败：' + String(payload.Message || payload.Code || '未知错误'));
+  }
+  return {
+    provider: 'aliyun',
+    deliveryStatus: 'sent',
+    messageId: String(payload && payload.Model && payload.Model.BizId || payload.BizId || payload.RequestId || ''),
+    debugCode: debugMode ? String(payload && payload.Model && payload.Model.VerifyCode || '') : undefined
+  };
+}
+
+async function checkAliyunSmsVerification(phone, code, purpose) {
+  const config = getAliyunSmsConfig(purpose);
+  if (config.provider !== 'aliyun') {
+    return { verified: false, provider: 'mock' };
+  }
+  if (!config.accessKeyId || !config.accessKeySecret) {
+    throw new Error('阿里云号码认证短信认证配置不完整，请先补齐 AccessKey');
+  }
+  const requestParams = {
+    Action: 'CheckSmsVerifyCode',
+    PhoneNumber: phone,
+    CountryCode: '86',
+    VerifyCode: String(code || '').trim(),
+    CaseAuthPolicy: 1
+  };
+  if (config.schemeName) requestParams.SchemeName = config.schemeName;
+  const requestUrl = buildAliyunRpcSignedUrl(requestParams, config.accessKeyId, config.accessKeySecret, 'https://dypnsapi.aliyuncs.com');
+  const responseText = await new Promise(function (resolve, reject) {
+    https.get(requestUrl, function (response) {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', function (chunk) { body += chunk; });
+      response.on('end', function () {
+        if (response.statusCode >= 400) {
+          reject(new Error('阿里云号码认证短信核验失败：HTTP ' + response.statusCode + ' ' + body));
+          return;
+        }
+        resolve(body);
+      });
+    }).on('error', reject);
+  });
+  let payload = {};
+  try {
+    payload = JSON.parse(responseText || '{}');
+  } catch (error) {
+    throw new Error('阿里云号码认证短信核验返回结果无法解析');
+  }
+  if (String(payload.Code || '').trim() !== 'OK') {
+    throw new Error('阿里云号码认证短信核验失败：' + String(payload.Message || payload.Code || '未知错误'));
+  }
+  const verifyResult = String(payload && payload.Model && payload.Model.VerifyResult || '').trim().toUpperCase();
+  return {
+    provider: 'aliyun',
+    verified: verifyResult === 'PASS',
+    verifyResult: verifyResult
+  };
 }
 
 function readDefaultArray(pattern) {
@@ -442,6 +1007,9 @@ function normalizeUserRecord(record) {
     id: record && record.id ? Number(record.id) : undefined,
     username: '',
     password: '',
+    nickname: '',
+    phone: '',
+    phoneVerifiedAt: 0,
     roles: { isFarmer: false, isAdmin: false, isSuperAdmin: false, farmerName: '' },
     addresses: [],
     shippingAddresses: [],
@@ -454,6 +1022,9 @@ function normalizeUserRecord(record) {
     createdAt: new Date().toLocaleDateString('zh-CN')
   }, record || {}, {
     id: record && record.id ? Number(record.id) : undefined,
+    nickname: String(record && record.nickname || '').trim(),
+    phone: normalizePhoneNumber(record && record.phone),
+    phoneVerifiedAt: Number(record && record.phoneVerifiedAt || 0),
     roles: normalizeRoleFlags(record && record.username, record && record.roles),
     addresses: Array.isArray(record && record.addresses) ? record.addresses : [],
     shippingAddresses: Array.isArray(record && record.shippingAddresses) ? record.shippingAddresses : [],
@@ -469,13 +1040,22 @@ function buildUserSummaryRecord(record) {
   return {
     id: user.id,
     username: user.username,
+    nickname: user.nickname,
+    phone: user.phone,
+    phoneVerifiedAt: user.phoneVerifiedAt,
     roles: user.roles,
     createdAt: user.createdAt
   };
 }
 
+function userHasPassword(record) {
+  const user = normalizeUserRecord(record);
+  return !!String(user.password || '').trim();
+}
+
 function selfUserRecord(record) {
   const user = normalizeUserRecord(record);
+  user.hasPassword = userHasPassword(user);
   delete user.password;
   return user;
 }
@@ -489,6 +1069,9 @@ function hydrateUser(row) {
     id: row.id,
     username: row.username,
     password: row.password,
+    nickname: row.nickname,
+    phone: row.phone,
+    phoneVerifiedAt: row.phoneVerifiedAt,
     roles: parseJsonObject(row.roles, { isFarmer: false, isAdmin: false, farmerName: row.username }),
     addresses: parseJsonArray(row.addresses),
     shippingAddresses: parseJsonArray(row.shippingAddresses),
@@ -508,6 +1091,9 @@ function toDbUser(record) {
     id: user.id,
     username: user.username,
     password: user.password || '',
+    nickname: user.nickname || '',
+    phone: user.phone || '',
+    phoneVerifiedAt: Number(user.phoneVerifiedAt || 0),
     roles: JSON.stringify(user.roles || {}),
     addresses: JSON.stringify(user.addresses || []),
     shippingAddresses: JSON.stringify(user.shippingAddresses || []),
@@ -548,6 +1134,13 @@ function normalizeOrderRecord(order) {
     owner: '',
     ownerDeleted: false,
     items: [],
+    shipments: [],
+    fulfillmentSummary: {
+      shipmentCount: 0,
+      assignedItemCount: 0,
+      totalItemCount: 0,
+      unassignedItemCount: 0
+    },
     total: 0,
     subtotal: 0,
     deliveryFee: 0,
@@ -567,6 +1160,8 @@ function normalizeOrderRecord(order) {
     owner: order && (order.owner || order.username) ? String(order.owner || order.username) : '',
     ownerDeleted: !!(order && order.ownerDeleted),
     items: Array.isArray(order && order.items) ? order.items : [],
+    shipments: Array.isArray(order && order.shipments) ? order.shipments.map(function (shipment) { return normalizeShipmentRecord(shipment); }) : [],
+    fulfillmentSummary: normalizeFulfillmentSummary(order && order.fulfillmentSummary, order && order.items, order && order.shipments),
     total: Number(order && order.total || 0),
     subtotal: Number(order && order.subtotal || 0),
     deliveryFee: Number(order && order.deliveryFee || 0),
@@ -865,6 +1460,7 @@ function getDefaultVariant(product) {
 
 function normalizeOrderItem(item, index) {
   return Object.assign({
+    orderItemId: 0,
     id: 0,
     productId: 0,
     name: '',
@@ -879,6 +1475,7 @@ function normalizeOrderItem(item, index) {
     shippingAddressId: '',
     shippingAddressSnapshot: {}
     }, item || {}, {
+    orderItemId: Number(item && (item.orderItemId != null ? item.orderItemId : 0) || 0),
     id: item && item.id ? Number(item.id) : index + 1,
     productId: Number(item && (item.productId != null ? item.productId : item.id) || 0),
     name: item && item.name ? String(item.name) : '',
@@ -895,9 +1492,117 @@ function normalizeOrderItem(item, index) {
   });
 }
 
-function hydrateOrderRows(orderRow, itemRows) {
+function normalizeFulfillmentSummary(summary, items, shipments) {
+  const itemList = Array.isArray(items) ? items : [];
+  const shipmentList = Array.isArray(shipments) ? shipments : [];
+  const assignedMap = shipmentList.reduce(function (result, shipment) {
+    const ids = Array.isArray(shipment && shipment.orderItemIds) ? shipment.orderItemIds : [];
+    ids.forEach(function (id) {
+      const numericId = Number(id || 0);
+      if (numericId > 0) result[numericId] = true;
+    });
+    return result;
+  }, {});
+  const assignedItemCount = Math.max(0, Number(summary && summary.assignedItemCount != null ? summary.assignedItemCount : Object.keys(assignedMap).length));
+  const totalItemCount = Math.max(0, Number(summary && summary.totalItemCount != null ? summary.totalItemCount : itemList.length));
+  return {
+    shipmentCount: Math.max(0, Number(summary && summary.shipmentCount != null ? summary.shipmentCount : shipmentList.length)),
+    assignedItemCount: assignedItemCount,
+    totalItemCount: totalItemCount,
+    unassignedItemCount: Math.max(0, Number(summary && summary.unassignedItemCount != null ? summary.unassignedItemCount : (totalItemCount - assignedItemCount)))
+  };
+}
+
+function normalizeShipmentLogisticsState(state, payload) {
+  const raw = String(state || '').trim();
+  if (['no_tracking', 'no_trace', 'active_success', 'stale_success', 'signed'].indexOf(raw) >= 0) return raw;
+  if (String(payload && payload.trackingNo || '').trim()) return 'no_trace';
+  return 'no_tracking';
+}
+
+function buildShipmentLogisticsSummary(state, payload) {
+  const trackingNo = String(payload && payload.trackingNo || '').trim();
+  const existing = String(payload && payload.logisticsSummary || '').trim();
+  if (existing) {
+    if (state === 'signed' && existing.indexOf('已签收') < 0) return '已签收 · ' + existing;
+    return existing;
+  }
+  if (state === 'signed') return '已签收';
+  if (state === 'active_success' || state === 'stale_success') {
+    return trackingNo ? '已录入单号，等待物流公司返回轨迹' : '待发货，暂未录入物流信息';
+  }
+  if (state === 'no_trace' && trackingNo) return '已录入单号，等待物流公司返回轨迹';
+  return '待发货，暂未录入物流信息';
+}
+
+function normalizeShipmentRecord(record) {
+  const payload = record || {};
+  const logisticsState = normalizeShipmentLogisticsState(payload.logisticsState, payload);
+  return {
+    id: payload.id ? String(payload.id) : '',
+    orderRelationId: payload.orderRelationId ? String(payload.orderRelationId) : (payload.orderId ? String(payload.orderId) : ''),
+    orderId: payload.orderSourceId ? String(payload.orderSourceId) : (payload.sourceOrderId ? String(payload.sourceOrderId) : ''),
+    owner: payload.owner ? String(payload.owner) : (payload.ownerUsername ? String(payload.ownerUsername) : ''),
+    trackingNo: payload.trackingNo ? String(payload.trackingNo) : '',
+    carrierCode: payload.carrierCode ? String(payload.carrierCode) : '',
+    carrierName: payload.carrierName ? String(payload.carrierName) : '',
+    status: payload.status ? String(payload.status) : 'shipped',
+    logisticsState: logisticsState,
+    logisticsSummary: buildShipmentLogisticsSummary(logisticsState, payload),
+    lastLogisticsQueryAt: Math.max(0, Number(payload.lastLogisticsQueryAt || 0)),
+    lastLogisticsSuccessAt: Math.max(0, Number(payload.lastLogisticsSuccessAt || 0)),
+    createdAt: Number(payload.createdAt || 0),
+    updatedAt: Number(payload.updatedAt || 0),
+    createdBy: payload.createdBy ? String(payload.createdBy) : '',
+    legacySource: payload.legacySource ? String(payload.legacySource) : '',
+    orderItemIds: Array.isArray(payload.orderItemIds) ? payload.orderItemIds.map(function (item) { return Number(item || 0); }).filter(function (item) { return item > 0; }) : [],
+    items: Array.isArray(payload.items) ? payload.items.map(function (item, index) { return normalizeOrderItem(item, index); }) : []
+  };
+}
+
+function buildShipmentRecordsForOrder(items, shipmentRows, shipmentItemRows) {
+  const orderItems = Array.isArray(items) ? items : [];
+  const itemByOrderItemId = orderItems.reduce(function (result, item) {
+    const normalizedItem = normalizeOrderItem(item, 0);
+    if (normalizedItem.orderItemId > 0) result[normalizedItem.orderItemId] = normalizedItem;
+    return result;
+  }, {});
+  const linksByShipmentId = (Array.isArray(shipmentItemRows) ? shipmentItemRows : []).reduce(function (result, row) {
+    const shipmentId = String(row && row.shipmentId || '');
+    if (!shipmentId) return result;
+    if (!result[shipmentId]) result[shipmentId] = [];
+    result[shipmentId].push({
+      orderItemId: Number(row && row.orderItemId || 0),
+      sortOrder: Number(row && row.sortOrder || 0)
+    });
+    return result;
+  }, {});
+  const shipments = (Array.isArray(shipmentRows) ? shipmentRows : []).map(function (row) {
+    const shipmentId = String(row && row.id || '');
+    const links = (linksByShipmentId[shipmentId] || []).slice().sort(function (a, b) {
+      return Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+    });
+    const shipmentItems = links.map(function (link) {
+      return itemByOrderItemId[link.orderItemId];
+    }).filter(Boolean);
+    return normalizeShipmentRecord(Object.assign({}, row, {
+      orderRelationId: row && row.orderId ? row.orderId : '',
+      sourceOrderId: row && row.orderSourceId ? row.orderSourceId : '',
+      owner: row && row.ownerUsername ? row.ownerUsername : '',
+      orderItemIds: links.map(function (link) { return link.orderItemId; }),
+      items: shipmentItems
+    }));
+  });
+  return {
+    shipments: shipments,
+    fulfillmentSummary: normalizeFulfillmentSummary(null, orderItems, shipments)
+  };
+}
+
+function hydrateOrderRows(orderRow, itemRows, shipmentRows, shipmentItemRows) {
   const items = (itemRows || []).map(function (itemRow, index) {
     return normalizeOrderItem({
+      orderItemId: itemRow.id,
       id: itemRow.productId,
       productId: itemRow.productId,
       name: itemRow.name,
@@ -918,6 +1623,9 @@ function hydrateOrderRows(orderRow, itemRows) {
       }
     }, index);
   });
+  const shipmentPayload = buildShipmentRecordsForOrder(items, shipmentRows, shipmentItemRows);
+  const trackingProjection = String(orderRow && orderRow.trackingNo || '').trim()
+    || (shipmentPayload.shipments[0] && shipmentPayload.shipments[0].trackingNo ? shipmentPayload.shipments[0].trackingNo : '');
   return normalizeOrderRecord({
     id: orderRow.sourceId || orderRow.id,
     owner: orderRow.username,
@@ -936,7 +1644,9 @@ function hydrateOrderRows(orderRow, itemRows) {
     },
     coupon: orderRow.couponText,
     couponId: orderRow.couponId,
-    trackingNo: orderRow.trackingNo,
+    trackingNo: trackingProjection,
+    shipments: shipmentPayload.shipments,
+    fulfillmentSummary: shipmentPayload.fulfillmentSummary,
     reserveExpiresAt: orderRow.reserveExpiresAt,
     inventoryReleased: !!orderRow.inventoryReleased,
     inventoryReleasedAt: orderRow.inventoryReleasedAt,
@@ -979,6 +1689,8 @@ async function listUserAddressRelations(username) {
 }
 
 async function syncUserOrderRelations(username, orders) {
+  await run('DELETE FROM shipment_items WHERE orderId IN (SELECT id FROM orders WHERE username = ?)', [username]);
+  await run('DELETE FROM shipments WHERE orderId IN (SELECT id FROM orders WHERE username = ?)', [username]);
   await run('DELETE FROM order_items WHERE orderId IN (SELECT id FROM orders WHERE username = ?)', [username]);
   await run('DELETE FROM orders WHERE username = ?', [username]);
   const orderList = Array.isArray(orders) ? orders : [];
@@ -1010,11 +1722,13 @@ async function syncUserOrderRelations(username, orders) {
         order.cancelReason || ''
       ]
     );
+    const insertedOrderItems = [];
     for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
       const item = normalizeOrderItem(order.items[itemIndex], itemIndex);
-      await run(
-        'INSERT INTO order_items (orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      const insertItemResult = await run(
+        'INSERT INTO order_items (id, orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
+          item.orderItemId > 0 ? item.orderItemId : null,
           relationOrderId,
           item.productId,
           item.name,
@@ -1033,8 +1747,91 @@ async function syncUserOrderRelations(username, orders) {
           itemIndex
         ]
       );
+      insertedOrderItems.push({
+        legacyOrderItemId: item.orderItemId > 0 ? item.orderItemId : Number(insertItemResult && insertItemResult.lastID || 0),
+        rowId: item.orderItemId > 0 ? item.orderItemId : Number(insertItemResult && insertItemResult.lastID || 0)
+      });
+    }
+    const orderItemIdMap = insertedOrderItems.reduce(function (result, item) {
+      if (item.legacyOrderItemId > 0 && item.rowId > 0) result[item.legacyOrderItemId] = item.rowId;
+      return result;
+    }, {});
+    const shipments = Array.isArray(order.shipments) ? order.shipments.map(normalizeShipmentRecord) : [];
+    for (let shipmentIndex = 0; shipmentIndex < shipments.length; shipmentIndex++) {
+      const shipment = shipments[shipmentIndex];
+      const shipmentId = shipment.id || buildShipmentId();
+      const shipmentCreatedAt = Number(shipment.createdAt || order.time || Date.now());
+      const shipmentUpdatedAt = Number(shipment.updatedAt || shipmentCreatedAt);
+      const shipmentLogistics = normalizeShipmentRecord(shipment);
+      await run(
+        'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          shipmentId,
+          relationOrderId,
+          order.id,
+          username,
+          shipmentLogistics.trackingNo || '',
+          shipmentLogistics.carrierCode || '',
+          shipmentLogistics.carrierName || '',
+          shipmentLogistics.status || 'shipped',
+          shipmentLogistics.logisticsSummary || '',
+          shipmentLogistics.logisticsState || 'no_tracking',
+          Number(shipmentLogistics.lastLogisticsQueryAt || 0),
+          Number(shipmentLogistics.lastLogisticsSuccessAt || 0),
+          shipmentCreatedAt,
+          shipmentUpdatedAt,
+          shipmentLogistics.createdBy || '',
+          shipmentLogistics.legacySource || ''
+        ]
+      );
+      const shipmentItemIds = Array.isArray(shipment.orderItemIds) && shipment.orderItemIds.length
+        ? shipment.orderItemIds
+        : (Array.isArray(shipment.items) ? shipment.items.map(function (entry, itemIndex) {
+            return normalizeOrderItem(entry, itemIndex).orderItemId;
+          }) : []);
+      for (let linkIndex = 0; linkIndex < shipmentItemIds.length; linkIndex++) {
+        const legacyOrderItemId = Number(shipmentItemIds[linkIndex] || 0);
+        const rowOrderItemId = Number(orderItemIdMap[legacyOrderItemId] || legacyOrderItemId || 0);
+        if (rowOrderItemId <= 0) continue;
+        await run(
+          'INSERT INTO shipment_items (shipmentId, orderId, orderItemId, sortOrder, createdAt) VALUES (?, ?, ?, ?, ?)',
+          [shipmentId, relationOrderId, rowOrderItemId, linkIndex, shipmentCreatedAt]
+        );
+      }
     }
   }
+}
+
+async function loadShipmentRelationsByOrderIds(orderRelationIds) {
+  const ids = Array.from(new Set((Array.isArray(orderRelationIds) ? orderRelationIds : []).map(function (item) {
+    return String(item || '').trim();
+  }).filter(Boolean)));
+  if (!ids.length) {
+    return { shipmentsByOrderId: {}, shipmentItemsByOrderId: {} };
+  }
+  const placeholders = ids.map(function () { return '?'; }).join(', ');
+  const shipmentRows = await all(
+    'SELECT ' + SHIPMENT_LIST_COLUMNS + ' FROM shipments WHERE orderId IN (' + placeholders + ') ORDER BY createdAt ASC, id ASC',
+    ids
+  );
+  const shipmentItemRows = await all(
+    'SELECT ' + SHIPMENT_ITEM_COLUMNS + ' FROM shipment_items WHERE orderId IN (' + placeholders + ') ORDER BY orderId ASC, shipmentId ASC, sortOrder ASC, id ASC',
+    ids
+  );
+  const shipmentsByOrderId = shipmentRows.reduce(function (result, row) {
+    if (!result[row.orderId]) result[row.orderId] = [];
+    result[row.orderId].push(row);
+    return result;
+  }, {});
+  const shipmentItemsByOrderId = shipmentItemRows.reduce(function (result, row) {
+    if (!result[row.orderId]) result[row.orderId] = [];
+    result[row.orderId].push(row);
+    return result;
+  }, {});
+  return {
+    shipmentsByOrderId: shipmentsByOrderId,
+    shipmentItemsByOrderId: shipmentItemsByOrderId
+  };
 }
 
 async function listUserOrderRelations(username) {
@@ -1043,13 +1840,19 @@ async function listUserOrderRelations(username) {
     'SELECT oi.* FROM order_items oi INNER JOIN orders o ON o.id = oi.orderId WHERE o.username = ? ORDER BY oi.orderId ASC, oi.sortOrder ASC, oi.id ASC',
     [username]
   );
+  const shipmentRelations = await loadShipmentRelationsByOrderIds(orderRows.map(function (row) { return row.id; }));
   const itemsByOrderId = itemRows.reduce(function (result, row) {
     if (!result[row.orderId]) result[row.orderId] = [];
     result[row.orderId].push(row);
     return result;
   }, {});
   return orderRows.map(function (row) {
-    return hydrateOrderRows(row, itemsByOrderId[row.id] || []);
+    return hydrateOrderRows(
+      row,
+      itemsByOrderId[row.id] || [],
+      shipmentRelations.shipmentsByOrderId[row.id] || [],
+      shipmentRelations.shipmentItemsByOrderId[row.id] || []
+    );
   });
 }
 
@@ -1061,6 +1864,7 @@ async function listAllOrderSnapshots() {
   }, {});
   const orderRows = await all('SELECT * FROM orders ORDER BY createdAt DESC, id DESC');
   const itemRows = await all('SELECT * FROM order_items ORDER BY orderId ASC, sortOrder ASC, id ASC');
+  const shipmentRelations = await loadShipmentRelationsByOrderIds(orderRows.map(function (row) { return row.id; }));
   const itemsByOrderId = itemRows.reduce(function (result, row) {
     if (!result[row.orderId]) result[row.orderId] = [];
     result[row.orderId].push(row);
@@ -1069,7 +1873,7 @@ async function listAllOrderSnapshots() {
   return orderRows.map(function (row) {
     return hydrateOrderRows(Object.assign({}, row, {
       ownerDeleted: row.ownerDeleted || !activeUsers[row.username]
-    }), itemsByOrderId[row.id] || []);
+    }), itemsByOrderId[row.id] || [], shipmentRelations.shipmentsByOrderId[row.id] || [], shipmentRelations.shipmentItemsByOrderId[row.id] || []);
   });
 }
 
@@ -1083,6 +1887,14 @@ function buildPaymentTransactionId(username, sourceOrderId) {
 
 function getReserveExpiresAt(createdAt) {
   return Number(createdAt || Date.now()) + 600000;
+}
+
+function isPendingOrderExpired(order, now) {
+  const normalized = normalizeOrderRecord(order);
+  const target = Number(now || Date.now());
+  return normalized.status !== 'pending'
+    || !!normalized.inventoryReleased
+    || (Number(normalized.reserveExpiresAt || 0) > 0 && Number(normalized.reserveExpiresAt || 0) <= target);
 }
 
 function getVariantById(product, variantId) {
@@ -1168,7 +1980,13 @@ async function getOrderSnapshotByRelationId(relationOrderId) {
   const row = await get('SELECT * FROM orders WHERE id = ?', [relationOrderId]);
   if (!row) return null;
   const itemRows = await all('SELECT * FROM order_items WHERE orderId = ? ORDER BY sortOrder ASC, id ASC', [relationOrderId]);
-  return hydrateOrderRows(row, itemRows);
+  const shipmentRelations = await loadShipmentRelationsByOrderIds([relationOrderId]);
+  return hydrateOrderRows(
+    row,
+    itemRows,
+    shipmentRelations.shipmentsByOrderId[relationOrderId] || [],
+    shipmentRelations.shipmentItemsByOrderId[relationOrderId] || []
+  );
 }
 
 async function getOrderSnapshotByOwner(ownerUsername, sourceOrderId) {
@@ -1384,7 +2202,7 @@ async function createPendingOrderFromCheckout(username, payload) {
       );
     }
     await run(
-      'INSERT OR REPLACE INTO payment_transactions (id, username, orderId, amount, status, channel, couponId, couponText, receiverName, receiverPhone, receiverFull, createdAt, paidAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO payment_transactions (id, username, orderId, amount, status, channel, couponId, couponText, receiverName, receiverPhone, receiverFull, externalTradeNo, createdAt, paidAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         buildPaymentTransactionId(ownerUsername, sourceOrderId),
         ownerUsername,
@@ -1397,6 +2215,7 @@ async function createPendingOrderFromCheckout(username, payload) {
         String(request.address.name || '').trim(),
         String(request.address.phone || '').trim(),
         String(request.address.full || '').trim(),
+        buildAlipayOutTradeNo(ownerUsername, sourceOrderId),
         now,
         0
       ]
@@ -1501,9 +2320,78 @@ function normalizePaymentTransaction(row) {
     receiverName: row && row.receiverName ? String(row.receiverName) : '',
     receiverPhone: row && row.receiverPhone ? String(row.receiverPhone) : '',
     receiverFull: row && row.receiverFull ? String(row.receiverFull) : '',
+    externalTradeNo: row && row.externalTradeNo ? String(row.externalTradeNo) : '',
+    gatewayTradeNo: row && row.gatewayTradeNo ? String(row.gatewayTradeNo) : '',
+    gatewayBuyerId: row && row.gatewayBuyerId ? String(row.gatewayBuyerId) : '',
+    notifyStatus: row && row.notifyStatus ? String(row.notifyStatus) : '',
+    notifyPayload: parseJsonObject(row && row.notifyPayload, {}),
+    notifyAt: Number(row && row.notifyAt || 0),
+    initiatedAt: Number(row && row.initiatedAt || 0),
+    returnCheckedAt: Number(row && row.returnCheckedAt || 0),
+    lastError: row && row.lastError ? String(row.lastError) : '',
     createdAt: Number(row && row.createdAt || 0),
     paidAt: Number(row && row.paidAt || 0)
   };
+}
+
+async function getPaymentTransactionByOwnerAndOrder(username, sourceOrderId) {
+  const row = await get(
+    'SELECT * FROM payment_transactions WHERE id = ?',
+    [buildPaymentTransactionId(String(username || '').trim(), String(sourceOrderId || '').trim())]
+  );
+  return row ? normalizePaymentTransaction(row) : null;
+}
+
+async function updatePaymentTransactionState(transactionId, updates) {
+  const payload = Object.assign({
+    status: null,
+    channel: null,
+    externalTradeNo: null,
+    gatewayTradeNo: null,
+    gatewayBuyerId: null,
+    notifyStatus: null,
+    notifyPayload: null,
+    notifyAt: null,
+    initiatedAt: null,
+    returnCheckedAt: null,
+    paidAt: null,
+    lastError: null
+  }, updates || {});
+  await run(
+    `UPDATE payment_transactions
+     SET status = CASE WHEN ? IS NOT NULL THEN ? ELSE status END,
+         channel = CASE WHEN ? IS NOT NULL THEN ? ELSE channel END,
+         externalTradeNo = CASE WHEN ? IS NOT NULL THEN ? ELSE externalTradeNo END,
+         gatewayTradeNo = CASE WHEN ? IS NOT NULL THEN ? ELSE gatewayTradeNo END,
+         gatewayBuyerId = CASE WHEN ? IS NOT NULL THEN ? ELSE gatewayBuyerId END,
+         notifyStatus = CASE WHEN ? IS NOT NULL THEN ? ELSE notifyStatus END,
+         notifyPayload = CASE WHEN ? IS NOT NULL THEN ? ELSE notifyPayload END,
+         notifyAt = CASE WHEN ? IS NOT NULL THEN ? ELSE notifyAt END,
+         initiatedAt = CASE WHEN ? IS NOT NULL THEN ? ELSE initiatedAt END,
+         returnCheckedAt = CASE WHEN ? IS NOT NULL THEN ? ELSE returnCheckedAt END,
+         paidAt = CASE WHEN ? IS NOT NULL THEN ? ELSE paidAt END,
+         lastError = CASE WHEN ? IS NOT NULL THEN ? ELSE lastError END
+     WHERE id = ?`,
+    [
+      payload.status, payload.status,
+      payload.channel, payload.channel,
+      payload.externalTradeNo, payload.externalTradeNo,
+      payload.gatewayTradeNo, payload.gatewayTradeNo,
+      payload.gatewayBuyerId, payload.gatewayBuyerId,
+      payload.notifyStatus, payload.notifyStatus,
+      payload.notifyPayload, payload.notifyPayload,
+      payload.notifyAt, payload.notifyAt,
+      payload.initiatedAt, payload.initiatedAt,
+      payload.returnCheckedAt, payload.returnCheckedAt,
+      payload.paidAt, payload.paidAt,
+      payload.lastError, payload.lastError,
+      transactionId
+    ]
+  );
+}
+
+async function updatePaymentTransactionAlipayState(transactionId, updates) {
+  return updatePaymentTransactionState(transactionId, updates);
 }
 
 function normalizeAftersaleRecord(row) {
@@ -1556,10 +2444,18 @@ const ORDER_ITEM_COLUMNS = [
   'id', 'orderId', 'productId', 'name', 'variantId', 'variantLabel', 'unitId', 'unitLabel', 'unit', 'price',
   'qty', 'img', 'shippingAddressId', 'shippingName', 'shippingPhone', 'shippingFull', 'sortOrder'
 ].join(', ');
+const SHIPMENT_LIST_COLUMNS = [
+  'id', 'orderId', 'orderSourceId', 'ownerUsername', 'trackingNo', 'carrierCode', 'carrierName', 'status',
+  'logisticsSummary', 'logisticsState', 'lastLogisticsQueryAt', 'lastLogisticsSuccessAt',
+  'createdAt', 'updatedAt', 'createdBy', 'legacySource'
+].join(', ');
+const SHIPMENT_ITEM_COLUMNS = [
+  'id', 'shipmentId', 'orderId', 'orderItemId', 'sortOrder', 'createdAt'
+].join(', ');
 
-const USER_SUMMARY_COLUMNS = ['id', 'username', 'roles', 'createdAt'].join(', ');
+const USER_SUMMARY_COLUMNS = ['id', 'username', 'nickname', 'phone', 'phoneVerifiedAt', 'roles', 'createdAt'].join(', ');
 const REFUND_LIST_COLUMNS = ['id', 'orderId', 'ownerUsername', 'scopeType', 'itemsSnapshot', 'sourceOrderStatus', 'status', 'refundAmount', 'reason', 'assigneeRole', 'assigneeUsername', 'inventoryRestored', 'paymentRefunded', 'rejectReason', 'requestedAt', 'reviewedAt', 'completedAt', 'updatedAt'].join(', ');
-const PAYMENT_LIST_COLUMNS = ['id', 'username', 'orderId', 'amount', 'status', 'channel', 'couponId', 'couponText', 'receiverName', 'receiverPhone', 'receiverFull', 'createdAt', 'paidAt'].join(', ');
+const PAYMENT_LIST_COLUMNS = ['id', 'username', 'orderId', 'amount', 'status', 'channel', 'couponId', 'couponText', 'receiverName', 'receiverPhone', 'receiverFull', 'externalTradeNo', 'gatewayTradeNo', 'gatewayBuyerId', 'notifyStatus', 'notifyPayload', 'notifyAt', 'initiatedAt', 'returnCheckedAt', 'lastError', 'createdAt', 'paidAt'].join(', ');
 const AFTERSALE_LIST_COLUMNS = ['id', 'username', 'orderId', 'type', 'status', 'amount', 'reason', 'createdAt', 'updatedAt'].join(', ');
 const INVENTORY_LOG_COLUMNS = ['id', 'productId', 'productName', 'operatorUsername', 'operatorRole', 'actionType', 'deltaStock', 'deltaSales', 'beforeStock', 'afterStock', 'beforeSales', 'afterSales', 'orderId', 'note', 'createdAt'].join(', ');
 
@@ -1665,6 +2561,7 @@ async function hydratePagedOrders(orderRows) {
       ownerDeletedMap[username] = !activeUsers[username];
     });
   }
+  const shipmentRelations = await loadShipmentRelationsByOrderIds(rows.map(function (row) { return row.id; }));
   const itemsByOrderId = itemRows.reduce(function (result, row) {
     if (!result[row.orderId]) result[row.orderId] = [];
     result[row.orderId].push(row);
@@ -1673,7 +2570,7 @@ async function hydratePagedOrders(orderRows) {
   return rows.map(function (row) {
     return hydrateOrderRows(Object.assign({}, row, {
       ownerDeleted: row.ownerDeleted || ownerDeletedMap[String(row && row.username || '').trim()]
-    }), itemsByOrderId[row.id] || []);
+    }), itemsByOrderId[row.id] || [], shipmentRelations.shipmentsByOrderId[row.id] || [], shipmentRelations.shipmentItemsByOrderId[row.id] || []);
   });
 }
 
@@ -1712,13 +2609,178 @@ async function listOrdersByOwnerPage(ownerUsername, filters) {
 async function listAllOrdersPage(filters) {
   const query = filters || {};
   const paging = normalizePaging(query, { pageSize: 10, maxPageSize: 50 });
+  const filterQuery = buildAdminOrderFilterQuery(query);
+  const countRow = await get('SELECT COUNT(*) AS count FROM orders' + filterQuery.whereClause, filterQuery.params);
+  const orderRows = await all(
+    'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders' + filterQuery.whereClause + ' ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+    filterQuery.params.concat([paging.pageSize, paging.offset])
+  );
+  const items = await hydratePagedOrders(orderRows);
+  return buildPagedResult(items, countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+function normalizeOrderExportFilters(query) {
+  return {
+    ownerUsername: normalizeTextFilter(query && (query.ownerUsername || query.username)),
+    status: normalizeTextFilter(query && query.status),
+    orderId: normalizeTextFilter(query && query.orderId),
+    dateFrom: parseTimeFilterValue(query && query.dateFrom),
+    dateTo: parseTimeFilterValue(query && query.dateTo, { endOfDay: true })
+  };
+}
+
+function buildAdminOrderFilterQuery(query) {
+  const normalized = normalizeOrderExportFilters(query || {});
+  const conditions = [];
+  const params = [];
+  if (normalized.ownerUsername) {
+    conditions.push('username LIKE ?');
+    params.push(buildContainsLikeValue(normalized.ownerUsername));
+  }
+  if (normalized.status) {
+    conditions.push('status = ?');
+    params.push(normalized.status);
+  }
+  if (normalized.orderId) {
+    conditions.push('(sourceId LIKE ? OR id LIKE ?)');
+    params.push(buildContainsLikeValue(normalized.orderId), buildContainsLikeValue(normalized.orderId));
+  }
+  if (normalized.dateFrom) {
+    conditions.push('createdAt >= ?');
+    params.push(normalized.dateFrom);
+  }
+  if (normalized.dateTo) {
+    conditions.push('createdAt <= ?');
+    params.push(normalized.dateTo);
+  }
+  return {
+    normalized: normalized,
+    whereClause: conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '',
+    params: params
+  };
+}
+
+async function listAllOrdersForExport(filters) {
+  const filterQuery = buildAdminOrderFilterQuery(filters || {});
+  const orderRows = await all(
+    'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders' + filterQuery.whereClause + ' ORDER BY createdAt DESC, id DESC',
+    filterQuery.params
+  );
+  return hydratePagedOrders(orderRows);
+}
+
+function getOrderStatusExportLabel(status) {
+  const normalized = String(status || '').trim();
+  const labelMap = {
+    pending: '待支付',
+    paid: '待发货',
+    shipped: '已发货',
+    done: '已完成',
+    cancelled: '已取消',
+    refund_pending: '退款中',
+    refunded: '已退款'
+  };
+  return labelMap[normalized] || normalized || '未知状态';
+}
+
+function formatOrderExportDateTime(value) {
+  const numeric = Number(value || 0);
+  if (!(numeric > 0)) return '';
+  return new Date(numeric).toLocaleString('zh-CN');
+}
+
+function formatOrderExportAddress(address) {
+  const payload = address && typeof address === 'object' ? address : {};
+  return [payload.name, payload.phone, payload.full].map(function (item) {
+    return String(item || '').trim();
+  }).filter(Boolean).join(' / ');
+}
+
+function findShipmentForOrderItem(order, item) {
+  const targetOrderItemId = Number(item && item.orderItemId || 0);
+  if (!(targetOrderItemId > 0)) return null;
+  const shipments = Array.isArray(order && order.shipments) ? order.shipments : [];
+  for (let index = 0; index < shipments.length; index++) {
+    const shipment = shipments[index];
+    const orderItemIds = Array.isArray(shipment && shipment.orderItemIds) ? shipment.orderItemIds : [];
+    if (orderItemIds.some(function (itemId) { return Number(itemId || 0) === targetOrderItemId; })) return shipment;
+  }
+  return null;
+}
+
+function buildOrderExportRows(orders) {
+  const list = Array.isArray(orders) ? orders : [];
+  return list.reduce(function (rows, order) {
+    const items = Array.isArray(order && order.items) ? order.items : [];
+    const receiver = order && order.address && typeof order.address === 'object' ? order.address : {};
+    items.forEach(function (item) {
+      const shipment = findShipmentForOrderItem(order, item);
+      rows.push({
+        '订单号': String(order && (order.sourceId || order.id) || ''),
+        '订单状态': getOrderStatusExportLabel(order && order.status),
+        '下单时间': formatOrderExportDateTime(order && order.time),
+        '买家': String(order && order.owner || ''),
+        '收货姓名': String(receiver.name || ''),
+        '收货手机号': String(receiver.phone || ''),
+        '收货详细地址': String(receiver.full || ''),
+        '商品名称': String(item && item.name || ''),
+        '规格': String(item && item.variantLabel || '默认规格'),
+        '单位': String(item && (item.unit || item.unitLabel) || '默认单位'),
+        '数量': Number(item && item.qty || 0),
+        '商品发货地址': formatOrderExportAddress(item && item.shippingAddressSnapshot),
+        '快递单号': String(shipment && shipment.trackingNo || ''),
+        '订单实付': Number(order && order.total || 0).toFixed(2)
+      });
+    });
+    return rows;
+  }, []);
+}
+
+function escapeFormulaValue(value) {
+  const text = String(value == null ? '' : value);
+  return /^[\t\r\n ]*[=+\-@]/.test(text) ? ("'" + text) : text;
+}
+
+function serializeOrderExportCsv(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const columns = ['订单号', '订单状态', '下单时间', '买家', '收货姓名', '收货手机号', '收货详细地址', '商品名称', '规格', '单位', '数量', '商品发货地址', '快递单号', '订单实付'];
+  const escapeCell = function (value) {
+    const normalized = escapeFormulaValue(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    return '"' + normalized.replace(/"/g, '""') + '"';
+  };
+  const headerLine = columns.map(escapeCell).join(',');
+  const bodyLines = items.map(function (row) {
+    return columns.map(function (column) {
+      return escapeCell(row && row[column] != null ? row[column] : '');
+    }).join(',');
+  });
+  return '\uFEFF' + [headerLine].concat(bodyLines).join('\r\n');
+}
+
+function buildOrderExportFilename(timestamp) {
+  const date = new Date(timestamp || Date.now());
+  const pad = function (value) {
+    return String(Number(value || 0)).padStart(2, '0');
+  };
+  return 'orders-export-'
+    + date.getFullYear()
+    + pad(date.getMonth() + 1)
+    + pad(date.getDate())
+    + '-'
+    + pad(date.getHours())
+    + pad(date.getMinutes())
+    + pad(date.getSeconds())
+    + '.csv';
+}
+
+async function listAdminFulfillmentOrdersPage(filters) {
+  const query = filters || {};
+  const paging = normalizePaging(query, { pageSize: 8, maxPageSize: 40 });
   const conditions = [];
   const params = [];
   const ownerUsername = normalizeTextFilter(query.ownerUsername || query.username);
-  const status = normalizeTextFilter(query.status);
   const orderId = normalizeTextFilter(query.orderId);
-  const dateFrom = parseTimeFilterValue(query.dateFrom);
-  const dateTo = parseTimeFilterValue(query.dateTo, { endOfDay: true });
+  const status = normalizeTextFilter(query.status) || 'paid';
   if (ownerUsername) {
     conditions.push('username LIKE ?');
     params.push(buildContainsLikeValue(ownerUsername));
@@ -1731,22 +2793,323 @@ async function listAllOrdersPage(filters) {
     conditions.push('(sourceId LIKE ? OR id LIKE ?)');
     params.push(buildContainsLikeValue(orderId), buildContainsLikeValue(orderId));
   }
-  if (dateFrom) {
-    conditions.push('createdAt >= ?');
-    params.push(dateFrom);
-  }
-  if (dateTo) {
-    conditions.push('createdAt <= ?');
-    params.push(dateTo);
-  }
   const whereClause = conditions.length ? (' WHERE ' + conditions.join(' AND ')) : '';
   const countRow = await get('SELECT COUNT(*) AS count FROM orders' + whereClause, params);
   const orderRows = await all(
-    'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders' + whereClause + ' ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?',
+    'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders' + whereClause + ' ORDER BY createdAt ASC, id ASC LIMIT ? OFFSET ?',
     params.concat([paging.pageSize, paging.offset])
   );
   const items = await hydratePagedOrders(orderRows);
   return buildPagedResult(items, countRow && countRow.count, paging.page, paging.pageSize);
+}
+
+function buildShipmentId() {
+  return 'ship_' + Date.now() + '_' + generateToken(10);
+}
+
+async function listShipmentRowsByOrderId(relationOrderId) {
+  return all('SELECT ' + SHIPMENT_LIST_COLUMNS + ' FROM shipments WHERE orderId = ? ORDER BY createdAt ASC, id ASC', [relationOrderId]);
+}
+
+async function listShipmentItemRowsByOrderId(relationOrderId) {
+  return all('SELECT ' + SHIPMENT_ITEM_COLUMNS + ' FROM shipment_items WHERE orderId = ? ORDER BY shipmentId ASC, sortOrder ASC, id ASC', [relationOrderId]);
+}
+
+function buildShipmentLogisticsSignature(record) {
+  const shipment = normalizeShipmentRecord(record);
+  return [shipment.logisticsState, shipment.logisticsSummary].join('|');
+}
+
+function buildMockCourierSummary(prefix, now) {
+  const timeText = new Date(now).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).replace(/\//g, '-');
+  return prefix + ' · ' + timeText;
+}
+
+async function queryCourierTrackingAdapter(shipment, now) {
+  const trackingNo = String(shipment && shipment.trackingNo || '').trim();
+  const carrierName = String(shipment && shipment.carrierName || '').trim();
+  const upperTracking = trackingNo.toUpperCase();
+  if (!trackingNo) {
+    return {
+      logisticsState: 'no_tracking',
+      logisticsSummary: '待发货，暂未录入物流信息',
+      successAt: 0
+    };
+  }
+  if (upperTracking.indexOf('FAIL') >= 0 || upperTracking.indexOf('ERROR') >= 0) {
+    throw new Error('courier_lookup_failed');
+  }
+  if (upperTracking.indexOf('NO-TRACE') >= 0 || upperTracking.indexOf('NOTRACE') >= 0 || upperTracking.indexOf('WAIT') >= 0) {
+    return {
+      logisticsState: 'no_trace',
+      logisticsSummary: '已录入单号，等待物流公司返回轨迹',
+      successAt: 0
+    };
+  }
+  if (upperTracking.indexOf('SIGNED') >= 0 || upperTracking.indexOf('DELIVERED') >= 0 || upperTracking.indexOf('DONE') >= 0) {
+    return {
+      logisticsState: 'signed',
+      logisticsSummary: buildMockCourierSummary('已签收', now - 15 * 60 * 1000),
+      successAt: now
+    };
+  }
+  return {
+    logisticsState: 'active_success',
+    logisticsSummary: buildMockCourierSummary((carrierName || '物流') + '运输中，最新节点已同步', now - 30 * 60 * 1000),
+    successAt: now
+  };
+}
+
+async function saveShipmentLogisticsSnapshot(shipmentId, payload, now) {
+  const snapshot = normalizeShipmentRecord(Object.assign({}, payload, { id: shipmentId }));
+  const updatedAt = Math.max(Number(now || Date.now()), Number(snapshot.updatedAt || 0));
+  await run(
+    'UPDATE shipments SET logisticsSummary = ?, logisticsState = ?, lastLogisticsQueryAt = ?, lastLogisticsSuccessAt = ?, updatedAt = ? WHERE id = ?',
+    [
+      snapshot.logisticsSummary,
+      snapshot.logisticsState,
+      Math.max(0, Number(snapshot.lastLogisticsQueryAt || 0)),
+      Math.max(0, Number(snapshot.lastLogisticsSuccessAt || 0)),
+      updatedAt,
+      shipmentId
+    ]
+  );
+  return snapshot;
+}
+
+async function refreshShipmentLogisticsRow(row, now) {
+  const shipment = normalizeShipmentRecord(row);
+  const beforeSignature = buildShipmentLogisticsSignature(shipment);
+  let nextPayload = Object.assign({}, shipment);
+  if (!shipment.trackingNo) {
+    nextPayload = Object.assign({}, shipment, {
+      logisticsState: 'no_tracking',
+      logisticsSummary: '待发货，暂未录入物流信息'
+    });
+  } else if (shipment.logisticsState === 'signed' && Number(shipment.lastLogisticsSuccessAt || 0) > 0) {
+    nextPayload = Object.assign({}, shipment, {
+      logisticsState: 'signed',
+      logisticsSummary: buildShipmentLogisticsSummary('signed', shipment)
+    });
+  } else if (Number(shipment.lastLogisticsQueryAt || 0) > 0 && now - Number(shipment.lastLogisticsQueryAt || 0) < LOGISTICS_THROTTLE_MS) {
+    nextPayload = Object.assign({}, shipment, {
+      logisticsState: shipment.logisticsState,
+      logisticsSummary: buildShipmentLogisticsSummary(shipment.logisticsState, shipment)
+    });
+  } else {
+    try {
+      const adapterResult = await queryCourierTrackingAdapter(shipment, now);
+      nextPayload = Object.assign({}, shipment, {
+        logisticsState: adapterResult.logisticsState,
+        logisticsSummary: adapterResult.logisticsSummary,
+        lastLogisticsQueryAt: now,
+        lastLogisticsSuccessAt: Math.max(0, Number(adapterResult.successAt || 0))
+      });
+    } catch (error) {
+      const hasHistoricalSuccess = Number(shipment.lastLogisticsSuccessAt || 0) > 0 && !!String(shipment.logisticsSummary || '').trim();
+      nextPayload = Object.assign({}, shipment, {
+        logisticsState: hasHistoricalSuccess
+          ? (shipment.logisticsState === 'signed' ? 'signed' : 'stale_success')
+          : 'no_trace',
+        logisticsSummary: hasHistoricalSuccess
+          ? buildShipmentLogisticsSummary(shipment.logisticsState, shipment)
+          : '已录入单号，等待物流公司返回轨迹',
+        lastLogisticsQueryAt: now,
+        lastLogisticsSuccessAt: hasHistoricalSuccess ? Number(shipment.lastLogisticsSuccessAt || 0) : 0
+      });
+    }
+  }
+  const normalizedNext = normalizeShipmentRecord(nextPayload);
+  const signatureChanged = buildShipmentLogisticsSignature(normalizedNext) !== beforeSignature;
+  const shouldPersist =
+    signatureChanged
+    || Number(normalizedNext.lastLogisticsQueryAt || 0) !== Number(shipment.lastLogisticsQueryAt || 0)
+    || Number(normalizedNext.lastLogisticsSuccessAt || 0) !== Number(shipment.lastLogisticsSuccessAt || 0);
+  if (shouldPersist) {
+    await saveShipmentLogisticsSnapshot(shipment.id, normalizedNext, now);
+  }
+  return {
+    changed: signatureChanged,
+    shipment: normalizedNext
+  };
+}
+
+async function refreshOrderLogisticsByRelationId(relationOrderId) {
+  const shipmentRows = await listShipmentRowsByOrderId(relationOrderId);
+  if (!shipmentRows.length) {
+    return { changed: false, order: await getOrderSnapshotByRelationId(relationOrderId) };
+  }
+  const now = Date.now();
+  let changed = false;
+  for (let index = 0; index < shipmentRows.length; index++) {
+    const result = await refreshShipmentLogisticsRow(shipmentRows[index], now);
+    if (result.changed) changed = true;
+  }
+  return {
+    changed: changed,
+    order: await getOrderSnapshotByRelationId(relationOrderId)
+  };
+}
+
+async function listAllOrdersByOwner(ownerUsername) {
+  const owner = String(ownerUsername || '').trim();
+  if (!owner) return [];
+  const orderRows = await all(
+    'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders WHERE username = ? ORDER BY createdAt DESC, id DESC',
+    [owner]
+  );
+  return hydratePagedOrders(orderRows);
+}
+
+function isOrderLogisticsCandidate(order) {
+  const snapshot = normalizeOrderRecord(order);
+  if (Array.isArray(snapshot.shipments) && snapshot.shipments.length > 0) return true;
+  return ['paid', 'shipped', 'done'].indexOf(String(snapshot.status || '').trim()) >= 0;
+}
+
+function normalizeVisibleOrderIdList(value) {
+  return Array.from(new Set((Array.isArray(value) ? value : []).map(function (item) {
+    return String(item || '').trim();
+  }).filter(Boolean)));
+}
+
+async function runBuyerLogisticsRefreshCheck(ownerUsername, options) {
+  const owner = String(ownerUsername || '').trim();
+  const config = Object.assign({ visibleOrderIds: [], orderId: '' }, options || {});
+  const visibleOrderIds = normalizeVisibleOrderIdList(config.visibleOrderIds);
+  const targetOrderId = String(config.orderId || '').trim();
+  const orderList = targetOrderId
+    ? [await getOrderSnapshotByOwner(owner, targetOrderId)].filter(Boolean)
+    : await listAllOrdersByOwner(owner);
+  const candidates = orderList.filter(isOrderLogisticsCandidate);
+  const changedOrderIds = [];
+  for (let index = 0; index < candidates.length; index++) {
+    const order = normalizeOrderRecord(candidates[index]);
+    const refreshed = await refreshOrderLogisticsByRelationId(buildOrderRelationId(owner, order.id));
+    if (refreshed.changed) changedOrderIds.push(order.id);
+  }
+  const changedIdSet = changedOrderIds.reduce(function (result, item) {
+    result[String(item || '').trim()] = true;
+    return result;
+  }, {});
+  const visibleChangedOrderIds = visibleOrderIds.filter(function (item) {
+    return !!changedIdSet[item];
+  });
+  return {
+    orderId: targetOrderId,
+    changed: targetOrderId ? changedOrderIds.indexOf(targetOrderId) >= 0 : visibleChangedOrderIds.length > 0,
+    changedOrderIds: changedOrderIds,
+    changedCount: changedOrderIds.length,
+    visibleOrderIds: visibleOrderIds,
+    visibleChangedOrderIds: visibleChangedOrderIds,
+    visibleChangedCount: visibleChangedOrderIds.length
+  };
+}
+
+async function syncDerivedOrderStatusFromShipments(relationOrderId) {
+  const orderRow = await get('SELECT * FROM orders WHERE id = ?', [relationOrderId]);
+  if (!orderRow) return null;
+  const itemRows = await all('SELECT * FROM order_items WHERE orderId = ? ORDER BY sortOrder ASC, id ASC', [relationOrderId]);
+  const shipmentRows = await listShipmentRowsByOrderId(relationOrderId);
+  const shipmentItemRows = await listShipmentItemRowsByOrderId(relationOrderId);
+  const assignedItemIds = shipmentItemRows.reduce(function (result, row) {
+    const numericId = Number(row && row.orderItemId || 0);
+    if (numericId > 0) result[numericId] = true;
+    return result;
+  }, {});
+  const nextStatus = itemRows.length && itemRows.every(function (itemRow) {
+    return !!assignedItemIds[Number(itemRow.id || 0)];
+  }) ? 'shipped' : 'paid';
+  const nextTrackingNo = shipmentRows[0] && shipmentRows[0].trackingNo ? String(shipmentRows[0].trackingNo) : '';
+  await run('UPDATE orders SET status = ?, trackingNo = ? WHERE id = ?', [nextStatus, nextTrackingNo, relationOrderId]);
+  const updatedRow = await get('SELECT * FROM orders WHERE id = ?', [relationOrderId]);
+  return hydrateOrderRows(updatedRow, itemRows, shipmentRows, shipmentItemRows);
+}
+
+async function createShipmentForOrder(ownerUsername, sourceOrderId, payload, actorUsername) {
+  const owner = String(ownerUsername || '').trim();
+  const orderId = String(sourceOrderId || '').trim();
+  const actor = String(actorUsername || '').trim();
+  const trackingNo = String(payload && payload.trackingNo || '').trim();
+  const carrierCode = String(payload && payload.carrierCode || '').trim();
+  const carrierName = String(payload && payload.carrierName || '').trim();
+  const requestedOrderItemIds = Array.isArray(payload && payload.orderItemIds) ? payload.orderItemIds : [];
+  const selectedOrderItemIds = Array.from(new Set(requestedOrderItemIds.map(function (item) {
+    return Number(item || 0);
+  }).filter(function (item) {
+    return item > 0;
+  })));
+  if (!owner || !orderId) throw new Error('订单标识不完整');
+  if (!trackingNo) throw new Error('请先填写快递单号');
+  if (!selectedOrderItemIds.length) throw new Error('请至少选择一条订单商品');
+  return withImmediateTransaction(async function () {
+    const relationOrderId = buildOrderRelationId(owner, orderId);
+    const orderRow = await get('SELECT * FROM orders WHERE id = ?', [relationOrderId]);
+    if (!orderRow) throw new Error('订单不存在');
+    if (String(orderRow.status || '').trim() !== 'paid') throw new Error('当前订单状态不支持继续发货');
+    const itemRows = await all('SELECT * FROM order_items WHERE orderId = ? ORDER BY sortOrder ASC, id ASC', [relationOrderId]);
+    if (!itemRows.length) throw new Error('订单缺少商品行，无法发货');
+    const itemIdMap = itemRows.reduce(function (result, row) {
+      result[Number(row.id || 0)] = row;
+      return result;
+    }, {});
+    const invalidOrderItemId = selectedOrderItemIds.find(function (itemId) {
+      return !itemIdMap[itemId];
+    });
+    if (invalidOrderItemId) throw new Error('存在不属于该订单的商品行，无法发货');
+    const existingShipmentItemRows = await listShipmentItemRowsByOrderId(relationOrderId);
+    const assignedItemMap = existingShipmentItemRows.reduce(function (result, row) {
+      result[Number(row && row.orderItemId || 0)] = true;
+      return result;
+    }, {});
+    const duplicatedItemId = selectedOrderItemIds.find(function (itemId) {
+      return !!assignedItemMap[itemId];
+    });
+    if (duplicatedItemId) throw new Error('所选商品中包含已发货条目，请刷新后重试');
+    const shipmentId = buildShipmentId();
+    const now = Date.now();
+    const shipmentLogistics = normalizeShipmentRecord({
+      trackingNo: trackingNo,
+      carrierCode: carrierCode,
+      carrierName: carrierName,
+      logisticsState: 'no_trace',
+      logisticsSummary: '已录入单号，等待物流公司返回轨迹'
+    });
+    await run(
+      'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        shipmentId,
+        relationOrderId,
+        orderId,
+        owner,
+        shipmentLogistics.trackingNo,
+        shipmentLogistics.carrierCode,
+        shipmentLogistics.carrierName,
+        'shipped',
+        shipmentLogistics.logisticsSummary,
+        shipmentLogistics.logisticsState,
+        0,
+        0,
+        now,
+        now,
+        actor,
+        ''
+      ]
+    );
+    for (let index = 0; index < selectedOrderItemIds.length; index++) {
+      await run(
+        'INSERT INTO shipment_items (shipmentId, orderId, orderItemId, sortOrder, createdAt) VALUES (?, ?, ?, ?, ?)',
+        [shipmentId, relationOrderId, selectedOrderItemIds[index], index, now]
+      );
+    }
+    return syncDerivedOrderStatusFromShipments(relationOrderId);
+  });
 }
 
 async function listRefundRequestsPage(filters) {
@@ -2220,7 +3583,7 @@ async function insertPaymentTransaction(username, order, options) {
     channel: 'mock_h5'
   });
   await run(
-    'INSERT OR IGNORE INTO payment_transactions (id, username, orderId, amount, status, channel, couponId, couponText, receiverName, receiverPhone, receiverFull, createdAt, paidAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO payment_transactions (id, username, orderId, amount, status, channel, couponId, couponText, receiverName, receiverPhone, receiverFull, externalTradeNo, createdAt, paidAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       username + ':' + normalizedOrder.id,
       username,
@@ -2233,6 +3596,7 @@ async function insertPaymentTransaction(username, order, options) {
       normalizedOrder.address && normalizedOrder.address.name ? normalizedOrder.address.name : '',
       normalizedOrder.address && normalizedOrder.address.phone ? normalizedOrder.address.phone : '',
       normalizedOrder.address && normalizedOrder.address.full ? normalizedOrder.address.full : '',
+      buildAlipayOutTradeNo(username, normalizedOrder.id),
       Date.now(),
       Number(options && options.paidAt || normalizedOrder.time || Date.now())
     ]
@@ -2851,11 +4215,195 @@ async function getCouponTemplateList() {
   return rows.map(hydrateCouponTemplate);
 }
 
+function hydrateSmsVerificationRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id || 0),
+    phone: normalizePhoneNumber(row.phone),
+    purpose: normalizeSmsPurpose(row.purpose),
+    code: String(row.code || ''),
+    username: String(row.username || '').trim(),
+    createdAt: Number(row.createdAt || 0),
+    expiresAt: Number(row.expiresAt || 0),
+    resendAvailableAt: Number(row.resendAvailableAt || 0),
+    consumedAt: Number(row.consumedAt || 0),
+    invalidatedAt: Number(row.invalidatedAt || 0),
+    requestIp: String(row.requestIp || ''),
+    deliveryChannel: String(row.deliveryChannel || 'mock'),
+    deliveryStatus: String(row.deliveryStatus || 'queued'),
+    messageId: String(row.messageId || '')
+  };
+}
+
+async function getUserByPhone(phone) {
+  const normalized = normalizePhoneNumber(phone);
+  if (!normalized) return null;
+  const row = await get('SELECT * FROM users WHERE phone = ?', [normalized]);
+  return row ? hydrateUserWithRelations(row) : null;
+}
+
+async function generatePhoneFirstUsername() {
+  for (let index = 0; index < 10; index++) {
+    const candidate = 'u_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1679616).toString(36).padStart(4, '0');
+    if (!await getUserByUsername(candidate)) return candidate;
+  }
+  throw new Error('自动生成账号失败，请稍后再试');
+}
+
+async function createPhoneFirstUser(phone) {
+  const normalizedPhone = normalizePhoneNumber(phone);
+  if (!isValidChinaMainlandPhone(normalizedPhone)) throw new Error('请输入正确的手机号');
+  const templates = await getCouponTemplateList();
+  const username = await generatePhoneFirstUsername();
+  await insertUser(normalizeUserRecord({
+    username: username,
+    password: '',
+    nickname: '',
+    phone: normalizedPhone,
+    phoneVerifiedAt: Date.now(),
+    roles: { isFarmer: false, isAdmin: false, isSuperAdmin: false, farmerName: username },
+    addresses: [],
+    coupons: templates.map(buildCouponFromTemplate),
+    selectedAddressId: '',
+    selectedCouponId: '',
+    cart: [],
+    orders: [],
+    member: { levelId: 'normal', points: 0, totalSpent: 0 },
+    createdAt: new Date().toLocaleDateString('zh-CN')
+  }));
+  return getUserByUsername(username);
+}
+
+async function getLatestSmsVerification(phone, purpose) {
+  const normalizedPhone = normalizePhoneNumber(phone);
+  if (!normalizedPhone) return null;
+  const row = await get(
+    'SELECT * FROM sms_verification_codes WHERE phone = ? AND purpose = ? ORDER BY id DESC LIMIT 1',
+    [normalizedPhone, normalizeSmsPurpose(purpose)]
+  );
+  return hydrateSmsVerificationRow(row);
+}
+
+async function getCurrentActiveSmsVerification(phone, purpose) {
+  const normalizedPhone = normalizePhoneNumber(phone);
+  if (!normalizedPhone) return null;
+  const row = await get(
+    'SELECT * FROM sms_verification_codes WHERE phone = ? AND purpose = ? AND consumedAt = 0 AND invalidatedAt = 0 ORDER BY id DESC LIMIT 1',
+    [normalizedPhone, normalizeSmsPurpose(purpose)]
+  );
+  return hydrateSmsVerificationRow(row);
+}
+
+async function countRecentSmsRequests(phone, purpose, windowStart) {
+  const row = await get(
+    'SELECT COUNT(*) AS count FROM sms_verification_codes WHERE phone = ? AND purpose = ? AND createdAt >= ?',
+    [normalizePhoneNumber(phone), normalizeSmsPurpose(purpose), Number(windowStart || 0)]
+  );
+  return Number(row && row.count || 0);
+}
+
+async function cleanupExpiredSmsVerifications() {
+  await run('DELETE FROM sms_verification_codes WHERE expiresAt > 0 AND expiresAt <= ?', [Date.now()]);
+}
+
+async function createSmsVerificationRecord(record) {
+  const item = hydrateSmsVerificationRow(record || {});
+  const result = await run(
+    'INSERT INTO sms_verification_codes (phone, purpose, code, username, createdAt, expiresAt, resendAvailableAt, consumedAt, invalidatedAt, requestIp, deliveryChannel, deliveryStatus, messageId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [item.phone, item.purpose, item.code, item.username, item.createdAt, item.expiresAt, item.resendAvailableAt, item.consumedAt, item.invalidatedAt, item.requestIp, item.deliveryChannel, item.deliveryStatus, item.messageId]
+  );
+  return get('SELECT * FROM sms_verification_codes WHERE id = ?', [result.lastID]).then(hydrateSmsVerificationRow);
+}
+
+async function consumeSmsVerificationRecord(id) {
+  const now = Date.now();
+  await run('UPDATE sms_verification_codes SET consumedAt = ? WHERE id = ?', [now, Number(id || 0)]);
+}
+
+async function invalidateSmsVerificationRecords(phone, purpose, now) {
+  await run(
+    'UPDATE sms_verification_codes SET invalidatedAt = ? WHERE phone = ? AND purpose = ? AND consumedAt = 0 AND invalidatedAt = 0',
+    [Number(now || Date.now()), normalizePhoneNumber(phone), normalizeSmsPurpose(purpose)]
+  );
+}
+
+async function issueSmsVerificationCode(phone, purpose, options) {
+  const normalizedPhone = normalizePhoneNumber(phone);
+  const normalizedPurpose = normalizeSmsPurpose(purpose);
+  const config = Object.assign({ username: '', requestIp: '' }, options || {});
+  await cleanupExpiredSmsVerifications();
+  if (!isValidChinaMainlandPhone(normalizedPhone)) {
+    throw new Error('请输入正确的手机号');
+  }
+  const latest = await getLatestSmsVerification(normalizedPhone, normalizedPurpose);
+  const now = Date.now();
+  if (latest && Number(latest.resendAvailableAt || 0) > now) {
+    const waitSeconds = Math.max(1, Math.ceil((Number(latest.resendAvailableAt || 0) - now) / 1000));
+    throw new Error('验证码已发送，请在 ' + waitSeconds + ' 秒后重试');
+  }
+  const recentCount = await countRecentSmsRequests(normalizedPhone, normalizedPurpose, now - SMS_CODE_SHORT_WINDOW_MS);
+  if (recentCount >= SMS_CODE_SHORT_LIMIT) {
+    throw new Error('验证码发送过于频繁，请稍后再试');
+  }
+  const providerConfig = getAliyunSmsConfig(normalizedPurpose);
+  const code = providerConfig.provider === 'aliyun' ? '' : generateSmsVerificationCode();
+  const delivery = await sendAliyunSms(normalizedPhone, code, normalizedPurpose);
+  const created = await withImmediateTransaction(async function () {
+    await invalidateSmsVerificationRecords(normalizedPhone, normalizedPurpose, now);
+    return createSmsVerificationRecord({
+      phone: normalizedPhone,
+      purpose: normalizedPurpose,
+      code: String(delivery.debugCode || code || ''),
+      username: config.username,
+      createdAt: now,
+      expiresAt: now + SMS_CODE_TTL_MS,
+      resendAvailableAt: now + SMS_CODE_RESEND_MS,
+      consumedAt: 0,
+      invalidatedAt: 0,
+      requestIp: config.requestIp,
+      deliveryChannel: delivery.provider,
+      deliveryStatus: delivery.deliveryStatus,
+      messageId: delivery.messageId
+    });
+  });
+  return {
+    ok: true,
+    phone: normalizedPhone,
+    maskedPhone: maskPhoneNumber(normalizedPhone),
+    purpose: normalizedPurpose,
+    resendAfterSeconds: Math.ceil(SMS_CODE_RESEND_MS / 1000),
+    expiresInSeconds: Math.ceil(SMS_CODE_TTL_MS / 1000),
+    sentAt: created.createdAt,
+    mock: delivery.provider !== 'aliyun',
+    debugCode: shouldExposeSmsDebugCode(providerConfig) ? delivery.debugCode : undefined
+  };
+}
+
+async function verifySmsCodeOrThrow(phone, purpose, code) {
+  const normalizedPhone = normalizePhoneNumber(phone);
+  const normalizedPurpose = normalizeSmsPurpose(purpose);
+  const normalizedCode = String(code || '').trim();
+  const config = getAliyunSmsConfig(normalizedPurpose);
+  await cleanupExpiredSmsVerifications();
+  if (!isValidChinaMainlandPhone(normalizedPhone)) throw new Error('请输入正确的手机号');
+  if (!/^\d{6}$/.test(normalizedCode)) throw new Error('请输入 6 位验证码');
+  const currentRecord = await getCurrentActiveSmsVerification(normalizedPhone, normalizedPurpose);
+  if (!currentRecord) throw new Error('请先获取验证码');
+  if (Number(currentRecord.expiresAt || 0) <= Date.now()) throw new Error('验证码已过期，请重新获取');
+  if (config.provider === 'aliyun') {
+    const verifyResult = await checkAliyunSmsVerification(normalizedPhone, normalizedCode, normalizedPurpose);
+    if (!verifyResult.verified) throw new Error('验证码错误或已失效');
+    return currentRecord;
+  }
+  if (String(currentRecord.code || '') !== normalizedCode) throw new Error('验证码错误或已失效');
+  return currentRecord;
+}
+
 async function insertUser(record) {
   const user = toDbUser(record);
   const result = await run(
-    'INSERT INTO users (username, password, roles, addresses, shippingAddresses, coupons, selectedAddressId, selectedCouponId, cart, orders, member, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [user.username, user.password, user.roles, user.addresses, user.shippingAddresses, user.coupons, user.selectedAddressId, user.selectedCouponId, user.cart, user.orders, user.member, user.createdAt]
+    'INSERT INTO users (username, password, nickname, phone, phoneVerifiedAt, roles, addresses, shippingAddresses, coupons, selectedAddressId, selectedCouponId, cart, orders, member, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [user.username, user.password, user.nickname, user.phone, user.phoneVerifiedAt, user.roles, user.addresses, user.shippingAddresses, user.coupons, user.selectedAddressId, user.selectedCouponId, user.cart, user.orders, user.member, user.createdAt]
   );
   await syncUserAddressRelations(user.username, JSON.parse(user.addresses), JSON.parse(user.shippingAddresses));
   await syncUserOrderRelations(user.username, JSON.parse(user.orders));
@@ -2867,8 +4415,8 @@ async function insertUser(record) {
 async function updateUser(record) {
   const user = toDbUser(record);
   const result = await run(
-    'UPDATE users SET password = ?, roles = ?, addresses = ?, shippingAddresses = ?, coupons = ?, selectedAddressId = ?, selectedCouponId = ?, cart = ?, orders = ?, member = ?, createdAt = ? WHERE username = ?',
-    [user.password, user.roles, user.addresses, user.shippingAddresses, user.coupons, user.selectedAddressId, user.selectedCouponId, user.cart, user.orders, user.member, user.createdAt, user.username]
+    'UPDATE users SET password = ?, nickname = ?, phone = ?, phoneVerifiedAt = ?, roles = ?, addresses = ?, shippingAddresses = ?, coupons = ?, selectedAddressId = ?, selectedCouponId = ?, cart = ?, orders = ?, member = ?, createdAt = ? WHERE username = ?',
+    [user.password, user.nickname, user.phone, user.phoneVerifiedAt, user.roles, user.addresses, user.shippingAddresses, user.coupons, user.selectedAddressId, user.selectedCouponId, user.cart, user.orders, user.member, user.createdAt, user.username]
   );
   await syncUserAddressRelations(user.username, JSON.parse(user.addresses), JSON.parse(user.shippingAddresses));
   await syncUserOrderRelations(user.username, JSON.parse(user.orders));
@@ -3000,10 +4548,40 @@ function canManageProduct(currentUser, product) {
   return String(normalized.farmerAccount || '').trim() === String(currentUser.username || '').trim();
 }
 
-async function finalizePendingOrderPayment(ownerUsername, sourceOrderId) {
+async function applyOrderPaymentBenefits(ownerUsername, order) {
+  const owner = String(ownerUsername || '').trim();
+  if (!owner) return;
+  const user = await getUserByUsername(owner);
+  if (!user) return;
+  const normalizedOrder = normalizeOrderRecord(order);
+  user.member = Object.assign({ levelId: 'normal', points: 0, totalSpent: 0 }, user.member || {}, {
+    totalSpent: Number(user.member && user.member.totalSpent || 0) + Number(normalizedOrder.subtotal || 0)
+  });
+  if (normalizedOrder.couponId) {
+    user.coupons = (Array.isArray(user.coupons) ? user.coupons : []).map(function (item, index) {
+      const coupon = normalizeUserCoupon(item, index);
+      return coupon.id === normalizedOrder.couponId ? Object.assign({}, coupon, { used: true }) : coupon;
+    });
+  }
+  user.selectedCouponId = '';
+  user.cart = [];
+  await syncUserCartRelations(owner, []);
+  await syncUserCouponRelations(owner, user.coupons || []);
+  await updateUser(user);
+}
+
+async function finalizePendingOrderPayment(ownerUsername, sourceOrderId, options) {
   const owner = String(ownerUsername || '').trim();
   const orderId = String(sourceOrderId || '').trim();
   if (!owner || !orderId) throw new Error('待支付订单参数不完整');
+  const paymentMeta = Object.assign({
+    channel: 'mock_h5',
+    gatewayTradeNo: '',
+    gatewayBuyerId: '',
+    notifyStatus: '',
+    notifyPayload: '',
+    notifyAt: 0
+  }, options || {});
   await cleanupExpiredPendingOrders(Date.now());
   return withImmediateTransaction(async function () {
     const relationOrderId = buildOrderRelationId(owner, orderId);
@@ -3032,8 +4610,20 @@ async function finalizePendingOrderPayment(ownerUsername, sourceOrderId) {
       }, now);
     }
     await run('UPDATE orders SET status = ?, cancelReason = ? WHERE id = ?', ['paid', '', relationOrderId]);
-    await run('UPDATE payment_transactions SET status = ?, paidAt = ? WHERE id = ?', ['paid', now, buildPaymentTransactionId(owner, orderId)]);
-    return getOrderSnapshotByRelationId(relationOrderId);
+    await updatePaymentTransactionAlipayState(buildPaymentTransactionId(owner, orderId), {
+      status: 'paid',
+      channel: paymentMeta.channel || 'mock_h5',
+      gatewayTradeNo: String(paymentMeta.gatewayTradeNo || ''),
+      gatewayBuyerId: String(paymentMeta.gatewayBuyerId || ''),
+      notifyStatus: String(paymentMeta.notifyStatus || ''),
+      notifyPayload: paymentMeta.notifyPayload ? JSON.stringify(paymentMeta.notifyPayload) : '',
+      notifyAt: paymentMeta.notifyAt ? Number(paymentMeta.notifyAt) : '',
+      paidAt: now,
+      lastError: ''
+    });
+    const savedOrder = await getOrderSnapshotByRelationId(relationOrderId);
+    await applyOrderPaymentBenefits(owner, savedOrder);
+    return savedOrder;
   });
 }
 
@@ -3054,6 +4644,289 @@ async function cancelPendingOrder(ownerUsername, sourceOrderId) {
       operatorRole: 'buyer'
     });
   });
+}
+
+async function createAlipayWapLaunch(ownerUsername, sourceOrderId, req) {
+  const owner = String(ownerUsername || '').trim();
+  const orderId = String(sourceOrderId || '').trim();
+  if (!owner || !orderId) throw new Error('支付发起参数不完整');
+  await cleanupExpiredPendingOrders(Date.now());
+  const relationOrderId = buildOrderRelationId(owner, orderId);
+  const order = await getOrderSnapshotByRelationId(relationOrderId);
+  if (!order) throw new Error('订单不存在');
+  if (order.status !== 'pending' || order.inventoryReleased || isPendingOrderExpired(order)) {
+    throw new Error('当前订单已超时或已取消，不能继续发起支付');
+  }
+  const config = getAlipayConfig(req);
+  assertAlipayReady(config);
+  const transactionId = buildPaymentTransactionId(owner, orderId);
+  const externalTradeNo = buildAlipayOutTradeNo(owner, orderId);
+  await updatePaymentTransactionAlipayState(transactionId, {
+    status: 'pending',
+    channel: 'alipay_wap',
+    externalTradeNo: externalTradeNo,
+    initiatedAt: Date.now(),
+    lastError: ''
+  });
+  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  return Object.assign({
+    orderId: orderId,
+    channel: 'alipay_wap',
+    recommendedChannel: 'alipay_wap',
+    availableChannels: getPaymentChannelRuntimeMeta(req, { preferredChannel: 'alipay_wap' }).availableChannels
+  }, buildAlipayWapRequest(order, paymentTransaction, config), {
+    paymentTransaction: paymentTransaction
+  });
+}
+
+async function createWechatPaymentLaunch(ownerUsername, sourceOrderId, req, channel) {
+  const owner = String(ownerUsername || '').trim();
+  const orderId = String(sourceOrderId || '').trim();
+  const targetChannel = channel === 'wechat_h5_inapp' ? 'wechat_h5_inapp' : 'wechat_h5_external';
+  if (!owner || !orderId) throw new Error('支付发起参数不完整');
+  await cleanupExpiredPendingOrders(Date.now());
+  const relationOrderId = buildOrderRelationId(owner, orderId);
+  const order = await getOrderSnapshotByRelationId(relationOrderId);
+  if (!order) throw new Error('订单不存在');
+  if (order.status !== 'pending' || order.inventoryReleased || isPendingOrderExpired(order)) {
+    throw new Error('当前订单已超时或已取消，不能继续发起支付');
+  }
+  const config = getWechatPayConfig(req);
+  assertWechatPayReady(config, targetChannel);
+  const transactionId = buildPaymentTransactionId(owner, orderId);
+  const externalTradeNo = buildAlipayOutTradeNo(owner, orderId);
+  await updatePaymentTransactionState(transactionId, {
+    status: 'pending',
+    channel: targetChannel,
+    externalTradeNo: externalTradeNo,
+    initiatedAt: Date.now(),
+    lastError: ''
+  });
+  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  return Object.assign({
+    orderId: orderId,
+    channel: targetChannel,
+    recommendedChannel: targetChannel,
+    availableChannels: getPaymentChannelRuntimeMeta(req, { preferredChannel: targetChannel }).availableChannels
+  }, buildWechatLaunchRequest(order, paymentTransaction, config, targetChannel, req), {
+    paymentTransaction: paymentTransaction
+  });
+}
+
+async function getBuyerPaymentStatus(ownerUsername, sourceOrderId, options, req) {
+  const owner = String(ownerUsername || '').trim();
+  const orderId = String(sourceOrderId || '').trim();
+  if (!owner || !orderId) throw new Error('支付状态查询参数不完整');
+  await cleanupExpiredPendingOrders(Date.now());
+  const relationOrderId = buildOrderRelationId(owner, orderId);
+  const order = await getOrderSnapshotByRelationId(relationOrderId);
+  if (!order) throw new Error('订单不存在');
+  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  if (options && options.markReturnChecked && paymentTransaction) {
+    await updatePaymentTransactionAlipayState(buildPaymentTransactionId(owner, orderId), {
+      returnCheckedAt: Date.now()
+    });
+  }
+  const latestTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  const runtimeMeta = getPaymentChannelRuntimeMeta(req, {
+    preferredChannel: latestTransaction && latestTransaction.channel ? latestTransaction.channel : ''
+  });
+  return {
+    order: Object.assign({}, order, runtimeMeta),
+    paymentTransaction: latestTransaction,
+    awaitingAsyncNotify: order.status === 'pending'
+      && !order.inventoryReleased
+      && latestTransaction
+      && ['alipay_wap', 'wechat_h5_inapp', 'wechat_h5_external'].indexOf(latestTransaction.channel) >= 0
+      && latestTransaction.status === 'pending',
+    isFinal: order.status !== 'pending' || !!order.inventoryReleased,
+    availableChannels: runtimeMeta.availableChannels,
+    recommendedChannel: runtimeMeta.recommendedChannel,
+    wechatBrowser: runtimeMeta.wechatBrowser
+  };
+}
+
+async function handleAlipayNotification(payload) {
+  const notifyPayload = Object.assign({}, payload || {});
+  const config = getAlipayConfig();
+  if (!config.publicKey) {
+    return { ok: false, shouldAcknowledge: false, message: '支付宝公钥未配置' };
+  }
+  if (!verifyAlipaySignature(notifyPayload, config.publicKey)) {
+    return { ok: false, shouldAcknowledge: false, message: '支付宝异步通知验签失败' };
+  }
+  const identifier = parseAlipayOutTradeNo(notifyPayload.out_trade_no);
+  if (!identifier) {
+    return { ok: false, shouldAcknowledge: false, message: '支付宝订单号无法识别' };
+  }
+  const owner = identifier.ownerUsername;
+  const orderId = identifier.sourceOrderId;
+  const relationOrderId = buildOrderRelationId(owner, orderId);
+  const order = await getOrderSnapshotByRelationId(relationOrderId);
+  const transactionId = buildPaymentTransactionId(owner, orderId);
+  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  if (!order || !paymentTransaction) {
+    return { ok: false, shouldAcknowledge: false, message: '本地订单或支付流水不存在' };
+  }
+  const notifyAt = Date.now();
+  const tradeStatus = String(notifyPayload.trade_status || '').trim();
+  const gatewayTradeNo = String(notifyPayload.trade_no || '').trim();
+  const gatewayBuyerId = String(notifyPayload.buyer_id || '').trim();
+  const totalAmount = formatCurrencyAmount(order.total);
+  if (String(notifyPayload.app_id || '').trim() && config.appId && String(notifyPayload.app_id || '').trim() !== config.appId) {
+    await updatePaymentTransactionAlipayState(transactionId, {
+      notifyStatus: 'invalid_app_id',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: '支付宝应用 ID 不匹配'
+    });
+    return { ok: false, shouldAcknowledge: false, message: '支付宝应用 ID 不匹配' };
+  }
+  if (String(notifyPayload.total_amount || '').trim() && String(notifyPayload.total_amount || '').trim() !== totalAmount) {
+    await updatePaymentTransactionAlipayState(transactionId, {
+      notifyStatus: 'invalid_total_amount',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: '支付宝金额校验失败'
+    });
+    return { ok: false, shouldAcknowledge: false, message: '支付宝金额校验失败' };
+  }
+  if (paymentTransaction.status === 'paid' || order.status === 'paid') {
+    await updatePaymentTransactionAlipayState(transactionId, {
+      notifyStatus: tradeStatus || paymentTransaction.notifyStatus || 'TRADE_SUCCESS',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      channel: 'alipay_wap',
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: ''
+    });
+    return { ok: true, shouldAcknowledge: true, order: await getOrderSnapshotByRelationId(relationOrderId) };
+  }
+  if (['TRADE_SUCCESS', 'TRADE_FINISHED'].indexOf(tradeStatus) < 0) {
+    await updatePaymentTransactionAlipayState(transactionId, {
+      notifyStatus: tradeStatus || 'ignored_non_success',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      channel: 'alipay_wap',
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: ''
+    });
+    return { ok: true, shouldAcknowledge: true, order: order };
+  }
+  if (order.inventoryReleased || order.status !== 'pending' || isPendingOrderExpired(order)) {
+    await updatePaymentTransactionAlipayState(transactionId, {
+      notifyStatus: 'ignored_terminal_state',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      channel: 'alipay_wap',
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: '订单已取消或超时，异步通知未再转 paid'
+    });
+    return { ok: true, shouldAcknowledge: true, order: order };
+  }
+  const paidOrder = await finalizePendingOrderPayment(owner, orderId, {
+    channel: 'alipay_wap',
+    gatewayTradeNo: gatewayTradeNo,
+    gatewayBuyerId: gatewayBuyerId,
+    notifyStatus: tradeStatus,
+    notifyPayload: notifyPayload,
+    notifyAt: notifyAt
+  });
+  return { ok: true, shouldAcknowledge: true, order: paidOrder };
+}
+
+async function handleWechatNotification(payload) {
+  const notifyPayload = Object.assign({}, payload || {});
+  const transaction = notifyPayload.transaction && typeof notifyPayload.transaction === 'object'
+    ? notifyPayload.transaction
+    : notifyPayload;
+  const outTradeNo = String(transaction.out_trade_no || notifyPayload.out_trade_no || '').trim();
+  const identifier = parseAlipayOutTradeNo(outTradeNo);
+  if (!identifier) {
+    return { ok: false, shouldAcknowledge: false, message: '微信支付订单号无法识别' };
+  }
+  const owner = identifier.ownerUsername;
+  const orderId = identifier.sourceOrderId;
+  const relationOrderId = buildOrderRelationId(owner, orderId);
+  const order = await getOrderSnapshotByRelationId(relationOrderId);
+  const transactionId = buildPaymentTransactionId(owner, orderId);
+  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  if (!order || !paymentTransaction) {
+    return { ok: false, shouldAcknowledge: false, message: '本地订单或支付流水不存在' };
+  }
+  const notifyAt = Date.now();
+  const tradeState = String(transaction.trade_state || notifyPayload.trade_state || '').trim();
+  const gatewayTradeNo = String(transaction.transaction_id || notifyPayload.transaction_id || '').trim();
+  const gatewayBuyerId = String(transaction.payer && transaction.payer.openid || notifyPayload.openid || '').trim();
+  const amountTotalFen = Number(transaction.amount && transaction.amount.total || notifyPayload.amountTotal || 0);
+  const expectedTotalFen = Math.round(Number(order.total || 0) * 100);
+  const wechatChannel = paymentTransaction.channel === 'wechat_h5_inapp'
+    ? 'wechat_h5_inapp'
+    : (paymentTransaction.channel === 'wechat_h5_external' ? 'wechat_h5_external' : (String(transaction.trade_type || '').trim() === 'JSAPI' ? 'wechat_h5_inapp' : 'wechat_h5_external'));
+  if (amountTotalFen > 0 && amountTotalFen !== expectedTotalFen) {
+    await updatePaymentTransactionState(transactionId, {
+      notifyStatus: 'invalid_total_amount',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      channel: wechatChannel,
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: '微信支付金额校验失败'
+    });
+    return { ok: false, shouldAcknowledge: false, message: '微信支付金额校验失败' };
+  }
+  if (paymentTransaction.status === 'paid' || order.status === 'paid') {
+    await updatePaymentTransactionState(transactionId, {
+      notifyStatus: tradeState || paymentTransaction.notifyStatus || 'SUCCESS',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      channel: wechatChannel,
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: ''
+    });
+    return { ok: true, shouldAcknowledge: true, order: await getOrderSnapshotByRelationId(relationOrderId) };
+  }
+  if (tradeState !== 'SUCCESS') {
+    await updatePaymentTransactionState(transactionId, {
+      notifyStatus: tradeState || 'ignored_non_success',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      channel: wechatChannel,
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: ''
+    });
+    return { ok: true, shouldAcknowledge: true, order: order };
+  }
+  if (order.inventoryReleased || order.status !== 'pending' || isPendingOrderExpired(order)) {
+    await updatePaymentTransactionState(transactionId, {
+      notifyStatus: 'ignored_terminal_state',
+      notifyPayload: JSON.stringify(notifyPayload),
+      notifyAt: notifyAt,
+      channel: wechatChannel,
+      gatewayTradeNo: gatewayTradeNo,
+      gatewayBuyerId: gatewayBuyerId,
+      lastError: '订单已取消或超时，异步通知未再转 paid'
+    });
+    return { ok: true, shouldAcknowledge: true, order: order };
+  }
+  const paidOrder = await finalizePendingOrderPayment(owner, orderId, {
+    channel: wechatChannel,
+    gatewayTradeNo: gatewayTradeNo,
+    gatewayBuyerId: gatewayBuyerId,
+    notifyStatus: tradeState,
+    notifyPayload: notifyPayload,
+    notifyAt: notifyAt
+  });
+  return { ok: true, shouldAcknowledge: true, order: paidOrder };
 }
 
 async function applyOrderSnapshotStatus(username, sourceOrderId, status, trackingNo, options) {
@@ -3428,10 +5301,16 @@ async function ensureScaleReadyIndexes() {
     'CREATE INDEX IF NOT EXISTS idx_products_off_id ON products(off, id)',
     'CREATE INDEX IF NOT EXISTS idx_products_farmer_account_id ON products(farmerAccount, id)',
     'CREATE INDEX IF NOT EXISTS idx_users_username_id ON users(username, id)',
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique ON users(phone) WHERE phone <> ''",
+    'CREATE INDEX IF NOT EXISTS idx_users_phone_verified ON users(phoneVerifiedAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_orders_username_status_created_id ON orders(username, status, createdAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_orders_status_created_id ON orders(status, createdAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_orders_source_username ON orders(sourceId, username)',
     'CREATE INDEX IF NOT EXISTS idx_order_items_order_sort_id ON order_items(orderId, sortOrder, id)',
+    'CREATE INDEX IF NOT EXISTS idx_shipments_order_created_id ON shipments(orderId, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_shipments_order_source_owner ON shipments(orderSourceId, ownerUsername, id)',
+    'CREATE INDEX IF NOT EXISTS idx_shipment_items_order_shipment_sort_id ON shipment_items(orderId, shipmentId, sortOrder, id)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_shipment_items_order_item_unique ON shipment_items(orderItemId)',
     'CREATE INDEX IF NOT EXISTS idx_cart_items_username_product_id ON cart_items(username, productId, id)',
     'CREATE INDEX IF NOT EXISTS idx_user_addresses_username_type_sort_id ON user_addresses(username, type, sortOrder, id)',
     'CREATE INDEX IF NOT EXISTS idx_user_coupons_username_used_sort_id ON user_coupons(username, used, sortOrder, id)',
@@ -3439,15 +5318,67 @@ async function ensureScaleReadyIndexes() {
     'CREATE INDEX IF NOT EXISTS idx_refund_requests_order_id ON refund_requests(orderId, id)',
     'CREATE INDEX IF NOT EXISTS idx_payment_transactions_username_status_created_id ON payment_transactions(username, status, createdAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_payment_transactions_order_status ON payment_transactions(orderId, status)',
+    'CREATE INDEX IF NOT EXISTS idx_payment_transactions_external_trade ON payment_transactions(externalTradeNo, status)',
+    'CREATE INDEX IF NOT EXISTS idx_payment_transactions_gateway_trade ON payment_transactions(gatewayTradeNo, status)',
     'CREATE INDEX IF NOT EXISTS idx_aftersales_username_status_created_id ON aftersales(username, status, createdAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_aftersales_order_type_created_id ON aftersales(orderId, type, createdAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_inventory_logs_order_created_id ON inventory_logs(orderId, createdAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_inventory_logs_operator_action_created_id ON inventory_logs(operatorUsername, actionType, createdAt, id)',
     'CREATE INDEX IF NOT EXISTS idx_sessions_username_expires ON sessions(username, expiresAt)',
-    'CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expiresAt)'
+    'CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expiresAt)',
+    'CREATE INDEX IF NOT EXISTS idx_sms_codes_phone_purpose_created ON sms_verification_codes(phone, purpose, createdAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_sms_codes_phone_purpose_resend ON sms_verification_codes(phone, purpose, resendAvailableAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_sms_codes_phone_purpose_code ON sms_verification_codes(phone, purpose, code, consumedAt, expiresAt, id)',
+    'CREATE INDEX IF NOT EXISTS idx_sms_codes_phone_purpose_active ON sms_verification_codes(phone, purpose, consumedAt, invalidatedAt, createdAt, id)'
   ];
   for (let index = 0; index < statements.length; index++) {
     await run(statements[index]);
+  }
+}
+
+async function backfillLegacyTrackingShipments() {
+  const legacyOrders = await all(
+    "SELECT o.id, o.sourceId, o.username, o.status, o.trackingNo, o.createdAt FROM orders o WHERE TRIM(COALESCE(o.trackingNo, '')) <> '' AND NOT EXISTS (SELECT 1 FROM shipments s WHERE s.orderId = o.id)"
+  );
+  for (let index = 0; index < legacyOrders.length; index++) {
+    const row = legacyOrders[index];
+    const itemRows = await all('SELECT id FROM order_items WHERE orderId = ? ORDER BY sortOrder ASC, id ASC', [row.id]);
+    if (!itemRows.length) continue;
+    const now = Number(row.createdAt || Date.now());
+    const shipmentId = buildShipmentId();
+    const shipmentLogistics = normalizeShipmentRecord({
+      trackingNo: row.trackingNo,
+      status: String(row.status || 'shipped') === 'done' ? 'done' : 'shipped',
+      logisticsState: row.trackingNo ? 'no_trace' : 'no_tracking',
+      logisticsSummary: row.trackingNo ? '已录入单号，等待物流公司返回轨迹' : '待发货，暂未录入物流信息'
+    });
+    await run(
+      'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        shipmentId,
+        row.id,
+        row.sourceId,
+        row.username,
+        shipmentLogistics.trackingNo,
+        '',
+        '',
+        shipmentLogistics.status,
+        shipmentLogistics.logisticsSummary,
+        shipmentLogistics.logisticsState,
+        0,
+        0,
+        now,
+        now,
+        'system',
+        'orders.trackingNo'
+      ]
+    );
+    for (let itemIndex = 0; itemIndex < itemRows.length; itemIndex++) {
+      await run(
+        'INSERT INTO shipment_items (shipmentId, orderId, orderItemId, sortOrder, createdAt) VALUES (?, ?, ?, ?, ?)',
+        [shipmentId, row.id, Number(itemRows[itemIndex].id || 0), itemIndex, now]
+      );
+    }
   }
 }
 
@@ -3484,6 +5415,9 @@ async function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL DEFAULT '',
+      nickname TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      phoneVerifiedAt INTEGER NOT NULL DEFAULT 0,
       roles TEXT NOT NULL DEFAULT '{}',
       addresses TEXT NOT NULL DEFAULT '[]',
       shippingAddresses TEXT NOT NULL DEFAULT '[]',
@@ -3494,6 +5428,24 @@ async function initDatabase() {
       orders TEXT NOT NULL DEFAULT '[]',
       member TEXT NOT NULL DEFAULT '{}',
       createdAt TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS sms_verification_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT NOT NULL DEFAULT '',
+      purpose TEXT NOT NULL DEFAULT 'bind_phone',
+      code TEXT NOT NULL DEFAULT '',
+      username TEXT NOT NULL DEFAULT '',
+      createdAt INTEGER NOT NULL DEFAULT 0,
+      expiresAt INTEGER NOT NULL DEFAULT 0,
+      resendAvailableAt INTEGER NOT NULL DEFAULT 0,
+      consumedAt INTEGER NOT NULL DEFAULT 0,
+      invalidatedAt INTEGER NOT NULL DEFAULT 0,
+      requestIp TEXT NOT NULL DEFAULT '',
+      deliveryChannel TEXT NOT NULL DEFAULT 'mock',
+      deliveryStatus TEXT NOT NULL DEFAULT 'queued',
+      messageId TEXT NOT NULL DEFAULT ''
     )
   `);
   await run(`
@@ -3606,6 +5558,36 @@ async function initDatabase() {
     )
   `);
   await run(`
+    CREATE TABLE IF NOT EXISTS shipments (
+      id TEXT PRIMARY KEY,
+      orderId TEXT NOT NULL,
+      orderSourceId TEXT NOT NULL DEFAULT '',
+      ownerUsername TEXT NOT NULL DEFAULT '',
+      trackingNo TEXT NOT NULL DEFAULT '',
+      carrierCode TEXT NOT NULL DEFAULT '',
+      carrierName TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'shipped',
+      logisticsSummary TEXT NOT NULL DEFAULT '',
+      logisticsState TEXT NOT NULL DEFAULT 'no_tracking',
+      lastLogisticsQueryAt INTEGER NOT NULL DEFAULT 0,
+      lastLogisticsSuccessAt INTEGER NOT NULL DEFAULT 0,
+      createdAt INTEGER NOT NULL DEFAULT 0,
+      updatedAt INTEGER NOT NULL DEFAULT 0,
+      createdBy TEXT NOT NULL DEFAULT '',
+      legacySource TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS shipment_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shipmentId TEXT NOT NULL,
+      orderId TEXT NOT NULL,
+      orderItemId INTEGER NOT NULL DEFAULT 0,
+      sortOrder INTEGER NOT NULL DEFAULT 0,
+      createdAt INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await run(`
     CREATE TABLE IF NOT EXISTS cart_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL,
@@ -3650,6 +5632,15 @@ async function initDatabase() {
       receiverName TEXT NOT NULL DEFAULT '',
       receiverPhone TEXT NOT NULL DEFAULT '',
       receiverFull TEXT NOT NULL DEFAULT '',
+      externalTradeNo TEXT NOT NULL DEFAULT '',
+      gatewayTradeNo TEXT NOT NULL DEFAULT '',
+      gatewayBuyerId TEXT NOT NULL DEFAULT '',
+      notifyStatus TEXT NOT NULL DEFAULT '',
+      notifyPayload TEXT NOT NULL DEFAULT '{}',
+      notifyAt INTEGER NOT NULL DEFAULT 0,
+      initiatedAt INTEGER NOT NULL DEFAULT 0,
+      returnCheckedAt INTEGER NOT NULL DEFAULT 0,
+      lastError TEXT NOT NULL DEFAULT '',
       createdAt INTEGER NOT NULL DEFAULT 0,
       paidAt INTEGER NOT NULL DEFAULT 0
     )
@@ -3748,6 +5739,9 @@ async function initDatabase() {
   }, {});
   var userDefinitions = {
     password: "TEXT NOT NULL DEFAULT ''",
+    nickname: "TEXT NOT NULL DEFAULT ''",
+    phone: "TEXT NOT NULL DEFAULT ''",
+    phoneVerifiedAt: 'INTEGER NOT NULL DEFAULT 0',
     roles: "TEXT NOT NULL DEFAULT '{}'",
     addresses: "TEXT NOT NULL DEFAULT '[]'",
     shippingAddresses: "TEXT NOT NULL DEFAULT '[]'",
@@ -3761,6 +5755,29 @@ async function initDatabase() {
   };
   for (const key of Object.keys(userDefinitions)) {
     if (!userExisting[key]) await run('ALTER TABLE users ADD COLUMN ' + key + ' ' + userDefinitions[key]);
+  }
+  var smsCodeColumns = await all('PRAGMA table_info(sms_verification_codes)');
+  var smsCodeExisting = smsCodeColumns.reduce(function (result, item) {
+    result[item.name] = true;
+    return result;
+  }, {});
+  var smsCodeDefinitions = {
+    phone: "TEXT NOT NULL DEFAULT ''",
+    purpose: "TEXT NOT NULL DEFAULT 'bind_phone'",
+    code: "TEXT NOT NULL DEFAULT ''",
+    username: "TEXT NOT NULL DEFAULT ''",
+    createdAt: 'INTEGER NOT NULL DEFAULT 0',
+    expiresAt: 'INTEGER NOT NULL DEFAULT 0',
+    resendAvailableAt: 'INTEGER NOT NULL DEFAULT 0',
+    consumedAt: 'INTEGER NOT NULL DEFAULT 0',
+    invalidatedAt: 'INTEGER NOT NULL DEFAULT 0',
+    requestIp: "TEXT NOT NULL DEFAULT ''",
+    deliveryChannel: "TEXT NOT NULL DEFAULT 'mock'",
+    deliveryStatus: "TEXT NOT NULL DEFAULT 'queued'",
+    messageId: "TEXT NOT NULL DEFAULT ''"
+  };
+  for (const key of Object.keys(smsCodeDefinitions)) {
+    if (!smsCodeExisting[key]) await run('ALTER TABLE sms_verification_codes ADD COLUMN ' + key + ' ' + smsCodeDefinitions[key]);
   }
   var categoryColumns = await all('PRAGMA table_info(categories)');
   var categoryExisting = categoryColumns.reduce(function (result, item) {
@@ -3844,6 +5861,43 @@ async function initDatabase() {
   for (const key of Object.keys(orderItemDefinitions)) {
     if (!orderItemExisting[key]) await run('ALTER TABLE order_items ADD COLUMN ' + key + ' ' + orderItemDefinitions[key]);
   }
+  var shipmentColumns = await all('PRAGMA table_info(shipments)');
+  var shipmentExisting = shipmentColumns.reduce(function (result, item) {
+    result[item.name] = true;
+    return result;
+  }, {});
+  var shipmentDefinitions = {
+    orderSourceId: "TEXT NOT NULL DEFAULT ''",
+    ownerUsername: "TEXT NOT NULL DEFAULT ''",
+    trackingNo: "TEXT NOT NULL DEFAULT ''",
+    carrierCode: "TEXT NOT NULL DEFAULT ''",
+    carrierName: "TEXT NOT NULL DEFAULT ''",
+    status: "TEXT NOT NULL DEFAULT 'shipped'",
+    logisticsSummary: "TEXT NOT NULL DEFAULT ''",
+    logisticsState: "TEXT NOT NULL DEFAULT 'no_tracking'",
+    lastLogisticsQueryAt: 'INTEGER NOT NULL DEFAULT 0',
+    lastLogisticsSuccessAt: 'INTEGER NOT NULL DEFAULT 0',
+    createdAt: 'INTEGER NOT NULL DEFAULT 0',
+    updatedAt: 'INTEGER NOT NULL DEFAULT 0',
+    createdBy: "TEXT NOT NULL DEFAULT ''",
+    legacySource: "TEXT NOT NULL DEFAULT ''"
+  };
+  for (const key of Object.keys(shipmentDefinitions)) {
+    if (!shipmentExisting[key]) await run('ALTER TABLE shipments ADD COLUMN ' + key + ' ' + shipmentDefinitions[key]);
+  }
+  var shipmentItemColumns = await all('PRAGMA table_info(shipment_items)');
+  var shipmentItemExisting = shipmentItemColumns.reduce(function (result, item) {
+    result[item.name] = true;
+    return result;
+  }, {});
+  var shipmentItemDefinitions = {
+    orderItemId: 'INTEGER NOT NULL DEFAULT 0',
+    sortOrder: 'INTEGER NOT NULL DEFAULT 0',
+    createdAt: 'INTEGER NOT NULL DEFAULT 0'
+  };
+  for (const key of Object.keys(shipmentItemDefinitions)) {
+    if (!shipmentItemExisting[key]) await run('ALTER TABLE shipment_items ADD COLUMN ' + key + ' ' + shipmentItemDefinitions[key]);
+  }
   var cartItemColumns = await all('PRAGMA table_info(cart_items)');
   var cartItemExisting = cartItemColumns.reduce(function (result, item) {
     result[item.name] = true;
@@ -3868,6 +5922,25 @@ async function initDatabase() {
   };
   for (const key of Object.keys(userCouponDefinitions)) {
     if (!userCouponExisting[key]) await run('ALTER TABLE user_coupons ADD COLUMN ' + key + ' ' + userCouponDefinitions[key]);
+  }
+  var paymentColumns = await all('PRAGMA table_info(payment_transactions)');
+  var paymentExisting = paymentColumns.reduce(function (result, item) {
+    result[item.name] = true;
+    return result;
+  }, {});
+  var paymentDefinitions = {
+    externalTradeNo: "TEXT NOT NULL DEFAULT ''",
+    gatewayTradeNo: "TEXT NOT NULL DEFAULT ''",
+    gatewayBuyerId: "TEXT NOT NULL DEFAULT ''",
+    notifyStatus: "TEXT NOT NULL DEFAULT ''",
+    notifyPayload: "TEXT NOT NULL DEFAULT '{}'",
+    notifyAt: 'INTEGER NOT NULL DEFAULT 0',
+    initiatedAt: 'INTEGER NOT NULL DEFAULT 0',
+    returnCheckedAt: 'INTEGER NOT NULL DEFAULT 0',
+    lastError: "TEXT NOT NULL DEFAULT ''"
+  };
+  for (const key of Object.keys(paymentDefinitions)) {
+    if (!paymentExisting[key]) await run('ALTER TABLE payment_transactions ADD COLUMN ' + key + ' ' + paymentDefinitions[key]);
   }
   var refundColumns = await all('PRAGMA table_info(refund_requests)');
   var refundExisting = refundColumns.reduce(function (result, item) {
@@ -3898,11 +5971,13 @@ async function initDatabase() {
   }
   await ensureScaleReadyIndexes();
   await cleanupExpiredSessions();
+  await cleanupExpiredSmsVerifications();
   await backfillPasswordHashes();
   await seedCategoriesIfNeeded();
   await seedCouponTemplatesIfNeeded();
   await seedAdminIfNeeded();
   await backfillUserRelationsFromJson();
+  await backfillLegacyTrackingShipments();
   // 支付与售后都能从现有订单状态回填；库存流水缺少历史差值，只能从本次版本开始持续积累。
   await backfillOrderDerivedRelations();
   await cleanupExpiredPendingOrders(Date.now());
@@ -4192,13 +6267,112 @@ app.get('/api/orders', async function (req, res) {
   }
 });
 
+app.get('/api/orders/:orderId', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后查看订单')) return;
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const order = await getOrderSnapshotByOwner(req.currentUser.username, sourceOrderId);
+    if (!order) return res.status(404).json({ message: '订单不存在' });
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '订单加载失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/logistics-refresh-check', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后查看物流')) return;
+    const payload = await runBuyerLogisticsRefreshCheck(req.currentUser.username, {
+      visibleOrderIds: req.body && req.body.visibleOrderIds
+    });
+    res.json(payload);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '物流检查失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/:orderId/logistics-refresh-check', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后查看物流')) return;
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const order = await getOrderSnapshotByOwner(req.currentUser.username, sourceOrderId);
+    if (!order) return res.status(404).json({ message: '订单不存在' });
+    const payload = await runBuyerLogisticsRefreshCheck(req.currentUser.username, { orderId: sourceOrderId });
+    res.json(payload);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '物流检查失败', error: error.message });
+  }
+});
+
+app.get('/api/admin/orders/export', async function (req, res) {
+  try {
+    await cleanupExpiredPendingOrders(Date.now());
+    if (!ensureAccess('admin')(req, res, '当前账号无权导出订单')) return;
+    const orders = await listAllOrdersForExport({
+      ownerUsername: req.query && (req.query.ownerUsername || req.query.username),
+      orderId: req.query && req.query.orderId,
+      status: req.query && req.query.status,
+      dateFrom: req.query && req.query.dateFrom,
+      dateTo: req.query && req.query.dateTo
+    });
+    const csv = serializeOrderExportCsv(buildOrderExportRows(orders));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + buildOrderExportFilename(Date.now()) + '"');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ message: '导出订单失败', error: error.message });
+  }
+});
+
+app.get('/api/admin/fulfillment/orders', async function (req, res) {
+  try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看发货工作台')) return;
+    const page = await listAdminFulfillmentOrdersPage({
+      page: req.query && req.query.page,
+      pageSize: req.query && req.query.pageSize,
+      ownerUsername: req.query && (req.query.ownerUsername || req.query.username),
+      orderId: req.query && req.query.orderId,
+      status: req.query && req.query.status
+    });
+    res.json(page);
+  } catch (error) {
+    res.status(500).json({ message: '发货工作台订单加载失败', error: error.message });
+  }
+});
+
+app.get('/api/admin/fulfillment/orders/:ownerUsername/:orderId', async function (req, res) {
+  try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权查看发货详情')) return;
+    const ownerUsername = String(req.params.ownerUsername || '').trim();
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const order = await getOrderSnapshotByOwner(ownerUsername, sourceOrderId);
+    if (!order) return res.status(404).json({ message: '订单不存在' });
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '发货详情加载失败', error: error.message });
+  }
+});
+
+app.post('/api/admin/fulfillment/orders/:ownerUsername/:orderId/shipments', async function (req, res) {
+  try {
+    if (!ensureAccess('admin')(req, res, '当前账号无权执行发货')) return;
+    const ownerUsername = String(req.params.ownerUsername || '').trim();
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const order = await createShipmentForOrder(ownerUsername, sourceOrderId, req.body || {}, req.currentUser && req.currentUser.username);
+    if (!order) return res.status(404).json({ message: '订单不存在' });
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '发货保存失败', error: error.message });
+  }
+});
+
 app.post('/api/orders/prepare-payment', async function (req, res) {
   try {
     if (!ensureLoggedIn(req, res, '请先登录后再下单')) return;
     await cleanupExpiredPendingOrders(Date.now());
     const ownerUsername = req.currentUser.username;
     const order = await createPendingOrderFromCheckout(ownerUsername, req.body || {});
-    res.json(order);
+    res.json(withPaymentRuntimeMeta(order, req));
   } catch (error) {
     res.status(400).json({ message: error.message || '创建待支付订单失败', error: error.message });
   }
@@ -4207,13 +6381,90 @@ app.post('/api/orders/prepare-payment', async function (req, res) {
 app.post('/api/orders/:orderId/pay', async function (req, res) {
   try {
     if (!ensureLoggedIn(req, res, '请先登录后再支付')) return;
+    if (!isLocalMockPaymentEnabled()) {
+      return res.status(403).json({
+        message: 'mock 支付接口仅供本地开发调试使用，请改走 /api/orders/:orderId/alipay-wap 并以支付宝异步通知确认结果'
+      });
+    }
     await cleanupExpiredPendingOrders(Date.now());
     const sourceOrderId = String(req.params.orderId || '').trim();
     const ownerUsername = req.currentUser.username;
-    const order = await finalizePendingOrderPayment(ownerUsername, sourceOrderId);
+    const order = await finalizePendingOrderPayment(ownerUsername, sourceOrderId, {
+      channel: 'mock_h5'
+    });
     res.json(order);
   } catch (error) {
     res.status(400).json({ message: error.message || '待支付订单支付失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/:orderId/alipay-wap', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后再支付')) return;
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const launch = await createAlipayWapLaunch(req.currentUser.username, sourceOrderId, req);
+    res.json(launch);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '支付宝支付发起失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/:orderId/wechat-inapp-h5', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后再支付')) return;
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const launch = await createWechatPaymentLaunch(req.currentUser.username, sourceOrderId, req, 'wechat_h5_inapp');
+    res.json(launch);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '微信内 H5 支付发起失败', error: error.message });
+  }
+});
+
+app.post('/api/orders/:orderId/wechat-external-h5', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后再支付')) return;
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const launch = await createWechatPaymentLaunch(req.currentUser.username, sourceOrderId, req, 'wechat_h5_external');
+    res.json(launch);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '微信外 H5 支付发起失败', error: error.message });
+  }
+});
+
+app.get('/api/orders/:orderId/payment-status', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后查看支付状态')) return;
+    const sourceOrderId = String(req.params.orderId || '').trim();
+    const payload = await getBuyerPaymentStatus(req.currentUser.username, sourceOrderId, {
+      markReturnChecked: parseEnvFlag(req.query && req.query.returnCheck)
+    }, req);
+    res.json(payload);
+  } catch (error) {
+    res.status(400).json({ message: error.message || '获取支付状态失败', error: error.message });
+  }
+});
+
+app.post('/api/payments/alipay/notify', async function (req, res) {
+  try {
+    const handled = await handleAlipayNotification(req.body || {});
+    if (!handled.ok && !handled.shouldAcknowledge) return res.status(400).send('fail');
+    return res.type('text/plain').send('success');
+  } catch (error) {
+    console.error('支付宝异步通知处理失败', error);
+    res.status(500).type('text/plain').send('fail');
+  }
+});
+
+app.post('/api/payments/wechat/notify', async function (req, res) {
+  try {
+    const handled = await handleWechatNotification(req.body || {});
+    if (!handled.ok && !handled.shouldAcknowledge) {
+      return res.status(400).json({ code: 'FAIL', message: handled.message || 'FAIL' });
+    }
+    return res.json({ code: 'SUCCESS', message: '成功' });
+  } catch (error) {
+    console.error('微信支付异步通知处理失败', error);
+    res.status(500).json({ code: 'FAIL', message: 'FAIL' });
   }
 });
 
@@ -4369,8 +6620,24 @@ app.post('/api/orders/:orderId/status', async function (req, res) {
     const status = String(req.body && req.body.status || '').trim();
     const trackingNo = String(req.body && req.body.trackingNo || '').trim();
     if (!sourceOrderId || !ownerUsername || !status) return res.status(400).json({ message: '订单状态更新参数不完整' });
-    if (status === 'shipped' && !trackingNo) return res.status(400).json({ message: '请先填写物流编号' });
-    const updated = await updateOrderSnapshotStatus(ownerUsername, sourceOrderId, status, trackingNo);
+    let updated = null;
+    if (status === 'shipped') {
+      if (!trackingNo) return res.status(400).json({ message: '请先填写物流编号' });
+      const order = await getOrderSnapshotByOwner(ownerUsername, sourceOrderId);
+      if (!order) return res.status(404).json({ message: '订单不存在' });
+      updated = await createShipmentForOrder(ownerUsername, sourceOrderId, {
+        trackingNo: trackingNo,
+        carrierCode: String(req.body && req.body.carrierCode || '').trim(),
+        carrierName: String(req.body && req.body.carrierName || '').trim(),
+        orderItemIds: (order.items || []).map(function (item) {
+          return Number(item && item.orderItemId || 0);
+        }).filter(function (item) {
+          return item > 0;
+        })
+      }, req.currentUser && req.currentUser.username);
+    } else {
+      updated = await updateOrderSnapshotStatus(ownerUsername, sourceOrderId, status, trackingNo);
+    }
     if (!updated) return res.status(404).json({ message: '订单不存在' });
     res.json(updated);
   } catch (error) {
@@ -4442,16 +6709,32 @@ app.get('/api/admin/light-stats', async function (req, res) {
 app.post('/api/auth/login', async function (req, res) {
   try {
     const payload = req.body || {};
-    const rateLimitKey = getClientIp(req) + ':' + String(payload.username || '').trim().toLowerCase();
+    const phone = normalizePhoneNumber(payload.phone || payload.username);
+    const username = String(payload.username || '').trim();
+    const password = String(payload.password || '');
+    const usingPhoneLogin = isValidChinaMainlandPhone(phone);
+    const loginIdentity = usingPhoneLogin ? phone : username;
+    if (!loginIdentity || !password) {
+      return res.status(400).json({ message: usingPhoneLogin || payload.phone ? '请填写手机号和密码' : '请填写用户名和密码' });
+    }
+    const rateLimitKey = getClientIp(req) + ':' + String(loginIdentity || '').trim().toLowerCase();
     const blockedMessage = getRateLimitBlockMessage(rateLimitKey);
     if (blockedMessage) return res.status(429).json({ message: blockedMessage });
-    const user = await getUserByUsername(String(payload.username || '').trim());
-    if (!user || !verifyPassword(user.password, String(payload.password || ''))) {
+    const user = usingPhoneLogin ? await getUserByPhone(phone) : await getUserByUsername(username);
+    if (!user) {
       consumeRateLimitFailure(rateLimitKey);
-      return res.status(401).json({ message: '用户名或密码错误' });
+      return res.status(401).json({ message: usingPhoneLogin ? '手机号或密码错误' : '用户名或密码错误' });
+    }
+    if (usingPhoneLogin && !userHasPassword(user)) {
+      consumeRateLimitFailure(rateLimitKey);
+      return res.status(401).json({ message: '该账号尚未设置登录密码，请先使用验证码登录' });
+    }
+    if (!verifyPassword(user.password, password)) {
+      consumeRateLimitFailure(rateLimitKey);
+      return res.status(401).json({ message: usingPhoneLogin ? '手机号或密码错误' : '用户名或密码错误' });
     }
     if (!isPasswordHash(user.password)) {
-      user.password = hashPassword(String(payload.password || ''));
+      user.password = hashPassword(password);
       await updateUser(user);
     }
     clearRateLimitFailures(rateLimitKey);
@@ -4460,6 +6743,39 @@ app.post('/api/auth/login', async function (req, res) {
     res.json(selfUserRecord(await getUserByUsername(user.username)));
   } catch (error) {
     res.status(500).json({ message: '登录失败', error: error.message });
+  }
+});
+
+app.post('/api/auth/login-sms', async function (req, res) {
+  const payload = req.body || {};
+  const phone = normalizePhoneNumber(payload.phone);
+  const rateLimitKey = getClientIp(req) + ':sms:' + phone;
+  try {
+    if (!isValidChinaMainlandPhone(phone)) {
+      return res.status(400).json({ message: '请输入正确的手机号' });
+    }
+    const blockedMessage = getRateLimitBlockMessage(rateLimitKey);
+    if (blockedMessage) return res.status(429).json({ message: blockedMessage });
+    const record = await verifySmsCodeOrThrow(phone, 'login_or_register', payload.code);
+    let targetUser = await getUserByPhone(phone);
+    let autoRegistered = false;
+    if (!targetUser) {
+      targetUser = await createPhoneFirstUser(phone);
+      autoRegistered = true;
+    }
+    await consumeSmsVerificationRecord(record.id);
+    clearRateLimitFailures(rateLimitKey);
+    const sessionId = await createSession(targetUser.username);
+    res.setHeader('Set-Cookie', buildSessionCookieValue(sessionId, req));
+    res.json(Object.assign({
+      ok: true,
+      autoRegistered: autoRegistered,
+      message: autoRegistered ? '注册并登录成功' : '登录成功'
+    }, selfUserRecord(await getUserByUsername(targetUser.username))));
+  } catch (error) {
+    consumeRateLimitFailure(rateLimitKey);
+    const status = /验证码|手机号/.test(String(error.message || '')) ? 400 : 500;
+    res.status(status).json({ message: error.message || '验证码登录失败' });
   }
 });
 
@@ -4493,6 +6809,124 @@ app.post('/api/auth/register', async function (req, res) {
   }
 });
 
+app.post('/api/auth/change-password', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后再修改密码')) return;
+    const payload = req.body || {};
+    const currentPassword = String(payload.currentPassword || '');
+    const newPassword = String(payload.newPassword || '');
+    const passwordError = validateNewPassword(newPassword);
+    if (passwordError) return res.status(400).json({ message: passwordError });
+    const latestUser = await getUserByUsername(req.currentUser.username);
+    if (!latestUser) return res.status(404).json({ message: '当前用户不存在' });
+    const hadPassword = userHasPassword(latestUser);
+    if (hadPassword && !currentPassword) return res.status(400).json({ message: '请填写当前密码' });
+    if (hadPassword && !verifyPassword(latestUser.password, currentPassword)) {
+      return res.status(400).json({ message: '当前密码错误' });
+    }
+    latestUser.password = hashPassword(newPassword);
+    await updateUser(latestUser);
+    if (req.sessionId) {
+      await deleteSessionsByUsername(latestUser.username);
+      const sessionId = await createSession(latestUser.username);
+      res.setHeader('Set-Cookie', buildSessionCookieValue(sessionId, req));
+    }
+    res.json({ ok: true, message: hadPassword ? '密码修改成功' : '登录密码设置成功' });
+  } catch (error) {
+    res.status(500).json({ message: '修改密码失败', error: error.message });
+  }
+});
+
+app.post('/api/auth/send-sms-code', async function (req, res) {
+  try {
+    const payload = req.body || {};
+    const purpose = normalizeSmsPurpose(payload.purpose);
+    const phone = normalizePhoneNumber(payload.phone);
+    if (!isValidChinaMainlandPhone(phone)) {
+      return res.status(400).json({ message: '请输入正确的手机号' });
+    }
+    if (purpose === 'bind_phone') {
+      if (!ensureLoggedIn(req, res, '请先登录后再绑定手机号')) return;
+      const owner = await getUserByUsername(req.currentUser.username);
+      if (!owner) return res.status(404).json({ message: '当前用户不存在' });
+      const existingPhoneOwner = await getUserByPhone(phone);
+      if (existingPhoneOwner && existingPhoneOwner.username !== owner.username) {
+        return res.status(409).json({ message: '该手机号已绑定其他账号' });
+      }
+      const result = await issueSmsVerificationCode(phone, purpose, {
+        username: owner.username,
+        requestIp: getClientIp(req)
+      });
+      return res.json(Object.assign({ message: '验证码已发送，请注意查收' }, result));
+    }
+    if (purpose === 'login_or_register') {
+      const targetUser = await getUserByPhone(phone);
+      const result = await issueSmsVerificationCode(phone, purpose, {
+        username: targetUser && targetUser.username ? targetUser.username : '',
+        requestIp: getClientIp(req)
+      });
+      return res.json(Object.assign({
+        message: targetUser ? '验证码已发送，请注意查收' : '验证码已发送，验证通过后将自动创建账号',
+        autoRegisterOnVerify: !targetUser
+      }, result));
+    }
+    const targetUser = await getUserByPhone(phone);
+    if (!targetUser) return res.status(404).json({ message: '该手机号尚未绑定账号' });
+    const result = await issueSmsVerificationCode(phone, purpose, {
+      username: targetUser.username,
+      requestIp: getClientIp(req)
+    });
+    res.json(Object.assign({ message: '验证码已发送，请注意查收' }, result));
+  } catch (error) {
+    const status = /已绑定|尚未绑定|已发送|频繁|手机号|配置不完整/.test(String(error.message || '')) ? 400 : 500;
+    res.status(status).json({ message: error.message || '短信验证码发送失败' });
+  }
+});
+
+app.post('/api/auth/bind-phone', async function (req, res) {
+  try {
+    if (!ensureLoggedIn(req, res, '请先登录后再绑定手机号')) return;
+    const payload = req.body || {};
+    const phone = normalizePhoneNumber(payload.phone);
+    const record = await verifySmsCodeOrThrow(phone, 'bind_phone', payload.code);
+    const latestUser = await getUserByUsername(req.currentUser.username);
+    if (!latestUser) return res.status(404).json({ message: '当前用户不存在' });
+    const existingPhoneOwner = await getUserByPhone(phone);
+    if (existingPhoneOwner && existingPhoneOwner.username !== latestUser.username) {
+      return res.status(409).json({ message: '该手机号已绑定其他账号' });
+    }
+    latestUser.phone = phone;
+    latestUser.phoneVerifiedAt = Date.now();
+    await updateUser(latestUser);
+    await consumeSmsVerificationRecord(record.id);
+    res.json(Object.assign({ ok: true, message: '手机号绑定成功' }, selfUserRecord(await getUserByUsername(latestUser.username))));
+  } catch (error) {
+    const status = /验证码|手机号|已绑定/.test(String(error.message || '')) ? 400 : 500;
+    res.status(status).json({ message: error.message || '绑定手机号失败' });
+  }
+});
+
+app.post('/api/auth/forgot-password/reset', async function (req, res) {
+  try {
+    const payload = req.body || {};
+    const phone = normalizePhoneNumber(payload.phone);
+    const newPassword = String(payload.newPassword || '');
+    const passwordError = validateNewPassword(newPassword);
+    if (passwordError) return res.status(400).json({ message: passwordError });
+    const record = await verifySmsCodeOrThrow(phone, 'reset_password', payload.code);
+    const targetUser = await getUserByPhone(phone);
+    if (!targetUser) return res.status(404).json({ message: '该手机号尚未绑定账号' });
+    targetUser.password = hashPassword(newPassword);
+    await updateUser(targetUser);
+    await consumeSmsVerificationRecord(record.id);
+    await deleteSessionsByUsername(targetUser.username);
+    res.json({ ok: true, message: '密码重置成功，请重新登录' });
+  } catch (error) {
+    const status = /验证码|手机号|密码/.test(String(error.message || '')) ? 400 : 500;
+    res.status(status).json({ message: error.message || '重置密码失败' });
+  }
+});
+
 app.get('/api/auth/me', async function (req, res) {
   try {
     if (!req.currentUser) return res.status(401).json({ message: '当前未登录' });
@@ -4521,7 +6955,12 @@ app.post('/api/users/:username/state', async function (req, res) {
     }
     const existing = await getUserByUsername(username);
     if (!existing) return res.status(404).json({ message: '用户不存在' });
-    const payload = normalizeUserRecord(Object.assign({}, existing, req.body || {}, { username: username, password: existing.password }));
+    const payload = normalizeUserRecord(Object.assign({}, existing, req.body || {}, {
+      username: username,
+      password: existing.password,
+      phone: existing.phone,
+      phoneVerifiedAt: existing.phoneVerifiedAt
+    }));
     if (!hasAccessLevel(req.currentUser, 'admin')) payload.roles = existing.roles;
     await updateUser(payload);
     await syncOrderDerivedRelations(username, existing.orders, payload.orders, normalizeAuditMeta(req.body && req.body._audit, {

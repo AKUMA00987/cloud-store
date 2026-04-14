@@ -71,10 +71,15 @@ sudo bash /root/cloud-store/deploy/scripts/deploy-release-pm2.sh /root/cloud-sto
 这一步会自动做：
 
 1. 发布前手动备份
-2. 把新版 `server.js`、`public/`、`package.json`、`package-lock.json` 复制到 `/root/cloud-store`
+2. 把新版 `server.js`、`public/`、`deploy/`、`package.json`、`package-lock.json` 复制到 `/root/cloud-store`
 3. 重启 `PM2` 里的 `cloud-store`
 4. 检查 `nginx -t`
 5. 重启 Nginx
+
+补充说明：
+
+- `deploy/` 现在也会跟着 release 一起同步，避免服务器上的 `deploy/scripts/*.sh`、`deploy/docs/*.md` 长期停留在旧版本
+- `public/uploads` 仍然不会被覆盖
 
 现在脚本会自动优先识别：
 
@@ -96,6 +101,11 @@ health checks passed
 ```
 
 说明当前网站已经恢复到可访问状态。
+
+补充说明：
+
+- 当前 `check-health.sh` 已带启动期重试，默认会等待最多约 20 秒
+- 如果 Node 刚重启，前几次短暂 `connection refused` 不再直接算发版失败
 
 ### 第 4 步：看 PM2 最新日志
 

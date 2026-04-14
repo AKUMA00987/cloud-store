@@ -469,11 +469,9 @@ async function main() {
   assert(exec('currentCheckoutOrder && currentCheckoutOrder.items[0].unitLabel') === '袋装', '确认订单应冻结单位名称');
   assert(exec('currentCheckoutOrder && currentCheckoutOrder.items[0].price') === 26, '确认订单应冻结单位价格');
 
-  await execAsync('await completeMockPayment();');
-  await flush(6);
-  assert(exec('cart.length') === 0, '支付完成后应清空购物车');
-  assert(getUser('buyer1').orders[0].items[0].unitId === 'large-bag', '订单快照应保留单位 ID');
-  assert(products[0].variants.find(function (item) { return item.id === 'veg-large'; }).units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 2, '支付后应扣减对应单位库存');
+  assert(exec('currentCheckoutOrder && currentCheckoutOrder.status') === 'pending', '确认订单后应进入待支付状态');
+  assert(getUser('buyer1').orders[0].items[0].unitId === 'large-bag', '待支付订单快照应保留单位 ID');
+  assert(products[0].variants.find(function (item) { return item.id === 'veg-large'; }).units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 2, '进入支付后应先预占对应单位库存');
 
   [
     'new-name',
@@ -510,6 +508,16 @@ async function main() {
   const modalHtml = document.getElementById('modal-root').innerHTML;
   assert(modalHtml.includes('单位价格'), '规格弹窗应改为维护单位价格');
   assert(!modalHtml.includes('规格价格'), '规格弹窗不应再显示规格价格输入');
+  assert(modalHtml.includes('grid-cols-1 sm:grid-cols-3'), '规格弹窗在移动端应改为纵向优先布局');
+
+  exec('user = "admin"; openShippingAddressPicker("new");');
+  const shippingPickerHtml = document.getElementById('modal-root').innerHTML;
+  assert(shippingPickerHtml.includes('flex items-center justify-center'), '发货地址选择弹窗应默认在视口中间展示');
+  assert(shippingPickerHtml.includes('max-h-[85vh]'), '发货地址选择弹窗应限制高度并启用内部滚动');
+
+  const uploadHtml = exec('renderProductImageUploader("new", { images: ["https://example.com/a.jpg"], img: "https://example.com/a.jpg" })');
+  assert(uploadHtml.includes('flex flex-col gap-2 sm:flex-row'), '商品图片上传区在移动端应改成纵向优先布局');
+  assert(exec('validateProductPayload({ name: "测试商品", cat: "veg", images: ["https://example.com/a.jpg"], variants: [{ label: "默认规格", units: [{ label: "箱", price: 18, stock: 2 }] }], harvest: "", dispatchHours: 4, shippingAddressId: "ship_admin", tags: [] })') === '', '商品校验不应再强制要求采摘日期');
 
   exec('user = "admin";');
   currentAuthUsername = 'admin';
