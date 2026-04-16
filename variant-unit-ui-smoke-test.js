@@ -84,7 +84,9 @@ async function main() {
     'cart-badge',
     'modal-root',
     'admin-panel',
+    'admin-nav-zone',
     'farmer-panel',
+    'farmer-nav-zone',
     'admin-db',
     'admin-refund',
     'admin-pd',
@@ -428,7 +430,7 @@ async function main() {
   assert(appHtml.includes('小份'), '商品详情页应展示规格按钮');
   assert(!appHtml.includes('line-through'), '商品详情页在无活动时不应展示划线价');
 
-  exec('addToCart(1, { alertSuccess: false });');
+  await execAsync('await addToCart(1, { alertSuccess: false });');
   assert(alerts.includes('请先选择规格'), '未选规格时应先提示选择规格');
 
   exec('selectVariant(1, "veg-large");');
@@ -442,7 +444,7 @@ async function main() {
   await flush(2);
   appHtml = document.getElementById('app').innerHTML;
   assert(appHtml.includes('¥33.00'), '切换单位后详情页主价格应改为单位价格');
-  exec('addToCart(1, { alertSuccess: false });');
+  await execAsync('await addToCart(1, { alertSuccess: false });');
   assert(exec('cart.length') === 1, '选中规格和单位后应能加入购物车');
   assert(exec('cart[0].variantId') === 'veg-large', '购物车应记录规格 ID');
   assert(exec('cart[0].unitId') === 'large-box', '购物车应记录单位 ID');
@@ -458,7 +460,7 @@ async function main() {
   exec('upd(1, 1, "veg-large", "large-box");');
   assert(exec('cart[0].qty') === 1, '单位库存不足时购物车数量不应超过上限');
   exec('selectUnit(1, "large-bag");');
-  exec('addToCart(1, { alertSuccess: false });');
+  await execAsync('await addToCart(1, { alertSuccess: false });');
   assert(exec('cart.length') === 2, '相同规格不同单位应拆成两行购物车记录');
 
   exec('cart = [normalizeCartStateItem({ id: 1, productId: 1, name: "高山青菜", variantId: "veg-large", variantLabel: "大份", unitId: "large-bag", unitLabel: "袋装", unit: "袋装", price: 26, img: "https://example.com/veg.jpg", qty: 2 })]; updateCartBadge();');
@@ -508,16 +510,30 @@ async function main() {
   const modalHtml = document.getElementById('modal-root').innerHTML;
   assert(modalHtml.includes('单位价格'), '规格弹窗应改为维护单位价格');
   assert(!modalHtml.includes('规格价格'), '规格弹窗不应再显示规格价格输入');
-  assert(modalHtml.includes('grid-cols-1 sm:grid-cols-3'), '规格弹窗在移动端应改为纵向优先布局');
+  assert(modalHtml.includes('grid-cols-1 sm:grid-cols-4'), '规格弹窗在移动端应改为纵向优先布局');
+  assert(modalHtml.includes('app-modal-card modal-wide'), '规格弹窗应复用统一的大尺寸移动端 modal 壳子');
 
+  currentAuthUsername = 'admin';
+  exec('usersState["admin"] = normalizeUserRecord({ username: "admin", roles: { isFarmer: true, isAdmin: true, isSuperAdmin: true, farmerName: "系统管理员" }, addresses: [], shippingAddresses: [{ id: "ship_admin", name: "管理员", phone: "13800000002", full: "仓库发货点" }], coupons: [], selectedAddressId: "", selectedCouponId: "", cart: [], orders: [], member: { levelId: "normal", points: 0, totalSpent: 0 }, createdAt: "2026/04/09" });');
   exec('user = "admin"; openShippingAddressPicker("new");');
   const shippingPickerHtml = document.getElementById('modal-root').innerHTML;
-  assert(shippingPickerHtml.includes('flex items-center justify-center'), '发货地址选择弹窗应默认在视口中间展示');
-  assert(shippingPickerHtml.includes('max-h-[85vh]'), '发货地址选择弹窗应限制高度并启用内部滚动');
+  assert(shippingPickerHtml.includes('app-modal-card modal-compact'), '发货地址选择弹窗应复用统一的小尺寸移动端 modal 壳子');
+  assert(shippingPickerHtml.includes('app-modal-body'), '发货地址选择弹窗应限制高度并启用内部滚动');
 
   const uploadHtml = exec('renderProductImageUploader("new", { images: ["https://example.com/a.jpg"], img: "https://example.com/a.jpg" })');
   assert(uploadHtml.includes('flex flex-col gap-2 sm:flex-row'), '商品图片上传区在移动端应改成纵向优先布局');
   assert(exec('validateProductPayload({ name: "测试商品", cat: "veg", images: ["https://example.com/a.jpg"], variants: [{ label: "默认规格", units: [{ label: "箱", price: 18, stock: 2 }] }], harvest: "", dispatchHours: 4, shippingAddressId: "ship_admin", tags: [] })') === '', '商品校验不应再强制要求采摘日期');
+  assert(html.includes('workspace-layout'), '管理端应使用统一的 workspace 布局壳子');
+  assert(html.includes('.app-modal-shell'), '前端应提供统一的 modal 适配样式');
+  assert(html.includes('.workspace-nav-card'), '后台应提供统一的当前菜单卡片样式');
+  assert(html.includes('.workspace-nav-panel'), '后台应提供统一的右侧展开菜单面板样式');
+  assert(html.includes('function toggleWorkspaceNav(scope)'), '前端应提供共享导航开合 helper');
+  assert(html.includes('function renderWorkspaceNavShell(scope)'), '前端应提供共享导航壳层渲染 helper');
+  assert(html.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'), '后台菜单展开面板应改成九宫格布局');
+  assert(html.includes('top: calc(100% + 10px);'), '后台菜单面板应改为从卡片下方展开');
+  assert(html.includes('aspect-ratio: 1 / 1;'), '九宫格菜单项应尽量保持正方形');
+  assert(html.includes('.workspace-nav-zone {\n      position: sticky;'), '后台导航区在手机端滚动时应保持 sticky');
+  assert(html.includes('top: 56px;'), '后台导航区 sticky 位置应贴住绿色顶栏下沿');
 
   exec('user = "admin";');
   currentAuthUsername = 'admin';
@@ -532,6 +548,49 @@ async function main() {
   exec('openInventoryUnitModal(1, "veg-large");');
   const inventoryModalHtml = document.getElementById('modal-root').innerHTML;
   assert(inventoryModalHtml.includes('单位价格'), '库存管理弹窗应展示单位价格');
+  assert(inventoryModalHtml.includes('app-modal-card modal-compact'), '库存管理弹窗应复用统一的小尺寸移动端 modal 壳子');
+
+  await execAsync('await showAdminPanel();');
+  await flush(4);
+  let adminNavHtml = document.getElementById('admin-nav-zone').innerHTML;
+  assert(adminNavHtml.includes('workspace-nav-card'), '管理端应渲染当前菜单卡片');
+  assert(adminNavHtml.includes('展开菜单'), '管理端当前菜单卡片应提示可展开');
+  assert(adminNavHtml.includes('数据'), '管理端当前菜单卡片应显示当前页名称');
+  assert(adminNavHtml.includes('workspace-nav-panel is-admin is-hidden'), '管理端菜单面板默认应收起');
+
+  exec('toggleWorkspaceNav("admin");');
+  adminNavHtml = document.getElementById('admin-nav-zone').innerHTML;
+  assert(adminNavHtml.includes('切换后台工作区'), '管理端展开后应展示完整菜单面板');
+  assert(adminNavHtml.includes('退款'), '管理端展开面板应展示共享菜单项');
+  assert(!adminNavHtml.includes('切换到此菜单'), '展开面板不应再展示冗余引导文案');
+  assert(adminNavHtml.includes('▾'), '卡片箭头应改成更协调的向下提示');
+  assert(adminNavHtml.includes('onclick="switchAdminTab(\'ship\')"'), '管理端九宫格菜单项应保留可点击的安全切页事件');
+  assert(!adminNavHtml.includes('workspace-nav-panel is-admin is-hidden'), '管理端菜单展开后不应保持 hidden');
+
+  await execAsync('await switchAdminTab("ship");');
+  await flush(4);
+  adminNavHtml = document.getElementById('admin-nav-zone').innerHTML;
+  assert(adminNavHtml.includes('发货'), '管理端切换后当前菜单卡片应更新为新页签');
+  assert(adminNavHtml.includes('workspace-nav-panel is-admin is-hidden'), '管理端切页后菜单面板应自动收起');
+
+  await execAsync('await showFarmerPanel();');
+  await flush(4);
+  let farmerNavHtml = document.getElementById('farmer-nav-zone').innerHTML;
+  assert(farmerNavHtml.includes('workspace-nav-card'), '农户端应复用当前菜单卡片');
+  assert(farmerNavHtml.includes('商品管理'), '农户端当前菜单卡片应显示当前页名称');
+  assert(!document.getElementById('farmer-content').innerHTML.includes('grid grid-cols-2 gap-2 surface-card p-2'), '农户端不应再保留独立双按钮 strip');
+
+  exec('toggleWorkspaceNav("farmer");');
+  farmerNavHtml = document.getElementById('farmer-nav-zone').innerHTML;
+  assert(farmerNavHtml.includes('切换农户工作区'), '农户端展开后应展示同一套导航面板');
+  assert(farmerNavHtml.includes('发货地址'), '农户端展开面板应展示受权限约束的菜单项');
+  assert(farmerNavHtml.includes('onclick="switchFarmerTab(\'ship\')"'), '农户端九宫格菜单项应保留可点击的安全切页事件');
+
+  await execAsync('await switchFarmerTab("ship");');
+  await flush(4);
+  farmerNavHtml = document.getElementById('farmer-nav-zone').innerHTML;
+  assert(farmerNavHtml.includes('发货地址'), '农户端切换后当前菜单卡片应更新为新页签');
+  assert(farmerNavHtml.includes('workspace-nav-panel is-farmer is-hidden'), '农户端切页后菜单面板应自动收起');
 
   console.log('Variant unit UI smoke test passed.');
 }

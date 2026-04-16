@@ -183,8 +183,13 @@ async function main() {
         carrierCode: 'yto',
         carrierName: '圆通快递',
         status: 'shipped',
+        state: '0',
+        data: [
+          { context: '杭州分拨中心 已发出', ftime: '04-13 10:20' },
+          { context: '包裹已到达杭州分拨中心', ftime: '04-13 08:10' }
+        ],
         logisticsState: 'active_success',
-        logisticsSummary: '运输中，上一站杭州分拨中心',
+        logisticsSummary: '杭州分拨中心 已发出',
         orderItemIds: [101],
         items: [
           {
@@ -212,8 +217,45 @@ async function main() {
         carrierCode: 'sf',
         carrierName: '顺丰速运',
         status: 'shipped',
+        state: '0',
+        data: [
+          { context: '查无结果', ftime: '04-13 11:00' }
+        ],
         logisticsState: 'no_trace',
         logisticsSummary: '已录入单号，等待物流公司返回轨迹',
+        orderItemIds: [102],
+        items: [
+          {
+            orderItemId: 102,
+            id: 502,
+            productId: 502,
+            name: '青菜',
+            qty: 1,
+            price: 15,
+            img: 'https://example.com/b.png',
+            variantLabel: '精品规格',
+            unit: '把',
+            unitLabel: '把',
+            shippingAddressSnapshot: { name: '仓库乙', phone: '13833334444', full: '测试仓库 2 号' }
+          }
+        ],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        createdBy: 'admin',
+        legacySource: ''
+      },
+      {
+        id: 'ship_3',
+        trackingNo: 'YD246810121CN',
+        carrierCode: 'yd',
+        carrierName: '韵达快递',
+        status: 'shipped',
+        state: '3',
+        data: [
+          { context: '包裹已签收，签收人：本人', ftime: '04-13 10:40' }
+        ],
+        logisticsState: 'signed',
+        logisticsSummary: '已签收 · 04-13 10:40',
         orderItemIds: [102],
         items: [
           {
@@ -237,24 +279,14 @@ async function main() {
       }
     ],
     fulfillmentSummary: {
-      shipmentCount: 2,
+      shipmentCount: 3,
       assignedItemCount: 2,
       totalItemCount: 2,
       unassignedItemCount: 0
     }
   };
 
-  const listUpdatedOrder = cloneJson(baseOrder);
-  listUpdatedOrder.shipments[0].logisticsState = 'active_success';
-  listUpdatedOrder.shipments[0].logisticsSummary = '运输中，最新节点已同步 · 04-13 10:20';
-
-  const detailUpdatedOrder = cloneJson(listUpdatedOrder);
-  detailUpdatedOrder.shipments[0].logisticsState = 'signed';
-  detailUpdatedOrder.shipments[0].logisticsSummary = '已签收 · 04-13 10:40';
-
   let pageFetchCount = 0;
-  let singleFetchCount = 0;
-  let orderPayloadVersion = 0;
   const requestLog = [];
 
   const sandbox = {
@@ -309,27 +341,6 @@ async function main() {
           meta: { page: 1, pageSize: 8, totalCount: 1, totalPages: 1, hasPrev: false, hasNext: false }
         });
       }
-      if (parsed.pathname === '/api/orders/logistics-refresh-check' && method === 'POST') {
-        return createJsonResponse({
-          changed: true,
-          changedCount: 1,
-          changedOrderIds: ['ORD-001'],
-          visibleChangedOrderIds: ['ORD-001'],
-          visibleChangedCount: 1
-        });
-      }
-      if (parsed.pathname === '/api/orders/ORD-001/logistics-refresh-check' && method === 'POST') {
-        return createJsonResponse({
-          changed: true,
-          orderId: 'ORD-001'
-        });
-      }
-      if (parsed.pathname === '/api/orders/ORD-001' && method === 'GET') {
-        singleFetchCount += 1;
-        orderPayloadVersion += 1;
-        if (orderPayloadVersion === 1) return createJsonResponse(cloneJson(listUpdatedOrder));
-        return createJsonResponse(cloneJson(detailUpdatedOrder));
-      }
       if (
         parsed.pathname === '/api/products'
         || parsed.pathname === '/api/categories'
@@ -346,38 +357,23 @@ async function main() {
   const context = vm.createContext(sandbox);
   vm.runInContext(match[1], context, { filename: 'index-inline.js' });
   await vm.runInContext('initApp()', context);
-  await vm.runInContext('buyerLogisticsRefreshState.pendingListCheckPromise || Promise.resolve()', context);
 
   const ordersHtml = document.getElementById('app').innerHTML;
-  assert(ordersHtml.includes('查看更新'), '订单列表应显示顶部查看更新按钮');
-  assert(ordersHtml.includes('物流信息有更新'), '订单列表应显示卡内物流更新提示');
-  assert(ordersHtml.includes('还有 1 条'), '多运单订单列表态应收口为还有 N 条');
-
-  const pageFetchCountBeforeListUpdate = pageFetchCount;
-  await vm.runInContext('viewBuyerLogisticsUpdates()', context);
-  const updatedOrdersHtml = document.getElementById('app').innerHTML;
-  assert(pageFetchCount === pageFetchCountBeforeListUpdate, '点击查看更新后不应新增整页订单列表请求');
-  assert(singleFetchCount === 1, '点击查看更新后应只按 order.id 拉取变化订单');
-  assert(updatedOrdersHtml.includes('刚刚更新'), '列表局部刷新后应出现刚刚更新标签');
-  assert(updatedOrdersHtml.includes('运输中，最新节点已同步 · 04-13 10:20'), '列表局部刷新后应显示新的物流摘要');
+  assert(!ordersHtml.includes('查看更新'), '订单列表不应再显示实时物流更新按钮');
+  assert(!ordersHtml.includes('物流信息有更新'), '订单列表不应再显示实时物流更新提示');
+  assert(ordersHtml.includes('还有 2 条'), '多运单订单列表态应继续收口为还有 N 条');
 
   vm.runInContext('view = "orderDetail"; paramId = 0; render();', context);
-  await vm.runInContext('beginBuyerOrderDetailLogisticsCheck()', context);
   const detailHtml = document.getElementById('app').innerHTML;
-  assert(detailHtml.includes('刷新当前订单'), '订单详情应显示刷新当前订单按钮');
+  assert(!detailHtml.includes('刷新当前订单'), '订单详情不应再显示实时刷新当前订单按钮');
   assert(detailHtml.indexOf('录入时间') < 0, '订单详情不应展示内部录入时间');
   assert(detailHtml.indexOf('最近查询时间') < 0, '订单详情不应展示最近查询时间');
-
-  const pageFetchCountBeforeDetailUpdate = pageFetchCount;
-  await vm.runInContext('refreshCurrentBuyerOrder()', context);
-  const refreshedDetailHtml = document.getElementById('app').innerHTML;
-  assert(pageFetchCount === pageFetchCountBeforeDetailUpdate, '订单详情刷新后仍不应新增整页订单列表请求');
-  assert(singleFetchCount === 2, '订单详情刷新后应只再次请求当前订单');
-  assert(refreshedDetailHtml.includes('已签收 · 04-13 10:40'), '订单详情刷新后应显示新的详情物流结果');
-  assert(refreshedDetailHtml.includes('刚刚更新'), '订单详情刷新后应保留短暂更新提示');
-
-  assert(requestLog.some(function (entry) { return entry === 'POST /api/orders/logistics-refresh-check'; }), '应触发订单列表 refresh-check');
-  assert(requestLog.some(function (entry) { return entry === 'POST /api/orders/ORD-001/logistics-refresh-check'; }), '应触发订单详情 refresh-check');
+  assert(detailHtml.includes('物流轨迹'), '运输中且存在有效轨迹时，订单详情应展示物流轨迹');
+  assert(detailHtml.includes('杭州分拨中心 已发出'), '运输中运单应展示真实轨迹节点');
+  assert(!detailHtml.includes('查无结果'), '查无结果类无效轨迹不应展示给用户');
+  assert(detailHtml.includes('物流状态：已签收'), 'state=3 的运单在详情中应只展示状态');
+  assert(!detailHtml.includes('包裹已签收，签收人：本人'), '已签收运单不应继续展开详细轨迹内容');
+  assert(!requestLog.some(function (entry) { return /^POST \/api\/orders\/.*logistics-refresh-check/.test(entry); }), '前端不应再触发物流 refresh-check 接口');
 
   console.log('Logistics refresh UI smoke test passed.');
 }

@@ -399,13 +399,330 @@
       box-shadow: 0 12px 28px rgba(44, 58, 45, 0.14)
     }
 
+    .workspace-layout {
+      display: flex;
+      align-items: flex-start;
+      min-height: calc(100vh - 56px)
+    }
+
     .workspace-side {
+      width: 96px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 56px;
+      align-self: flex-start;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px;
+      border-right: 1px solid #E9E1D4;
       background: rgba(255, 252, 245, 0.86);
       backdrop-filter: blur(8px)
     }
 
+    .workspace-side::-webkit-scrollbar {
+      display: none
+    }
+
+    .workspace-side button {
+      flex: 0 0 auto
+    }
+
     .workspace-main {
+      min-width: 0;
+      flex: 1;
       padding-bottom: 48px
+    }
+
+    .workspace-nav-zone {
+      position: sticky;
+      top: 56px;
+      z-index: 49;
+      overflow: visible;
+      padding: 12px 16px 4px;
+      background: linear-gradient(180deg, rgba(242, 238, 226, 0.96) 0%, rgba(242, 238, 226, 0.82) 76%, rgba(242, 238, 226, 0) 100%)
+    }
+
+    .workspace-nav-shell {
+      position: relative;
+      z-index: 84;
+      display: inline-block;
+      max-width: 100%
+    }
+
+    .workspace-nav-card {
+      width: 188px;
+      min-width: 0;
+      max-width: calc(100vw - 48px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(61, 139, 95, 0.12);
+      background: rgba(255, 252, 245, 0.94);
+      box-shadow: var(--shadow-card);
+      text-align: left;
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast)
+    }
+
+    .workspace-nav-card:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-raise)
+    }
+
+    .workspace-nav-card.is-locked {
+      cursor: default
+    }
+
+    .workspace-nav-card.is-admin {
+      border-color: rgba(61, 139, 95, 0.18)
+    }
+
+    .workspace-nav-card.is-farmer {
+      border-color: rgba(224, 123, 57, 0.22)
+    }
+
+    .workspace-nav-card-badge {
+      width: 36px;
+      height: 36px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0
+    }
+
+    .workspace-nav-card.is-admin .workspace-nav-card-badge {
+      background: rgba(61, 139, 95, 0.12)
+    }
+
+    .workspace-nav-card.is-farmer .workspace-nav-card-badge {
+      background: rgba(224, 123, 57, 0.14)
+    }
+
+    .workspace-nav-card-label {
+      min-width: 0;
+      flex: 1
+    }
+
+    .workspace-nav-card-label strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: 0.9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      word-break: keep-all
+    }
+
+    .workspace-nav-card-label span {
+      display: block;
+      margin-top: 2px;
+      color: var(--text-faint);
+      font-size: 0.7rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      word-break: keep-all
+    }
+
+    .workspace-nav-card-toggle {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--text-faint);
+      background: rgba(28, 39, 30, 0.05);
+      transition: transform var(--transition-fast), background var(--transition-fast), color var(--transition-fast)
+    }
+
+    .workspace-nav-card-toggle.is-open {
+      transform: rotate(180deg)
+    }
+
+    .workspace-nav-card.is-admin .workspace-nav-card-toggle {
+      color: #2D9D4E
+    }
+
+    .workspace-nav-card.is-farmer .workspace-nav-card-toggle {
+      color: #E07B39
+    }
+
+    .workspace-nav-panel {
+      position: absolute;
+      left: 0;
+      top: calc(100% + 10px);
+      z-index: 85;
+      width: min(324px, calc(100vw - 40px));
+      max-width: calc(100vw - 40px);
+      max-height: min(72vh, 560px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      border-radius: 22px;
+      border: 1px solid rgba(61, 139, 95, 0.12);
+      background: rgba(255, 252, 246, 0.98);
+      box-shadow: 0 18px 42px rgba(44, 58, 45, 0.14);
+      padding: 10px;
+      transform-origin: left top;
+      transition: opacity var(--transition-fast), transform var(--transition-fast);
+      opacity: 1;
+      transform: translateX(0) scale(1)
+    }
+
+    .workspace-nav-panel.is-hidden {
+      opacity: 0;
+      transform: translateY(-12px) scale(0.96);
+      pointer-events: none;
+      visibility: hidden
+    }
+
+    .workspace-nav-panel.is-admin {
+      border-color: rgba(61, 139, 95, 0.16)
+    }
+
+    .workspace-nav-panel.is-farmer {
+      border-color: rgba(224, 123, 57, 0.2)
+    }
+
+    .workspace-nav-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px
+    }
+
+    .workspace-nav-panel-head strong {
+      color: var(--text-strong);
+      font-size: 0.88rem
+    }
+
+    .workspace-nav-panel-head span {
+      color: var(--text-faint);
+      font-size: 0.7rem
+    }
+
+    .workspace-nav-panel-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px
+    }
+
+    .workspace-nav-panel-item {
+      min-width: 0;
+      min-height: 0;
+      aspect-ratio: 1 / 1;
+      border-radius: 16px;
+      border: 1px solid rgba(28, 39, 30, 0.08);
+      background: rgba(255, 255, 255, 0.86);
+      padding: 10px 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-align: center;
+      transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast)
+    }
+
+    .workspace-nav-panel-item:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-card)
+    }
+
+    .workspace-nav-panel-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px
+    }
+
+    .workspace-nav-panel-item-icon {
+      font-size: 1rem
+    }
+
+    .workspace-nav-panel-item strong {
+      color: var(--text-strong);
+      font-size: 0.76rem;
+      line-height: 1.15
+    }
+
+    .workspace-nav-panel-item.is-active {
+      background: rgba(61, 139, 95, 0.12);
+      border-color: rgba(61, 139, 95, 0.22)
+    }
+
+    .workspace-nav-panel.is-farmer .workspace-nav-panel-item.is-active {
+      background: rgba(224, 123, 57, 0.14);
+      border-color: rgba(224, 123, 57, 0.24)
+    }
+
+    .workspace-nav-panel-item-current {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(45, 157, 78, 0.14);
+      color: #2D9D4E;
+      font-size: 0.58rem
+    }
+
+    .workspace-nav-panel.is-farmer .workspace-nav-panel-item-current {
+      background: rgba(224, 123, 57, 0.16);
+      color: #C4602A
+    }
+
+    .workspace-nav-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 72;
+      background: rgba(17, 24, 39, 0.08)
+    }
+
+    .app-modal-shell {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(17, 24, 39, 0.3)
+    }
+
+    .app-modal-card {
+      width: 100%;
+      max-height: min(86vh, 760px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-radius: 24px;
+      border: 1px solid rgba(61, 139, 95, 0.11);
+      background: rgba(255, 253, 248, 0.98);
+      box-shadow: var(--shadow-raise)
+    }
+
+    .app-modal-card.modal-compact {
+      max-width: 32rem
+    }
+
+    .app-modal-card.modal-wide {
+      max-width: 42rem
+    }
+
+    .app-modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 4px
     }
 
     .workspace-banner {
@@ -450,6 +767,73 @@
     .level-lv4 {
       background: #2D9D4E;
       color: #fff
+    }
+
+    @media (max-width: 640px) {
+      .workspace-layout {
+        display: block
+      }
+
+      .workspace-side {
+        width: 100%;
+        top: 56px;
+        z-index: 40;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px;
+        border-right: none;
+        border-bottom: 1px solid #E9E1D4
+      }
+
+      .workspace-side button {
+        width: 100%;
+        min-width: 0;
+        min-height: 72px;
+        padding: 10px 6px
+      }
+
+      .workspace-nav-zone {
+        padding: 12px 12px 4px
+      }
+
+      .workspace-nav-shell {
+        max-width: calc(100vw - 24px)
+      }
+
+      .workspace-nav-card {
+        width: 160px;
+        max-width: calc(100vw - 180px)
+      }
+
+      .workspace-nav-panel {
+        left: 0;
+        top: calc(100% + 8px);
+        width: min(324px, calc(100vw - 24px));
+        max-width: calc(100vw - 24px)
+      }
+
+      .app-modal-shell {
+        align-items: flex-end;
+        padding: 12px
+      }
+
+      .app-modal-card {
+        max-width: none !important;
+        max-height: min(88vh, 760px);
+        border-radius: 24px 24px 18px 18px
+      }
+
+      #admin-panel .grid.grid-cols-3,
+      #farmer-panel .grid.grid-cols-3 {
+        grid-template-columns: minmax(0, 1fr) !important
+      }
+
+      #admin-panel .grid.grid-cols-\[1fr\,110px\],
+      #farmer-panel .grid.grid-cols-\[1fr\,110px\] {
+        grid-template-columns: minmax(0, 1fr) !important
+      }
     }
   </style>
 </head>
@@ -610,6 +994,7 @@
       pendingDetailCheckPromise: null
     };
     var adminRefundFilters = { status: 'pending', orderId: '', ownerUsername: '', dateFrom: '', dateTo: '' };
+    var adminRefundState = { selectedRefundId: '' };
     var adminLedgerState = {
       tab: 'payment',
       paymentFilters: { orderId: '', username: '', status: 'paid', dateFrom: '', dateTo: '' },
@@ -623,6 +1008,10 @@
     var routeQuery = {};
     var paymentResultState = { orderId: '', order: null, paymentTransaction: null, awaitingAsyncNotify: false, isLoading: false, error: '' };
     var currentFarmerTab = 'product';
+    var adminNavOpen = false;
+    var farmerNavOpen = false;
+    var suppressWorkspaceHistorySync = false;
+    var lastWorkspaceHistoryKey = '';
     var currentCategoryEditId = '';
     var selectedVariantState = {};
     var variantEditorState = { prefix: '', mode: 'add', index: -1 };
@@ -635,6 +1024,24 @@
       adminShipEditId: '',
       farmerShipMode: '',
       farmerShipEditId: ''
+    };
+    var WORKSPACE_MENU_REGISTRY = {
+      admin: [
+        { key: 'db', label: '数据', icon: '📊', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'ledger', label: '台账', icon: '📒', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'refund', label: '退款', icon: '💸', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'pd', label: '商品', icon: '📦', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'od', label: '订单', icon: '📋', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'category', label: '分类', icon: '🏷', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'ship', label: '发货', icon: '🚚', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'coupon', label: '优惠券', icon: '🎟', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'banner', label: 'Banner', icon: '🖼', scope: 'admin', visible: function () { return canAccessAdminPanel(); } },
+        { key: 'auth', label: '权限', icon: '🔐', scope: 'admin', visible: function () { return canManageAuth(); } }
+      ],
+      farmer: [
+        { key: 'product', label: '商品管理', icon: '📦', scope: 'farmer', visible: function () { return canAccessFarmerPanel(); } },
+        { key: 'ship', label: '发货地址', icon: '🚚', scope: 'farmer', visible: function () { return canAccessFarmerPanel(); } }
+      ]
     };
 
     // === HELPERS / ROUTING_CORE ===
@@ -720,6 +1127,9 @@
       location.hash = buildHash(view, paramId);
       render();
       scrollPageToTop();
+      refreshBuyerRouteData(view, paramId).catch(function (error) {
+        console.error(error);
+      });
     }
     // [NAV_GUARD] 所有项目内主动导航都会先经过这里，先自动保存，再真正切页。
     function enqueueNavigation(action) {
@@ -752,6 +1162,94 @@
       }
       window.history.back();
     });
+
+    function buildWorkspaceHistorySnapshot() {
+      var adminPanel = document.getElementById('admin-panel');
+      var farmerPanel = document.getElementById('farmer-panel');
+      if (adminPanel && !adminPanel.classList.contains('hidden')) {
+        var adminSnapshot = {
+          route: 'admin',
+          adminTab: currentAdminTab || 'db'
+        };
+        if ((adminSnapshot.adminTab || '') === 'ship') {
+          adminSnapshot.adminFulfillmentView = adminFulfillmentState.view === 'addresses' ? 'addresses' : (adminFulfillmentState.view === 'detail' ? 'detail' : 'queue');
+          adminSnapshot.adminSelectedOwner = adminFulfillmentState.selectedOwner || '';
+          adminSnapshot.adminSelectedOrderId = adminFulfillmentState.selectedOrderId || '';
+        }
+        return adminSnapshot;
+      }
+      if (farmerPanel && !farmerPanel.classList.contains('hidden')) {
+        return {
+          route: 'farmer',
+          farmerTab: currentFarmerTab || 'product'
+        };
+      }
+      return null;
+    }
+
+    function syncWorkspaceHistoryState(mode) {
+      if (suppressWorkspaceHistorySync) return;
+      if (!window.history || typeof window.history[mode + 'State'] !== 'function') return;
+      var snapshot = buildWorkspaceHistorySnapshot();
+      if (!snapshot) {
+        lastWorkspaceHistoryKey = '';
+        return;
+      }
+      var nextKey = JSON.stringify(snapshot);
+      if (mode === 'push' && nextKey === lastWorkspaceHistoryKey) return;
+      var baseState = window.history.state && typeof window.history.state === 'object' ? window.history.state : {};
+      var nextState = Object.assign({}, baseState, { workspaceSnapshot: snapshot });
+      window.history[mode + 'State'](nextState, '', location.href);
+      lastWorkspaceHistoryKey = nextKey;
+    }
+
+    function resetAdminWorkspaceSessionState(options) {
+      var config = Object.assign({ preserveTab: false }, options || {});
+      adminNavOpen = false;
+      setAdminFulfillmentDetail(null);
+      adminFulfillmentState.view = 'queue';
+      adminFulfillmentState.error = '';
+      if (!config.preserveTab) currentAdminTab = 'db';
+    }
+
+    function resetFarmerWorkspaceSessionState(options) {
+      var config = Object.assign({ preserveTab: false }, options || {});
+      farmerNavOpen = false;
+      if (!config.preserveTab) currentFarmerTab = 'product';
+    }
+
+    function restoreWorkspaceHistorySnapshot(snapshot) {
+      if (!snapshot || !snapshot.route) return false;
+      suppressWorkspaceHistorySync = true;
+      try {
+        if (snapshot.route === 'admin') {
+          if (!canAccessAdminPanel()) return false;
+          currentAdminTab = snapshot.adminTab || 'db';
+          if (currentAdminTab === 'ship') {
+            adminFulfillmentState.view = snapshot.adminFulfillmentView === 'addresses' ? 'addresses' : (snapshot.adminFulfillmentView === 'detail' ? 'detail' : 'queue');
+            adminFulfillmentState.selectedOwner = adminFulfillmentState.view === 'detail' ? String(snapshot.adminSelectedOwner || '').trim() : '';
+            adminFulfillmentState.selectedOrderId = adminFulfillmentState.view === 'detail' ? String(snapshot.adminSelectedOrderId || '').trim() : '';
+            if (adminFulfillmentState.view !== 'detail') adminFulfillmentState.detail = null;
+            resetAdminFulfillmentDraft();
+          } else {
+            resetAdminWorkspaceSessionState({ preserveTab: true });
+            currentAdminTab = snapshot.adminTab || 'db';
+          }
+          showAdminPanel();
+          return true;
+        }
+        if (snapshot.route === 'farmer') {
+          if (!canAccessFarmerPanel()) return false;
+          currentFarmerTab = snapshot.farmerTab || 'product';
+          showFarmerPanel();
+          return true;
+        }
+        return false;
+      } finally {
+        suppressWorkspaceHistorySync = false;
+        syncWorkspaceHistoryState('replace');
+      }
+    }
     function syncNavActiveState() {
       ['home', 'category', 'cart', 'profile'].forEach(function (navKey) {
         var button = document.getElementById('nav-' + navKey);
@@ -812,11 +1310,32 @@
       return seed ? ('unit_' + seed + '_' + Number(index || 0)) : ('unit_' + Number(index || 0));
     }
 
+    function buildUniqueUnitId(preferredId, label, index, usedIds) {
+      var registry = usedIds || {};
+      var preferred = String(preferredId || '').trim();
+      var fallback = buildUnitId(label, index);
+      var candidate = preferred || fallback;
+      if (!registry[candidate]) {
+        registry[candidate] = true;
+        return candidate;
+      }
+      if (!registry[fallback]) {
+        registry[fallback] = true;
+        return fallback;
+      }
+      var suffix = 1;
+      while (registry[fallback + '_' + suffix]) suffix += 1;
+      candidate = fallback + '_' + suffix;
+      registry[candidate] = true;
+      return candidate;
+    }
+
     function createUnitDraft(overrides) {
       return Object.assign({
         id: '',
         label: '',
         price: 0,
+        deliveryFee: 0,
         stock: 0,
         sortOrder: 0,
         isDefault: false
@@ -842,20 +1361,25 @@
       var fallbackLabel = String(payload.unit || payload.label || baseProduct.unit || '').trim() || (index === 0 ? '默认单位' : ('单位' + (index + 1)));
       var fallbackStock = Math.max(0, Number(payload.stock != null ? payload.stock : 0));
       var fallbackPrice = Number(payload.price != null ? payload.price : (index === 0 ? Number(baseProduct.price || 0) : 0));
+      var fallbackDeliveryFee = Math.max(0, Number(payload.deliveryFee != null ? payload.deliveryFee : (index === 0 ? Number(baseProduct.deliveryFee || 0) : 0)));
       var source = rawUnits.length ? rawUnits : [createUnitDraft({
         id: payload.defaultUnitId || buildUnitId(fallbackLabel || 'default', 0),
         label: fallbackLabel,
         price: fallbackPrice,
+        deliveryFee: fallbackDeliveryFee,
         stock: fallbackStock,
         sortOrder: 0,
         isDefault: true
       })];
+      var usedUnitIds = {};
       var normalized = source.map(function (item, unitIndex) {
         var label = String(item && item.label || '').trim() || (unitIndex === 0 ? fallbackLabel : ('单位' + (unitIndex + 1)));
+        var unitId = buildUniqueUnitId(item && item.id, label, unitIndex, usedUnitIds);
         return {
-          id: String(item && item.id || buildUnitId(label, unitIndex)),
+          id: unitId,
           label: label,
           price: Number(item && item.price != null ? item.price : fallbackPrice),
+          deliveryFee: Math.max(0, Number(item && item.deliveryFee != null ? item.deliveryFee : fallbackDeliveryFee)),
           stock: Math.max(0, Number(item && item.stock != null ? item.stock : (unitIndex === 0 ? fallbackStock : 0))),
           sortOrder: Number(item && item.sortOrder != null ? item.sortOrder : unitIndex),
           isDefault: !!(item && item.isDefault)
@@ -1012,11 +1536,30 @@
         unitId: unitId,
         unitLabel: unitLabel,
         price: Number(payload.price || 0),
+        deliveryFee: Number(payload.deliveryFee || 0),
         unit: payload.unit ? String(payload.unit) : unitLabel,
         img: payload.img ? String(payload.img) : DEFAULT_PRODUCT_IMAGE,
         qty: Number(payload.qty || 0),
         sortOrder: Number(payload.sortOrder != null ? payload.sortOrder : index || 0)
       };
+    }
+
+    function buildComparableCartItemPayload(item) {
+      var payload = normalizeCartStateItem(item);
+      return JSON.stringify({
+        id: Number(payload.id || 0),
+        productId: Number(payload.productId || 0),
+        name: payload.name || '',
+        variantId: payload.variantId || '',
+        variantLabel: payload.variantLabel || '',
+        unitId: payload.unitId || '',
+        unitLabel: payload.unitLabel || '',
+        unit: payload.unit || '',
+        price: Number(payload.price || 0),
+        deliveryFee: Number(payload.deliveryFee || 0),
+        img: payload.img || '',
+        qty: Number(payload.qty || 0)
+      });
     }
 
     function normalizeOrderItemSnapshot(item, index) {
@@ -1046,6 +1589,7 @@
         unitLabel: payload.unitLabel ? String(payload.unitLabel) : (payload.unit ? String(payload.unit) : (payload.variantLabel ? String(payload.variantLabel) : '')),
         unit: payload.unit ? String(payload.unit) : (payload.unitLabel ? String(payload.unitLabel) : (payload.variantLabel ? String(payload.variantLabel) : '')),
         price: Number(payload.price || 0),
+        deliveryFee: Number(payload.deliveryFee || 0),
         qty: Number(payload.qty || 0),
         shippingAddressSnapshot: payload.shippingAddressSnapshot && typeof payload.shippingAddressSnapshot === 'object' ? payload.shippingAddressSnapshot : {}
       });
@@ -1053,11 +1597,29 @@
 
     function getSelectedVariantStateEntry(productId) {
       var raw = selectedVariantState[Number(productId || 0)];
-      if (!raw) return { variantId: '', unitId: '' };
-      if (typeof raw === 'string') return { variantId: raw, unitId: '' };
+      if (!raw) return { variantId: '', unitId: '', autoVariant: false, autoUnit: false };
+      if (typeof raw === 'string') return { variantId: raw, unitId: '', autoVariant: false, autoUnit: false };
       return {
         variantId: raw.variantId ? String(raw.variantId) : '',
-        unitId: raw.unitId ? String(raw.unitId) : ''
+        unitId: raw.unitId ? String(raw.unitId) : '',
+        autoVariant: !!raw.autoVariant,
+        autoUnit: !!raw.autoUnit
+      };
+    }
+
+    function setSelectedVariantStateEntry(productId, entry) {
+      var productKey = Number(productId || 0);
+      if (!(productKey > 0)) return;
+      var next = Object.assign({ variantId: '', unitId: '', autoVariant: false, autoUnit: false }, entry || {});
+      if (!next.variantId && !next.unitId && !next.autoVariant && !next.autoUnit) {
+        delete selectedVariantState[productKey];
+        return;
+      }
+      selectedVariantState[productKey] = {
+        variantId: next.variantId ? String(next.variantId) : '',
+        unitId: next.unitId ? String(next.unitId) : '',
+        autoVariant: !!next.autoVariant,
+        autoUnit: !!next.autoUnit
       };
     }
 
@@ -1097,6 +1659,7 @@
       var defaultVariant = getDefaultVariant(normalized);
       var defaultUnit = defaultVariant ? getDefaultUnitForVariant(defaultVariant, normalized) : null;
       normalized.price = Number(defaultUnit && defaultUnit.price || defaultVariant && defaultVariant.price || 0);
+      normalized.deliveryFee = Number(defaultUnit && defaultUnit.deliveryFee || 0);
       normalized.orig = normalized.price;
       normalized.unit = defaultUnit && defaultUnit.label ? String(defaultUnit.label) : '';
       normalized.stock = normalized.variants.reduce(function (sum, item) {
@@ -1107,6 +1670,52 @@
       normalized.images = imageList;
       normalized.img = explicitCover && imageList.indexOf(explicitCover) > -1 ? explicitCover : imageList[0];
       return normalized;
+    }
+
+    function reconcileProductSelectionState(product, previousProduct) {
+      var normalizedProduct = normalizeProduct(product);
+      var productId = Number(normalizedProduct && normalizedProduct.id || 0);
+      if (!(productId > 0)) return normalizedProduct;
+      var entry = getSelectedVariantStateEntry(productId);
+      if (!entry.variantId && !entry.unitId && !entry.autoVariant && !entry.autoUnit) return normalizedProduct;
+      var previous = previousProduct ? normalizeProduct(previousProduct) : null;
+      var nextVariantId = String(entry.variantId || '');
+      var nextUnitId = String(entry.unitId || '');
+      var autoVariant = !!entry.autoVariant;
+      var autoUnit = !!entry.autoUnit;
+      var nextDefaultVariant = getDefaultVariant(normalizedProduct);
+      var nextDefaultVariantId = nextDefaultVariant && nextDefaultVariant.id ? String(nextDefaultVariant.id) : '';
+      var previousDefaultVariantId = previous && previous.defaultVariantId ? String(previous.defaultVariantId) : '';
+      if (nextVariantId && !getVariantById(normalizedProduct, nextVariantId)) {
+        nextVariantId = nextDefaultVariantId;
+        autoVariant = !!nextVariantId;
+        autoUnit = !!nextVariantId;
+      } else if (autoVariant && nextDefaultVariantId && (!nextVariantId || nextVariantId === previousDefaultVariantId)) {
+        nextVariantId = nextDefaultVariantId;
+      }
+      var selectedVariant = nextVariantId ? getVariantById(normalizedProduct, nextVariantId) : null;
+      if (!selectedVariant) {
+        setSelectedVariantStateEntry(productId, { variantId: '', unitId: '', autoVariant: false, autoUnit: false });
+        return normalizedProduct;
+      }
+      var nextDefaultUnit = getDefaultUnitForVariant(selectedVariant, normalizedProduct);
+      var nextDefaultUnitId = nextDefaultUnit && nextDefaultUnit.id ? String(nextDefaultUnit.id) : '';
+      var previousVariant = previous && nextVariantId ? getVariantById(previous, nextVariantId) : null;
+      var previousDefaultUnit = previousVariant ? getDefaultUnitForVariant(previousVariant, previous) : null;
+      var previousDefaultUnitId = previousDefaultUnit && previousDefaultUnit.id ? String(previousDefaultUnit.id) : '';
+      if (nextUnitId && !getVariantUnitById(selectedVariant, nextUnitId, normalizedProduct)) {
+        nextUnitId = nextDefaultUnitId;
+        autoUnit = !!nextUnitId;
+      } else if (autoUnit && nextDefaultUnitId && (!nextUnitId || nextUnitId === previousDefaultUnitId)) {
+        nextUnitId = nextDefaultUnitId;
+      }
+      setSelectedVariantStateEntry(productId, {
+        variantId: nextVariantId,
+        unitId: nextUnitId,
+        autoVariant: autoVariant,
+        autoUnit: autoUnit
+      });
+      return normalizedProduct;
     }
 
     function cloneProduct(product) {
@@ -1126,7 +1735,14 @@
     }
 
     function setProds(list) {
-      productsState = (Array.isArray(list) ? list : []).map(normalizeProduct);
+      var previousProducts = getProds().slice();
+      productsState = (Array.isArray(list) ? list : []).map(function (product) {
+        var normalizedProduct = normalizeProduct(product);
+        var previous = previousProducts.find(function (item) {
+          return Number(item && item.id || 0) === Number(normalizedProduct && normalizedProduct.id || 0);
+        }) || null;
+        return reconcileProductSelectionState(normalizedProduct, previous);
+      });
       return productsState;
     }
 
@@ -1134,8 +1750,10 @@
       var existing = getProds().slice();
       (Array.isArray(list) ? list : []).map(normalizeProduct).forEach(function (product) {
         var index = existing.findIndex(function (item) { return Number(item.id || 0) === Number(product.id || 0); });
-        if (index >= 0) existing[index] = product;
-        else existing.push(product);
+        var previous = index >= 0 ? existing[index] : null;
+        var reconciled = reconcileProductSelectionState(product, previous);
+        if (index >= 0) existing[index] = reconciled;
+        else existing.push(reconciled);
       });
       productsState = existing;
       return productsState;
@@ -1156,6 +1774,12 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    function escapeJsSingleQuoted(value) {
+      return String(value || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, '\\\'');
     }
 
     function loadRecentSearchKeywords() {
@@ -1271,6 +1895,92 @@
       var product = normalizeProduct(await response.json());
       mergeProducts([product]);
       return product;
+    }
+
+    function normalizeCartItemWithProductTruth(item, product) {
+      var currentItem = normalizeCartStateItem(item);
+      var sourceProduct = product ? normalizeProduct(product) : null;
+      if (!sourceProduct) return currentItem;
+      var variant = resolveVariantForCartItem(sourceProduct, currentItem);
+      if (!variant) return Object.assign({}, currentItem, {
+        name: sourceProduct.name || currentItem.name,
+        img: sourceProduct.img || currentItem.img
+      });
+      var unit = resolveUnitForCartItem(sourceProduct, currentItem, variant);
+      if (!unit) return Object.assign({}, currentItem, {
+        name: sourceProduct.name || currentItem.name,
+        variantLabel: variant.label ? String(variant.label) : currentItem.variantLabel,
+        img: sourceProduct.img || currentItem.img
+      });
+      return normalizeCartStateItem(Object.assign({}, currentItem, {
+        name: sourceProduct.name || currentItem.name,
+        variantId: currentItem.variantId ? String(currentItem.variantId) : String(variant.id || ''),
+        variantLabel: variant.label ? String(variant.label) : currentItem.variantLabel,
+        unitId: currentItem.unitId ? String(currentItem.unitId) : String(unit.id || ''),
+        unitLabel: unit.label ? String(unit.label) : currentItem.unitLabel,
+        unit: unit.label ? String(unit.label) : currentItem.unit,
+        price: Number(unit.price != null ? unit.price : currentItem.price || 0),
+        deliveryFee: Number(unit.deliveryFee != null ? unit.deliveryFee : currentItem.deliveryFee || 0),
+        img: sourceProduct.img || currentItem.img
+      }));
+    }
+
+    async function refreshCartProductTruth(options) {
+      var config = Object.assign({ persist: true, rerender: true }, options || {});
+      if (!user || !cart.length) return false;
+      var productIds = cart.reduce(function (result, item) {
+        var productId = Number(item && (item.productId != null ? item.productId : item.id) || 0);
+        if (productId > 0 && result.indexOf(productId) < 0) result.push(productId);
+        return result;
+      }, []);
+      if (!productIds.length) return false;
+      var productMap = {};
+      await Promise.all(productIds.map(async function (productId) {
+        try {
+          productMap[productId] = await fetchProductDetail(productId);
+        } catch (error) {
+          console.error('购物车商品刷新失败', error);
+        }
+      }));
+      var changed = false;
+      var nextCart = cart.map(function (item) {
+        var productId = Number(item && (item.productId != null ? item.productId : item.id) || 0);
+        var refreshed = productMap[productId] || getProds().find(function (entry) {
+          return Number(entry && entry.id || 0) === productId;
+        }) || null;
+        var nextItem = normalizeCartItemWithProductTruth(item, refreshed);
+        if (!changed) {
+          changed = buildComparableCartItemPayload(nextItem) !== buildComparableCartItemPayload(item);
+        }
+        return nextItem;
+      });
+      if (!changed) return false;
+      cart = nextCart;
+      updateCartBadge();
+      if (config.persist) saveData();
+      if (config.rerender !== false) render();
+      return true;
+    }
+
+    async function refreshBuyerRouteData(nextView, nextParamId) {
+      if (nextView === 'product' && Number(nextParamId || 0) > 0) {
+        var beforeProduct = getProds().find(function (item) { return Number(item && item.id || 0) === Number(nextParamId || 0); }) || null;
+        var beforeComparable = beforeProduct ? buildComparableProductPayload(beforeProduct) : '';
+        try {
+          var refreshedProduct = await fetchProductDetail(nextParamId);
+          if (view === 'product' && Number(paramId || 0) === Number(nextParamId || 0) && buildComparableProductPayload(refreshedProduct) !== beforeComparable) render();
+        } catch (error) {
+          console.error('商品详情刷新失败', error);
+        }
+        return;
+      }
+      if (nextView === 'cart' || nextView === 'confirmOrder') {
+        try {
+          await refreshCartProductTruth();
+        } catch (error) {
+          console.error('购物车商品真相刷新失败', error);
+        }
+      }
     }
 
     async function saveProductToServer(product, options) {
@@ -1623,15 +2333,93 @@
       return setAdminUsersPage(await response.json());
     }
 
+    function buildLegacyShipmentSnapshot(order, items) {
+      var payload = order || {};
+      var trackingNo = payload.trackingNo ? String(payload.trackingNo).trim() : '';
+      if (!trackingNo) return null;
+      var normalizedItems = Array.isArray(items) ? items.map(function (item, index) {
+        return normalizeOrderItemSnapshot(item, index);
+      }) : [];
+      return {
+        id: payload.id ? ('legacy_tracking_' + String(payload.id)) : ('legacy_tracking_' + trackingNo),
+        trackingNo: trackingNo,
+        carrierCode: '',
+        carrierName: '物流',
+        status: String(payload.status || '').trim() === 'done' ? 'done' : 'shipped',
+        state: '',
+        data: [],
+        logisticsSummary: '已录入单号，等待物流公司返回轨迹',
+        logisticsState: 'no_trace',
+        lastLogisticsQueryAt: 0,
+        lastLogisticsSuccessAt: 0,
+        orderItemIds: normalizedItems.map(function (item) { return Number(item && item.orderItemId || 0); }).filter(function (item) { return item > 0; }),
+        items: normalizedItems,
+        createdAt: Number(payload.time || 0),
+        updatedAt: Number(payload.time || 0),
+        createdBy: '',
+        legacySource: 'order_tracking_projection'
+      };
+    }
+
     function normalizeOrderSnapshot(order) {
       var payload = order || {};
+      var normalizedItems = Array.isArray(payload.items) ? payload.items.map(function (item, index) {
+        return normalizeOrderItemSnapshot(item, index);
+      }) : [];
+      var shipments = Array.isArray(payload.shipments) ? payload.shipments.map(function (shipment) {
+        return {
+          id: shipment && shipment.id ? String(shipment.id) : '',
+          trackingNo: shipment && shipment.trackingNo ? String(shipment.trackingNo) : '',
+          carrierCode: shipment && shipment.carrierCode ? String(shipment.carrierCode) : '',
+          carrierName: shipment && shipment.carrierName ? String(shipment.carrierName) : '',
+          status: shipment && shipment.status ? String(shipment.status) : 'shipped',
+          state: shipment && shipment.state != null ? String(shipment.state) : '',
+          data: Array.isArray(shipment && shipment.data) ? shipment.data.map(function (entry) {
+            return {
+              context: entry && entry.context ? String(entry.context) : '',
+              ftime: entry && entry.ftime ? String(entry.ftime) : '',
+              area: entry && entry.area ? String(entry.area) : '',
+              status: entry && entry.status ? String(entry.status) : '',
+              time: Number(entry && entry.time || 0)
+            };
+          }).filter(function (entry) {
+            return !!(entry.context || entry.ftime || entry.area || entry.status || entry.time);
+          }) : [],
+          logisticsSummary: shipment && shipment.logisticsSummary ? String(shipment.logisticsSummary) : '',
+          logisticsState: shipment && shipment.logisticsState ? String(shipment.logisticsState) : ((shipment && shipment.trackingNo) ? 'no_trace' : 'no_tracking'),
+          lastLogisticsQueryAt: Number(shipment && shipment.lastLogisticsQueryAt || 0),
+          lastLogisticsSuccessAt: Number(shipment && shipment.lastLogisticsSuccessAt || 0),
+          orderItemIds: Array.isArray(shipment && shipment.orderItemIds) ? shipment.orderItemIds.map(function (item) { return Number(item || 0); }).filter(function (item) { return item > 0; }) : [],
+          items: Array.isArray(shipment && shipment.items) ? shipment.items.map(function (item, index) { return normalizeOrderItemSnapshot(item, index); }) : [],
+          createdAt: Number(shipment && shipment.createdAt || 0),
+          updatedAt: Number(shipment && shipment.updatedAt || 0),
+          createdBy: shipment && shipment.createdBy ? String(shipment.createdBy) : '',
+          legacySource: shipment && shipment.legacySource ? String(shipment.legacySource) : ''
+        };
+      }) : [];
+      if (!shipments.length) {
+        var legacyShipment = buildLegacyShipmentSnapshot(payload, normalizedItems);
+        if (legacyShipment) shipments = [legacyShipment];
+      }
+      var fulfillmentSummary = payload.fulfillmentSummary && typeof payload.fulfillmentSummary === 'object' ? {
+        shipmentCount: Number(payload.fulfillmentSummary.shipmentCount || 0),
+        assignedItemCount: Number(payload.fulfillmentSummary.assignedItemCount || 0),
+        totalItemCount: Number(payload.fulfillmentSummary.totalItemCount || 0),
+        unassignedItemCount: Number(payload.fulfillmentSummary.unassignedItemCount || 0)
+      } : { shipmentCount: 0, assignedItemCount: 0, totalItemCount: 0, unassignedItemCount: 0 };
+      if (shipments.length && Number(fulfillmentSummary.shipmentCount || 0) === 0) {
+        fulfillmentSummary = {
+          shipmentCount: shipments.length,
+          assignedItemCount: normalizedItems.length,
+          totalItemCount: normalizedItems.length,
+          unassignedItemCount: 0
+        };
+      }
       return {
         id: payload.id ? String(payload.id) : '',
         owner: payload.owner ? String(payload.owner) : (payload.username ? String(payload.username) : ''),
         ownerDeleted: !!payload.ownerDeleted,
-        items: Array.isArray(payload.items) ? payload.items.map(function (item) {
-          return normalizeOrderItemSnapshot(item);
-        }) : [],
+        items: normalizedItems,
         total: Number(payload.total || 0),
         subtotal: Number(payload.subtotal || 0),
         deliveryFee: Number(payload.deliveryFee || 0),
@@ -1642,31 +2430,8 @@
         coupon: payload.coupon ? String(payload.coupon) : '',
         couponId: payload.couponId ? String(payload.couponId) : '',
         trackingNo: payload.trackingNo ? String(payload.trackingNo) : '',
-        shipments: Array.isArray(payload.shipments) ? payload.shipments.map(function (shipment) {
-          return {
-            id: shipment && shipment.id ? String(shipment.id) : '',
-            trackingNo: shipment && shipment.trackingNo ? String(shipment.trackingNo) : '',
-            carrierCode: shipment && shipment.carrierCode ? String(shipment.carrierCode) : '',
-            carrierName: shipment && shipment.carrierName ? String(shipment.carrierName) : '',
-            status: shipment && shipment.status ? String(shipment.status) : 'shipped',
-            logisticsSummary: shipment && shipment.logisticsSummary ? String(shipment.logisticsSummary) : '',
-            logisticsState: shipment && shipment.logisticsState ? String(shipment.logisticsState) : ((shipment && shipment.trackingNo) ? 'no_trace' : 'no_tracking'),
-            lastLogisticsQueryAt: Number(shipment && shipment.lastLogisticsQueryAt || 0),
-            lastLogisticsSuccessAt: Number(shipment && shipment.lastLogisticsSuccessAt || 0),
-            orderItemIds: Array.isArray(shipment && shipment.orderItemIds) ? shipment.orderItemIds.map(function (item) { return Number(item || 0); }).filter(function (item) { return item > 0; }) : [],
-            items: Array.isArray(shipment && shipment.items) ? shipment.items.map(function (item, index) { return normalizeOrderItemSnapshot(item, index); }) : [],
-            createdAt: Number(shipment && shipment.createdAt || 0),
-            updatedAt: Number(shipment && shipment.updatedAt || 0),
-            createdBy: shipment && shipment.createdBy ? String(shipment.createdBy) : '',
-            legacySource: shipment && shipment.legacySource ? String(shipment.legacySource) : ''
-          };
-        }) : [],
-        fulfillmentSummary: payload.fulfillmentSummary && typeof payload.fulfillmentSummary === 'object' ? {
-          shipmentCount: Number(payload.fulfillmentSummary.shipmentCount || 0),
-          assignedItemCount: Number(payload.fulfillmentSummary.assignedItemCount || 0),
-          totalItemCount: Number(payload.fulfillmentSummary.totalItemCount || 0),
-          unassignedItemCount: Number(payload.fulfillmentSummary.unassignedItemCount || 0)
-        } : { shipmentCount: 0, assignedItemCount: 0, totalItemCount: 0, unassignedItemCount: 0 },
+        shipments: shipments,
+        fulfillmentSummary: fulfillmentSummary,
         reserveExpiresAt: Number(payload.reserveExpiresAt || 0),
         availableChannels: Array.isArray(payload.availableChannels) ? payload.availableChannels.map(function (item) { return String(item || '').trim(); }).filter(Boolean) : [],
         recommendedChannel: payload.recommendedChannel ? String(payload.recommendedChannel) : '',
@@ -1675,6 +2440,36 @@
         inventoryReleasedAt: Number(payload.inventoryReleasedAt || 0),
         cancelReason: payload.cancelReason ? String(payload.cancelReason) : ''
       };
+    }
+
+    function mergeOrderPaymentRuntimeFields(previousOrder, nextOrder) {
+      var nextNormalized = normalizeOrderSnapshot(nextOrder);
+      var previousNormalized = previousOrder ? normalizeOrderSnapshot(previousOrder) : null;
+      var rawNext = nextOrder && typeof nextOrder === 'object' ? nextOrder : {};
+      if (!previousNormalized) return nextNormalized;
+      if ((!Array.isArray(rawNext.availableChannels) || !rawNext.availableChannels.length) && previousNormalized.availableChannels && previousNormalized.availableChannels.length) {
+        nextNormalized.availableChannels = previousNormalized.availableChannels.slice();
+      }
+      if (!(rawNext.recommendedChannel && String(rawNext.recommendedChannel).trim()) && previousNormalized.recommendedChannel) {
+        nextNormalized.recommendedChannel = previousNormalized.recommendedChannel;
+      }
+      if (!Object.prototype.hasOwnProperty.call(rawNext, 'wechatBrowser')) {
+        nextNormalized.wechatBrowser = !!previousNormalized.wechatBrowser;
+      }
+      return nextNormalized;
+    }
+
+    function findKnownOrderSnapshot(orderId) {
+      var targetOrderId = String(orderId || '').trim();
+      if (!targetOrderId) return null;
+      if (currentCheckoutOrder && String(currentCheckoutOrder.id || '') === targetOrderId) return currentCheckoutOrder;
+      var fromOrders = (Array.isArray(orders) ? orders : []).find(function (item) {
+        return String(item && item.id || '') === targetOrderId;
+      });
+      if (fromOrders) return fromOrders;
+      return (Array.isArray(allOrdersState) ? allOrdersState : []).find(function (item) {
+        return String(item && item.id || '') === targetOrderId;
+      }) || null;
     }
 
     function truncateShipmentProductText(text, maxLength) {
@@ -1701,6 +2496,16 @@
     function getShipmentSummaryText(shipment) {
       var payload = shipment || {};
       if (payload.logisticsSummary) return String(payload.logisticsSummary);
+      if (Array.isArray(payload.data)) {
+        var latestValidEntry = payload.data.find(function (entry) {
+          var context = String(entry && entry.context || '').trim();
+          return context && !isShipmentInvalidTraceContext(context);
+        });
+        if (latestValidEntry) return String(latestValidEntry.context || '');
+      }
+      if (String(payload.state || '').trim() === '3') return '已签收';
+      if (String(payload.state || '').trim() === '4') return '已退签';
+      if (String(payload.state || '').trim() === '14') return '已拒签';
       if (payload.logisticsState === 'signed') return '已签收';
       if (payload.trackingNo) return '已录入单号，等待物流公司返回轨迹';
       return '待发货，暂未录入物流信息';
@@ -1708,9 +2513,75 @@
 
     function getShipmentSummaryTone(shipment) {
       var state = String(shipment && shipment.logisticsState || '').trim();
+      var providerState = String(shipment && shipment.state || '').trim();
       if (state === 'signed') return 'text-[#2D9D4E]';
+      if (providerState === '4' || providerState === '14') return 'text-[#E07B39]';
       if (state === 'no_trace') return 'text-[#E07B39]';
       return 'text-gray-400';
+    }
+
+    function isShipmentInvalidTraceContext(value) {
+      var text = String(value || '').trim();
+      if (!text) return true;
+      return /(查无结果|暂无结果|暂无轨迹|暂无物流|无物流信息|暂未查询到)/.test(text);
+    }
+
+    function getShipmentTraceEntries(shipment) {
+      return (Array.isArray(shipment && shipment.data) ? shipment.data : []).map(function (entry) {
+        return {
+          context: entry && entry.context ? String(entry.context).trim() : '',
+          ftime: entry && entry.ftime ? String(entry.ftime).trim() : '',
+          area: entry && entry.area ? String(entry.area).trim() : '',
+          status: entry && entry.status ? String(entry.status).trim() : '',
+          time: Number(entry && entry.time || 0)
+        };
+      }).filter(function (entry) {
+        return !!entry.context;
+      });
+    }
+
+    function hasShipmentValidTraceEntries(shipment) {
+      return getShipmentTraceEntries(shipment).some(function (entry) {
+        return !isShipmentInvalidTraceContext(entry.context);
+      });
+    }
+
+    function isShipmentTransportState(shipment) {
+      var providerState = String(shipment && shipment.state || '').trim();
+      return !!providerState && ['3', '4', '14'].indexOf(providerState) < 0;
+    }
+
+    function shouldShowShipmentTimeline(shipment) {
+      var providerState = String(shipment && shipment.state || '').trim();
+      if (['3', '4', '14'].indexOf(providerState) >= 0) return false;
+      return hasShipmentValidTraceEntries(shipment) || isShipmentTransportState(shipment);
+    }
+
+    function getShipmentStatusText(shipment) {
+      var providerState = String(shipment && shipment.state || '').trim();
+      if (providerState === '3') return '已签收';
+      if (providerState === '4') return '已退签';
+      if (providerState === '14') return '已拒签';
+      if (shipment && shipment.logisticsState === 'signed') return '已签收';
+      if (shipment && shipment.trackingNo) return '运输中';
+      return '待发货';
+    }
+
+    function buildShipmentTimelineEntries(shipment) {
+      if (!shouldShowShipmentTimeline(shipment)) return [];
+      var rawEntries = getShipmentTraceEntries(shipment);
+      var entries = rawEntries.filter(function (entry) {
+        return !isShipmentInvalidTraceContext(entry.context);
+      });
+      if (entries.length) return entries;
+      if (rawEntries.length) return [];
+      return [{
+        context: getShipmentSummaryText(shipment),
+        ftime: '',
+        area: '',
+        status: '',
+        time: 0
+      }];
     }
 
     function clearBuyerRecentOrderFlag(orderId) {
@@ -1779,11 +2650,29 @@
         var carrier = shipment && shipment.carrierName ? String(shipment.carrierName) : '物流';
         var productText = getShipmentFullProductText(shipment);
         var summaryTone = getShipmentSummaryTone(shipment);
+        var timelineEntries = buildShipmentTimelineEntries(shipment);
+        var timelineHtml = timelineEntries.length
+          ? '<div class="mt-3 rounded-xl bg-white/70 px-3 py-3">'
+            + '<div class="text-xs font-medium text-gray-500">物流轨迹</div>'
+            + '<div class="mt-2 space-y-2">' + timelineEntries.map(function (entry) {
+              var timeText = String(entry && entry.ftime || '').trim();
+              var contextText = String(entry && entry.context || '').trim();
+              var areaText = String(entry && entry.area || '').trim();
+              return '<div class="flex gap-3">'
+                + '<div class="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#2D9D4E]"></div>'
+                + '<div class="min-w-0 flex-1">'
+                + '<div class="text-sm text-gray-700">' + contextText + '</div>'
+                + (timeText || areaText ? '<div class="text-xs text-gray-400 mt-1">' + [timeText, areaText].filter(Boolean).join(' · ') + '</div>' : '')
+                + '</div></div>';
+            }).join('') + '</div></div>'
+          : '';
         return '<div class="rounded-xl bg-[#F9F7F3] p-4">'
           + '<div class="flex items-center justify-between gap-2"><div class="text-xs text-gray-500">' + carrier + (shipment && shipment.carrierCode ? ' · ' + shipment.carrierCode : '') + '</div>' + renderRecentlyUpdatedBadge(config.orderId) + '</div>'
           + '<div class="text-sm font-medium text-gray-700 mt-2">快递单号：' + (shipment && shipment.trackingNo ? shipment.trackingNo : '待补充') + '</div>'
           + '<div class="text-sm text-gray-600 mt-2">商品名称：' + (productText || '待补充') + '</div>'
-          + '<div class="text-sm ' + summaryTone + ' mt-2">物流信息：' + getShipmentSummaryText(shipment) + '</div>'
+          + '<div class="text-sm ' + summaryTone + ' mt-2">物流状态：' + getShipmentStatusText(shipment) + '</div>'
+          + '<div class="text-sm text-gray-500 mt-2">最新信息：' + getShipmentSummaryText(shipment) + '</div>'
+          + timelineHtml
           + '</div>';
       }).join('') + '</div>';
     }
@@ -1855,9 +2744,7 @@
       };
       var response = await fetch('/api/orders' + buildQueryString(query));
       if (!response.ok) throw new Error('我的订单加载失败');
-      var result = setBuyerOrdersPage(await response.json());
-      if (view === 'orders') beginBuyerOrderListLogisticsCheck();
-      return result;
+      return setBuyerOrdersPage(await response.json());
     }
 
     async function fetchBuyerOrderById(orderId) {
@@ -1915,7 +2802,7 @@
     }
 
     function updateBuyerOrderCache(order) {
-      var normalized = normalizeOrderSnapshot(order);
+      var normalized = mergeOrderPaymentRuntimeFields(findKnownOrderSnapshot(order && order.id), order);
       orders = upsertRecordById(orders.map(normalizeOrderSnapshot), normalized).map(normalizeOrderSnapshot).sort(function (a, b) {
         return Number(b.time || 0) - Number(a.time || 0);
       });
@@ -1923,7 +2810,7 @@
         return Number(b.time || 0) - Number(a.time || 0);
       });
       if (currentCheckoutOrder && String(currentCheckoutOrder.id || '') === String(normalized.id || '')) {
-        currentCheckoutOrder = normalizeOrderSnapshot(normalized);
+        currentCheckoutOrder = mergeOrderPaymentRuntimeFields(currentCheckoutOrder, normalized);
       }
       if (String(view || '') === 'orderDetail') {
         var currentOrder = orders[paramId];
@@ -2113,6 +3000,12 @@
       adminFulfillmentState.selectedOwner = detail.owner || String(ownerUsername || '').trim();
       adminFulfillmentState.selectedOrderId = detail.id || String(orderId || '').trim();
       return detail;
+    }
+
+    async function fetchAdminOrderSnapshot(ownerUsername, orderId) {
+      var response = await fetch('/api/admin/fulfillment/orders/' + encodeURIComponent(String(ownerUsername || '').trim()) + '/' + encodeURIComponent(String(orderId || '').trim()));
+      if (!response.ok) throw new Error('订单详情加载失败');
+      return normalizeOrderSnapshot(await response.json());
     }
 
     function normalizeRefundRequest(refund) {
@@ -2618,10 +3511,12 @@
       var stockEl = document.getElementById(prefix + '-stock-summary');
       if (stockEl) stockEl.textContent = String(totalStock);
       var priceEl = document.getElementById(prefix + '-price-summary');
+      var deliveryFeeEl = document.getElementById(prefix + '-delivery-fee-summary');
       var unitEl = document.getElementById(prefix + '-unit-summary');
       var defaultVariant = getDefaultVariant({ variants: normalized });
       var defaultUnit = defaultVariant ? getDefaultUnitForVariant(defaultVariant, { variants: normalized }) : null;
       if (priceEl) priceEl.textContent = fmt(defaultUnit && defaultUnit.price || defaultVariant && defaultVariant.price || 0);
+      if (deliveryFeeEl) deliveryFeeEl.textContent = fmt(defaultUnit && defaultUnit.deliveryFee || 0);
       if (unitEl) unitEl.textContent = defaultUnit && defaultUnit.label ? defaultUnit.label : '未设置';
     }
 
@@ -2639,7 +3534,7 @@
     function renderVariantUnitSummaryList(variant) {
       var units = normalizeVariantUnits(variant, Number(variant && variant.sortOrder || 0), { unit: variant && variant.label });
       return '<div class="space-y-2 mt-3">' + units.map(function (unit) {
-        return '<div class="rounded-lg bg-white border border-gray-100 px-3 py-2 flex items-center justify-between gap-3"><div><div class="text-sm font-medium text-gray-700">' + escapeHtml(unit.label) + (unit.isDefault ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-[#E8F5EC] text-[#2D9D4E]">默认</span>' : '') + '</div><div class="text-xs text-gray-400 mt-1">单位价格 ' + fmt(unit.price || 0) + ' · 单位库存</div></div><div class="text-sm font-bold text-[#2D9D4E]">' + Number(unit.stock || 0) + '</div></div>';
+        return '<div class="rounded-lg bg-white border border-gray-100 px-3 py-2 flex items-center justify-between gap-3"><div><div class="text-sm font-medium text-gray-700">' + escapeHtml(unit.label) + (unit.isDefault ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-[#E8F5EC] text-[#2D9D4E]">默认</span>' : '') + '</div><div class="text-xs text-gray-400 mt-1">单位价格 ' + fmt(unit.price || 0) + ' · 配送费 ' + fmt(unit.deliveryFee || 0) + ' · 单位库存</div></div><div class="text-sm font-bold text-[#2D9D4E]">' + Number(unit.stock || 0) + '</div></div>';
       }).join('') + '</div>';
     }
 
@@ -2648,17 +3543,19 @@
       var rows = variants.map(function (variant, index) {
         var panelKey = buildVariantPanelKey(prefix, variant.id || index);
         var expanded = !!variantPanelExpandState[panelKey];
+        var units = normalizeVariantUnits(variant, Number(variant && variant.sortOrder || index), { unit: variant && variant.label });
+        var defaultUnit = units.find(function (unit) { return unit.isDefault; }) || units[0] || null;
         return '<div class="rounded-xl border border-gray-200 bg-[#F9F7F3] p-3">'
           + '<div class="flex items-start justify-between gap-3">'
           + '<button type="button" onclick=\'toggleVariantPanelExpand(' + JSON.stringify(prefix) + ', ' + JSON.stringify(String(variant.id || '')) + ')\' class="flex-1 text-left">'
           + '<div class="font-medium text-sm">' + escapeHtml(variant.label) + (variant.isDefault ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-[#E8F5EC] text-[#2D9D4E]">默认规格</span>' : '') + '</div>'
-          + '<div class="text-xs text-gray-500 mt-1">单位价格：' + getVariantPriceSummary(variant, { variants: variants }) + ' · 规格库存：' + Number(variant.stock || 0) + '</div>'
+          + '<div class="text-xs text-gray-500 mt-1">单位价格：' + getVariantPriceSummary(variant, { variants: variants }) + ' · 默认配送费：' + fmt(defaultUnit && defaultUnit.deliveryFee || 0) + ' · 规格库存：' + Number(variant.stock || 0) + '</div>'
           + '</button>'
           + '<div class="flex flex-col gap-2 shrink-0">'
           + '<button type="button" onclick=\'openVariantEditor(' + JSON.stringify(prefix) + ', ' + index + ')\' class="px-3 py-1.5 rounded-full bg-white text-xs text-[#2D9D4E] border border-[#D8EBD8]">修改</button>'
           + '<button type="button" onclick=\'confirmRemoveVariant(' + JSON.stringify(prefix) + ', ' + index + ')\' class="px-3 py-1.5 rounded-full bg-red-50 text-xs text-red-500">删除</button>'
           + '</div></div>'
-          + (expanded ? ('<div class="mt-3 border-t border-gray-200 pt-3"><div class="flex items-center justify-between text-xs text-gray-500"><span>单位库存</span><button type="button" onclick=\'toggleVariantPanelExpand(' + JSON.stringify(prefix) + ', ' + JSON.stringify(String(variant.id || '')) + ')\' class="text-[#2D9D4E]">收起</button></div>' + renderVariantUnitSummaryList(variant) + '</div>') : '')
+          + (expanded ? ('<div class="mt-3 border-t border-gray-200 pt-3"><div class="flex items-center justify-between text-xs text-gray-500"><span>单位库存与配送费</span><button type="button" onclick=\'toggleVariantPanelExpand(' + JSON.stringify(prefix) + ', ' + JSON.stringify(String(variant.id || '')) + ')\' class="text-[#2D9D4E]">收起</button></div>' + renderVariantUnitSummaryList(variant) + '</div>') : '')
           + '</div>';
       }).join('');
       return '<div class="space-y-2">' + rows + '</div>';
@@ -2671,16 +3568,17 @@
       var root = document.getElementById('modal-root');
       if (!root) return;
       var units = normalizeVariantUnits(editing, Number(editing && editing.sortOrder || variants.length), { unit: editing.label }).map(function (unit) { return Object.assign({}, unit); });
-      root.innerHTML = '<div class="fixed inset-0 bg-black/30 z-[80] flex items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden p-4 flex flex-col"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">' + (index >= 0 ? '修改规格' : '新增规格') + '</div><div class="text-xs text-gray-500 mt-1">移动端会优先纵向排布字段，避免来回横向拖动。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div><div class="space-y-3 overflow-y-auto pr-1 flex-1"><div><div class="text-sm font-medium text-gray-700 mb-1">规格名称</div><input id="variant-modal-label" value="' + escapeHtml(editing.label || '') + '" placeholder="如：礼盒装 / 大份" class="w-full p-2 border rounded-lg text-sm"></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-2"><div><div class="text-sm font-medium text-gray-700">单位价格与单位库存</div></div><button type="button" onclick="addVariantEditorUnitRow()" class="w-full sm:w-auto text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增单位</button></div><div id="variant-unit-list" class="space-y-2">' + units.map(function (unit, unitIndex) { return renderVariantEditorUnitRow(unit, unitIndex); }).join('') + '</div><div class="mt-3 rounded-xl bg-white border border-gray-200 p-3"><div class="text-xs text-gray-400">规格库存汇总</div><div id="variant-modal-stock-summary" class="font-bold text-base mt-1">' + units.reduce(function (sum, unit) { return sum + Number(unit.stock || 0); }, 0) + '</div></div></div></div><button onclick="saveVariantEditor()" class="w-full bg-[#2D9D4E] text-white py-2 rounded-lg text-sm mt-3">保存规格</button></div></div>';
+      root.innerHTML = '<div class="app-modal-shell"><div class="app-modal-card modal-wide p-4"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">' + (index >= 0 ? '修改规格' : '新增规格') + '</div><div class="text-xs text-gray-500 mt-1">移动端会优先纵向排布字段，避免来回横向拖动。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div><div class="space-y-3 app-modal-body"><div><div class="text-sm font-medium text-gray-700 mb-1">规格名称</div><input id="variant-modal-label" value="' + escapeHtml(editing.label || '') + '" placeholder="如：礼盒装 / 大份" class="w-full p-2 border rounded-lg text-sm"></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-2"><div><div class="text-sm font-medium text-gray-700">单位价格、配送费与单位库存</div></div><button type="button" onclick="addVariantEditorUnitRow()" class="w-full sm:w-auto text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增单位</button></div><div id="variant-unit-list" class="space-y-2">' + units.map(function (unit, unitIndex) { return renderVariantEditorUnitRow(unit, unitIndex); }).join('') + '</div><div class="mt-3 rounded-xl bg-white border border-gray-200 p-3"><div class="text-xs text-gray-400">规格库存汇总</div><div id="variant-modal-stock-summary" class="font-bold text-base mt-1">' + units.reduce(function (sum, unit) { return sum + Number(unit.stock || 0); }, 0) + '</div></div></div></div><button onclick="saveVariantEditor()" class="w-full bg-[#2D9D4E] text-white py-2 rounded-lg text-sm mt-3">保存规格</button></div></div>';
     }
 
     function renderVariantEditorUnitRow(unit, index) {
       var payload = createUnitDraft(unit);
       return '<div class="rounded-xl bg-white border border-gray-200 p-3" data-unit-row="' + index + '">'
-        + '<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">'
+        + '<div class="grid grid-cols-1 sm:grid-cols-4 gap-2">'
         + '<input type="hidden" data-unit-id value="' + escapeHtml(payload.id || '') + '">'
         + '<div><div class="text-xs text-gray-400 mb-1">单位名称</div><input data-unit-label value="' + escapeHtml(payload.label || '') + '" oninput="syncVariantEditorStockSummary()" placeholder="如：盒 / 箱 / 提" class="w-full p-2 border rounded-lg text-sm"></div>'
         + '<div><div class="text-xs text-gray-400 mb-1">单位价格</div><input data-unit-price value="' + Number(payload.price || 0) + '" oninput="syncVariantEditorStockSummary()" type="number" min="0" step="0.01" class="w-full p-2 border rounded-lg text-sm"></div>'
+        + '<div><div class="text-xs text-gray-400 mb-1">单位配送费</div><input data-unit-delivery-fee value="' + Number(payload.deliveryFee || 0) + '" oninput="syncVariantEditorStockSummary()" type="number" min="0" step="0.01" class="w-full p-2 border rounded-lg text-sm"></div>'
         + '<div><div class="text-xs text-gray-400 mb-1">单位库存</div><input data-unit-stock value="' + Number(payload.stock || 0) + '" oninput="syncVariantEditorStockSummary()" type="number" min="0" step="1" class="w-full p-2 border rounded-lg text-sm"></div>'
         + '</div>'
         + '<div class="flex items-center justify-between mt-2">'
@@ -2695,6 +3593,7 @@
       return Array.prototype.slice.call(container.querySelectorAll('[data-unit-row]')).map(function (row, index) {
         var labelInput = row.querySelector('[data-unit-label]');
         var priceInput = row.querySelector('[data-unit-price]');
+        var deliveryFeeInput = row.querySelector('[data-unit-delivery-fee]');
         var stockInput = row.querySelector('[data-unit-stock]');
         var idInput = row.querySelector('[data-unit-id]');
         var defaultInput = row.querySelector('[data-unit-default]');
@@ -2702,6 +3601,7 @@
           id: (idInput && idInput.value ? idInput.value : '') || buildUnitId((labelInput && labelInput.value) || ('unit_' + index), index),
           label: labelInput ? String(labelInput.value || '').trim() : '',
           price: Math.max(0, Number(priceInput ? priceInput.value : 0)),
+          deliveryFee: Math.max(0, Number(deliveryFeeInput ? deliveryFeeInput.value : 0)),
           stock: Math.max(0, Number(stockInput ? stockInput.value : 0)),
           sortOrder: index,
           isDefault: !!(defaultInput && defaultInput.checked)
@@ -2729,7 +3629,7 @@
       if (!container) return;
       var units = readVariantEditorUnits();
       units.push(createUnitDraft({
-        id: buildUnitId('unit', units.length),
+        id: '',
         label: '',
         price: 0,
         stock: 0,
@@ -2767,6 +3667,7 @@
         var unit = units[unitIndex];
         if (!String(unit.label || '').trim()) { alert('请填写单位名称'); return; }
         if (!(Number(unit.price || 0) > 0)) { alert('单位价格必须大于 0'); return; }
+        if (isNaN(Number(unit.deliveryFee || 0)) || Number(unit.deliveryFee || 0) < 0) { alert('单位配送费不能小于 0'); return; }
         if (isNaN(Number(unit.stock || 0)) || Number(unit.stock || 0) < 0) { alert('单位库存不能小于 0'); return; }
       }
       if (!units.some(function (unit) { return unit.isDefault; }) && units[0]) units[0].isDefault = true;
@@ -2778,6 +3679,7 @@
             id: unit.id || buildUnitId(unit.label, unitIndex),
             label: unit.label,
             price: Number(unit.price || 0),
+            deliveryFee: Number(unit.deliveryFee || 0),
             stock: unit.stock,
             sortOrder: unitIndex,
             isDefault: !!unit.isDefault
@@ -3351,6 +4253,7 @@
           var unit = variant.units[unitIndex] || {};
           if (!String(unit.label || '').trim()) return '请填写单位名称';
           if (!(Number(unit.price || 0) > 0)) return '单位价格必须大于 0';
+          if (isNaN(Number(unit.deliveryFee || 0)) || Number(unit.deliveryFee || 0) < 0) return '单位配送费不能小于 0';
           if (isNaN(Number(unit.stock || 0)) || Number(unit.stock || 0) < 0) return '单位库存不能小于 0';
         }
       }
@@ -3401,7 +4304,7 @@
       h += '<div class="mb-3">' + renderFieldLabel('商品名称') + '<input id="' + prefix + '-name" value="' + (product.name || '') + '" placeholder="请输入商品名称" class="w-full p-2 border rounded-lg text-sm"></div>';
       h += '<div class="mb-3">' + renderFieldLabel('商品分类', '用于前台分类筛选与商品归类，数据来自后台“商品分类”维护') + '<select id="' + prefix + '-cat" class="w-full p-2 border rounded-lg text-sm">' + categoryOptions.map(function (item) { return '<option value="' + item.id + '"' + (item.id === (product.cat || getDefaultCategoryId()) ? ' selected' : '') + '>' + item.name + '</option>'; }).join('') + '</select></div>';
       h += '<div class="mb-3">' + renderFieldLabel('商品标签', '最多点亮 2 个标签，会展示在商品大图和商品卡片上') + '<input id="' + prefix + '-tags" type="hidden" value="' + selectedTags.join(',') + '"><div class="flex flex-wrap gap-2">' + PRODUCT_TAG_OPTIONS.map(function (tag) { var active = selectedTags.indexOf(tag) > -1; return '<button type="button" id="' + prefix + '-tag-' + tag + '" onclick="toggleFormTag(\'' + prefix + '\',\'' + tag + '\')" class="' + (active ? 'px-3 py-2 rounded-full text-xs bg-[#2D9D4E] text-white' : 'px-3 py-2 rounded-full text-xs bg-gray-100 text-gray-500') + '">' + tag + '</button>'; }).join('') + '</div></div>';
-      h += '<div class="mb-3"><div class="flex items-center justify-between mb-2"><div>' + renderFieldLabel('规格列表', '单位价格和单位库存是真相；规格默认先展示库存与价格摘要，点击规格可展开单位明细') + '</div><button type="button" onclick="openVariantEditor(\'' + prefix + '\',-1)" class="text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增规格</button></div><input id="' + prefix + '-variants-json" type="hidden" value=\'' + escapeHtml(serializeVariantsForField(normalizedProduct.variants || [])) + '\'><div id="' + prefix + '-variants-panel">' + renderVariantListPanel(prefix, normalizedProduct) + '</div><div class="grid grid-cols-3 gap-2 mt-3"><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">商品总库存</div><div id="' + prefix + '-stock-summary" class="font-bold text-base mt-1">' + Number(normalizedProduct.stock || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认展示价</div><div id="' + prefix + '-price-summary" class="font-bold text-base mt-1">' + fmt(normalizedProduct.price || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认单位</div><div id="' + prefix + '-unit-summary" class="font-bold text-sm mt-1">' + escapeHtml(normalizedProduct.unit || '未设置') + '</div></div></div></div>';
+      h += '<div class="mb-3"><div class="flex items-center justify-between mb-2"><div>' + renderFieldLabel('规格列表', '单位价格、单位配送费和单位库存是真相；规格默认先展示价格与配送费摘要，点击规格可展开单位明细') + '</div><button type="button" onclick="openVariantEditor(\'' + prefix + '\',-1)" class="text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增规格</button></div><input id="' + prefix + '-variants-json" type="hidden" value=\'' + escapeHtml(serializeVariantsForField(normalizedProduct.variants || [])) + '\'><div id="' + prefix + '-variants-panel">' + renderVariantListPanel(prefix, normalizedProduct) + '</div><div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3"><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">商品总库存</div><div id="' + prefix + '-stock-summary" class="font-bold text-base mt-1">' + Number(normalizedProduct.stock || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认展示价</div><div id="' + prefix + '-price-summary" class="font-bold text-base mt-1">' + fmt(normalizedProduct.price || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认配送费</div><div id="' + prefix + '-delivery-fee-summary" class="font-bold text-base mt-1">' + fmt(normalizedProduct.deliveryFee || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认单位</div><div id="' + prefix + '-unit-summary" class="font-bold text-sm mt-1">' + escapeHtml(normalizedProduct.unit || '未设置') + '</div></div></div></div>';
       h += '<div class="mb-3">' + renderFieldLabel('采摘日期', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-harvest" value="' + (product.harvest || '') + '" placeholder="采摘日期" type="date" class="w-full p-2 border rounded-lg text-sm"></div>';
       h += '<div class="mb-3">' + renderFieldLabel('发货时效', '填写多少小时内发货') + '<input id="' + prefix + '-dispatch-hours" value="' + Number(product.dispatchHours || 4) + '" placeholder="多少小时内发货" type="number" class="w-full p-2 border rounded-lg text-sm"></div>';
       if (canEditFarmer) h += '<div class="mb-3">' + renderFieldLabel('供货人 / 农户名称', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-farmer" value="' + (product.farmer || '') + '" placeholder="请输入供货人名称（可选）" class="w-full p-2 border rounded-lg text-sm"></div>';
@@ -3450,7 +4353,7 @@
       var currentId = (document.getElementById(prefix + '-shipping-address-id') || {}).value || '';
       var root = document.getElementById('modal-root');
       if (!root) return;
-      root.innerHTML = '<div class="fixed inset-0 bg-black/30 z-[80] flex items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-hidden p-4 flex flex-col"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">选择发货地址</div><div class="text-xs text-gray-500 mt-1">默认在当前视口内打开，直接选择即可绑定到商品。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div><div class="space-y-2 overflow-y-auto pr-1">' + list.map(function (item) { return '<button onclick="selectShippingAddressForProduct(\'' + prefix + '\',\'' + item.id + '\')" class="w-full text-left rounded-xl border ' + (currentId === item.id ? 'border-[#2D9D4E] bg-[#E8F5EC]' : 'border-gray-200 bg-[#F9F7F3]') + ' p-3"><div class="font-medium text-sm">' + (item.name || '未命名') + ' · ' + (item.phone || '-') + '</div><div class="text-xs text-gray-500 mt-1">' + (item.full || '未填写地址') + '</div></button>'; }).join('') + '</div></div></div>';
+      root.innerHTML = '<div class="app-modal-shell"><div class="app-modal-card modal-compact p-4"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">选择发货地址</div><div class="text-xs text-gray-500 mt-1">默认在当前视口内打开，直接选择即可绑定到商品。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div><div class="space-y-2 app-modal-body">' + list.map(function (item) { return '<button onclick="selectShippingAddressForProduct(\'' + prefix + '\',\'' + item.id + '\')" class="w-full text-left rounded-xl border ' + (currentId === item.id ? 'border-[#2D9D4E] bg-[#E8F5EC]' : 'border-gray-200 bg-[#F9F7F3]') + ' p-3"><div class="font-medium text-sm">' + (item.name || '未命名') + ' · ' + (item.phone || '-') + '</div><div class="text-xs text-gray-500 mt-1">' + (item.full || '未填写地址') + '</div></button>'; }).join('') + '</div></div></div>';
     }
 
     function selectShippingAddressForProduct(prefix, addressId) {
@@ -3854,7 +4757,13 @@
 
     function buildCheckoutSummary(meta) {
       var subtotal = cart.reduce(function (sum, item) { return sum + item.price * item.qty; }, 0);
-      var deliveryFee = cart.length ? 5 : 0;
+      var deliveryFee = cart.reduce(function (sum, item) {
+        var product = getProds().find(function (entry) { return Number(entry.id || 0) === Number(item.productId || item.id || 0); });
+        var variant = product ? resolveVariantForCartItem(product, item) : null;
+        var unit = product ? resolveUnitForCartItem(product, item, variant) : null;
+        var unitDeliveryFee = Math.max(0, Number(unit && unit.deliveryFee != null ? unit.deliveryFee : item.deliveryFee || 0));
+        return sum + unitDeliveryFee * Math.max(0, Number(item.qty || 0));
+      }, 0);
       var coupon = getSelectedCoupon(meta, subtotal);
       var discount = calcCouponDiscount(coupon, subtotal);
       return {
@@ -3878,6 +4787,7 @@
           unitLabel: unit && unit.label ? String(unit.label) : String(item.unitLabel || item.unit || item.variantLabel || ''),
           unit: unit && unit.label ? String(unit.label) : String(item.unit || item.unitLabel || item.variantLabel || ''),
           price: Number(unit && unit.price != null ? unit.price : item.price || 0),
+          deliveryFee: Number(unit && unit.deliveryFee != null ? unit.deliveryFee : item.deliveryFee || 0),
           shippingAddressId: product && product.shippingAddressId ? product.shippingAddressId : '',
           shippingAddressSnapshot: product && product.shippingAddressSnapshot ? Object.assign({}, product.shippingAddressSnapshot) : {}
         });
@@ -4031,6 +4941,22 @@
       var targetOrderId = String(orderId || '').trim();
       return getAllOrders().find(function (item) {
         return item.owner === targetOwner && item.id === targetOrderId;
+      }) || null;
+    }
+
+    function findAdminOrderSnapshot(ownerUsername, orderId) {
+      var targetOwner = String(ownerUsername || '').trim();
+      var targetOrderId = String(orderId || '').trim();
+      return (adminOrderListState.items || []).find(function (item) {
+        return String(item && item.owner || '') === targetOwner && String(item && item.id || '') === targetOrderId;
+      }) || findOrderSnapshot(targetOwner, targetOrderId);
+    }
+
+    function findRefundRequestById(refundId) {
+      var targetRefundId = String(refundId || '').trim();
+      if (!targetRefundId) return null;
+      return getRefundRequests().find(function (item) {
+        return String(item && item.id || '') === targetRefundId;
       }) || null;
     }
 
@@ -4251,19 +5177,50 @@
 
     function submitExternalPostForm(action, params) {
       if (!action || !params) throw new Error('支付跳转参数不完整');
+      var isAlipayWapLaunch = /(^https:\/\/openapi\.alipay\.com\/gateway\.do)|(^https:\/\/openapi-sandbox\.dc\.alipaydev\.com\/gateway\.do)/.test(String(action || ''))
+        && String(params.method || '').trim() === 'alipay.trade.wap.pay';
+      if (isAlipayWapLaunch) {
+        var query = Object.keys(params).reduce(function (pairs, key) {
+          var value = params[key];
+          if (value === null || value === undefined || value === '') return pairs;
+          pairs.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+          return pairs;
+        }, []).join('&');
+        var launchUrl = action + (action.indexOf('?') >= 0 ? '&' : '?') + query;
+        window.__lastPaymentLaunch = {
+          action: action,
+          params: params,
+          method: 'GET',
+          url: launchUrl,
+          acceptCharset: String(params.charset || 'utf-8'),
+          submissionMode: 'query'
+        };
+        if (window.location) {
+          window.location.href = launchUrl;
+        }
+        return;
+      }
       if (!document.body || typeof document.body.appendChild !== 'function') {
-        window.__lastPaymentLaunch = { action: action, params: params };
+        window.__lastPaymentLaunch = {
+          action: action,
+          params: params,
+          method: 'POST',
+          acceptCharset: String(params.charset || 'utf-8'),
+          enctype: 'application/x-www-form-urlencoded'
+        };
         return;
       }
       var form = document.createElement('form');
       form.method = 'POST';
       form.action = action;
+      form.acceptCharset = String(params.charset || 'utf-8');
+      form.enctype = 'application/x-www-form-urlencoded';
       form.style.display = 'none';
       Object.keys(params).forEach(function (key) {
         var input = document.createElement('input');
         input.type = 'hidden';
         input.name = key;
-        input.value = params[key];
+        input.value = params[key] === null || params[key] === undefined ? '' : String(params[key]);
         form.appendChild(input);
       });
       document.body.appendChild(form);
@@ -4271,7 +5228,13 @@
         form.submit();
         return;
       }
-      window.__lastPaymentLaunch = { action: action, params: params };
+      window.__lastPaymentLaunch = {
+        action: action,
+        params: params,
+        method: form.method,
+        acceptCharset: form.acceptCharset,
+        enctype: form.enctype
+      };
     }
 
     function loadData() {
@@ -4428,10 +5391,12 @@ ${!searchState.isLoading && searchState.searched && !results.length ? '<div clas
         var defaultVariant = getDefaultVariant(normalizedProduct);
         if (defaultVariant && normalizedProduct.id) {
           var defaultUnit = getDefaultUnitForVariant(defaultVariant, normalizedProduct);
-          selectedVariantState[normalizedProduct.id] = {
+          setSelectedVariantStateEntry(normalizedProduct.id, {
             variantId: defaultVariant.id,
-            unitId: defaultUnit && defaultUnit.id ? defaultUnit.id : ''
-          };
+            unitId: defaultUnit && defaultUnit.id ? defaultUnit.id : '',
+            autoVariant: true,
+            autoUnit: true
+          });
         }
         return defaultVariant;
       }
@@ -4449,10 +5414,12 @@ ${!searchState.isLoading && searchState.searched && !results.length ? '<div clas
       if (selectedUnit && selectedEntry.unitId) return selectedUnit;
       if (units.length === 1 || config.autoSingle) {
         var defaultUnit = getDefaultUnitForVariant(selectedVariant, normalizedProduct);
-        selectedVariantState[normalizedProduct.id] = {
+        setSelectedVariantStateEntry(normalizedProduct.id, {
           variantId: selectedVariant.id,
-          unitId: defaultUnit && defaultUnit.id ? defaultUnit.id : ''
-        };
+          unitId: defaultUnit && defaultUnit.id ? defaultUnit.id : '',
+          autoVariant: !!selectedEntry.autoVariant,
+          autoUnit: true
+        });
         return defaultUnit;
       }
       return null;
@@ -4462,19 +5429,23 @@ ${!searchState.isLoading && searchState.searched && !results.length ? '<div clas
       var product = getProds().find(function (item) { return Number(item.id || 0) === Number(productId || 0); });
       var selectedVariant = product ? getVariantById(product, variantId) : null;
       var defaultUnit = selectedVariant ? getDefaultUnitForVariant(selectedVariant, product) : null;
-      selectedVariantState[Number(productId || 0)] = {
+      setSelectedVariantStateEntry(productId, {
         variantId: String(variantId || ''),
-        unitId: defaultUnit && defaultUnit.id ? String(defaultUnit.id) : ''
-      };
+        unitId: defaultUnit && defaultUnit.id ? String(defaultUnit.id) : '',
+        autoVariant: false,
+        autoUnit: true
+      });
       render();
     }
 
     function selectUnit(productId, unitId) {
       var entry = getSelectedVariantStateEntry(productId);
-      selectedVariantState[Number(productId || 0)] = {
+      setSelectedVariantStateEntry(productId, {
         variantId: String(entry.variantId || ''),
-        unitId: String(unitId || '')
-      };
+        unitId: String(unitId || ''),
+        autoVariant: !!entry.autoVariant,
+        autoUnit: false
+      });
       render();
     }
 
@@ -4563,11 +5534,7 @@ ${p.farmer ? `<div class="soft-card p-4 mb-4">
       // 购物车页兼任结算确认页：这里集中展示地址和优惠券选择结果。
       var meta = getUserMeta();
       var address = getSelectedAddress(meta);
-      const t = cart.reduce((s, i) => s + i.price * i.qty, 0);
-      const delFee = 5;
-      var coupon = getSelectedCoupon(meta, t);
-      var discount = calcCouponDiscount(coupon, t);
-      const total = Math.max(0, t + delFee - discount);
+      var summary = buildCheckoutSummary(meta);
       return `<div class="page-shell compact">
 ${renderPageHeader('购物车', '当前共 ' + cart.length + ' 件商品，结账前可继续调整数量。')}
 <div class="space-y-3 mb-4">${cart.map(function (i) { var product = getProds().find(function (p) { return p.id === i.id; }); var variant = product ? resolveVariantForCartItem(product, i) : null; var unit = product ? resolveUnitForCartItem(product, i, variant) : null; var specLabel = variant && variant.label ? variant.label : (i.variantLabel || '默认规格'); var unitLabel = unit && unit.label ? unit.label : (i.unitLabel || i.unit || specLabel); var stockLabel = unit ? ('单位库存' + Number(unit.stock || 0)) : (variant ? ('规格库存' + Number(variant.stock || 0)) : (product ? ('库存' + Number(product.stock || 0)) : '商品已下架')); return `<div class="surface-card p-3.5 flex gap-3">
@@ -4583,12 +5550,12 @@ ${renderPageHeader('购物车', '当前共 ' + cart.length + ' 件商品，结�
 <div class="surface-card p-4 mb-20">
 <div class="flex justify-between items-center text-sm mb-1"><span class="text-gray-500">收货地址</span><button onclick="go('address')" class="text-[#2D9D4E]">${address ? '去修改' : '去添加'}</button></div>
 <div class="text-xs text-gray-500 mb-3">${address ? address.name + ' · ' + address.phone + ' · ' + address.full : '暂无收货地址，请先添加'}</div>
-<div class="flex justify-between items-center text-sm mb-2"><span class="text-gray-500">优惠券</span><button onclick="go('coupon')" class="text-[#2D9D4E]">${coupon ? coupon.name : '去选择'}</button></div>
-${coupon ? `<div class="text-xs text-[#E07B39] mb-2">${getCouponMetaText(coupon)}</div>` : ''}
-<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">商品金额</span><span>${fmt(t)}</span></div>
-<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">配送费</span><span class="text-gray-500">${fmt(delFee)}</span></div>
-<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">优惠抵扣</span><span class="${discount > 0 ? 'text-[#E07B39]' : 'text-gray-400'}">${discount > 0 ? '-' + fmt(discount) : '未使用'}</span></div>
-<div class="flex justify-between font-bold text-lg pt-2 border-t"><span>合计</span><span class="text-[#2D9D4E]">${fmt(total)}</span></div>
+<div class="flex justify-between items-center text-sm mb-2"><span class="text-gray-500">优惠券</span><button onclick="go('coupon')" class="text-[#2D9D4E]">${summary.coupon ? summary.coupon.name : '去选择'}</button></div>
+${summary.coupon ? `<div class="text-xs text-[#E07B39] mb-2">${getCouponMetaText(summary.coupon)}</div>` : ''}
+<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">商品金额</span><span>${fmt(summary.subtotal)}</span></div>
+<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">配送费</span><span class="text-gray-500">${fmt(summary.deliveryFee)}</span></div>
+<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">优惠抵扣</span><span class="${summary.discount > 0 ? 'text-[#E07B39]' : 'text-gray-400'}">${summary.discount > 0 ? '-' + fmt(summary.discount) : '未使用'}</span></div>
+<div class="flex justify-between font-bold text-lg pt-2 border-t"><span>合计</span><span class="text-[#2D9D4E]">${fmt(summary.total)}</span></div>
 <button onclick="startCheckout()" class="w-full mt-4 bg-[#2D9D4E] text-white py-3 rounded-xl font-medium btn">去确认订单</button></div></div>`;
     }
 
@@ -4799,11 +5766,9 @@ ${renderPageHeader('功能说明', '当前版本聚焦交易闭环与后台可�
       var p = o.items[0];
       var latestRefund = getLatestRefundRequest(o.id, user);
       var shouldShowShipmentList = o.status === 'paid' || o.status === 'shipped' || o.status === 'done' || (Array.isArray(o.shipments) && o.shipments.length > 0);
-      var shouldShowRefreshHint = isBuyerOrderPendingRefresh(o.id);
       return '<div id="buyer-order-card-' + o.id + '" class="surface-card p-3.5" onclick="pushView(\'orderDetail\',' + index + ')">'
         + '<div class="flex justify-between text-sm mb-2"><span class="text-gray-500">订单号: ' + o.id + '</span><span class="' + getOrderStatusTone(o.status) + '">' + getOrderStatusLabel(o.status) + '</span></div>'
         + '<div class="flex gap-3"><img src="' + p.img + '" class="w-14 h-14 rounded-lg object-cover"><div class="flex-1"><div class="font-medium text-sm line-clamp-1">' + p.name + (o.items.length > 1 ? ('等' + o.items.length + '件') : '') + '</div><div class="text-xs text-gray-500 mt-1">' + o.items.length + '件 · 实付<span class="text-[#2D9D4E] font-bold">' + fmt(o.total) + '</span></div></div></div>'
-        + (shouldShowRefreshHint ? '<div class="mt-2 rounded-xl bg-[#F3FBF5] px-3 py-2 text-xs text-[#2D9D4E]">物流信息有更新</div>' : '')
         + (shouldShowShipmentList ? '<div class="mt-2"><div class="text-xs font-medium text-gray-500">物流卡片</div>' + renderShipmentCardList(o.shipments, { compact: true, emptyText: o.status === 'paid' ? '待发货，暂未录入物流信息' : '暂未录入物流信息', orderId: o.id, collapseExtra: true }) + '</div>' : '')
         + (o.status === 'pending' ? '<div class="text-xs ' + (isPendingOrderExpired(o) ? 'text-[#E07B39]' : 'text-gray-400') + ' mt-2">' + getPendingOrderReserveText(o) + '</div>' : '')
         + (latestRefund && latestRefund.status === 'pending' ? '<div class="text-xs text-[#E07B39] mt-2">退款原因：' + (latestRefund.reason || '未填写') + '</div>' : '')
@@ -4824,7 +5789,6 @@ ${renderPageHeader('功能说明', '当前版本聚焦交易闭环与后台可�
       return `<div class="page-shell compact">
 ${renderPageHeader('我的订单', '统一查看待支付、发货、退款和完成状态。', { back: true })}
 <div class="surface-card p-3 mb-3"><div class="flex items-center gap-2"><select id="buyer-order-status-filter" class="flex-1 p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ${buyerOrderFilterState.status === 'pending' ? 'selected' : ''}>待支付</option><option value="paid" ${buyerOrderFilterState.status === 'paid' ? 'selected' : ''}>待发货</option><option value="shipped" ${buyerOrderFilterState.status === 'shipped' ? 'selected' : ''}>已发货</option><option value="done" ${buyerOrderFilterState.status === 'done' ? 'selected' : ''}>已完成</option><option value="cancelled" ${buyerOrderFilterState.status === 'cancelled' ? 'selected' : ''}>已取消</option><option value="refunded" ${buyerOrderFilterState.status === 'refunded' ? 'selected' : ''}>已退款</option></select><button onclick="applyBuyerOrderFilters()" class="px-4 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm btn">筛选</button></div></div>
-${renderBuyerOrderRefreshStrip()}
 <div class="space-y-3">
 ${orders.map(function (o, i) { return renderBuyerOrderCard(o, i); }).join('')}
 </div>
@@ -4840,7 +5804,6 @@ ${renderPager(buyerOrdersMeta, 'changeBuyerOrderPage')}
       var shouldShowShipmentDetail = o.status === 'paid' || o.status === 'shipped' || o.status === 'done' || (Array.isArray(o.shipments) && o.shipments.length > 0);
       return `<div class="page-shell compact">
 ${renderPageHeader('订单详情', '商品、地址、物流、退款和待支付时效都在这里集中展示。', { back: true })}
-${renderBuyerOrderDetailRefreshStrip(o.id)}
 <div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">订单状态</div>
 <div class="${getOrderStatusTone(o.status)} font-bold">${getOrderStatusLabel(o.status)}</div>
@@ -5590,11 +6553,18 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       go('home');
     }
 
-    function addToCart(id, options) {
+    async function addToCart(id, options) {
       var config = Object.assign({ alertSuccess: true }, options || {});
       // 加购前先校验实时库存，避免买家端继续把缺货商品加进购物车。
-      const p = getProds().find(x => x.id === id);
+      var p = getProds().find(x => x.id === id);
       if (!p) return false;
+      if (view === 'product' && Number(paramId || 0) === Number(id || 0)) {
+        try {
+          p = await fetchProductDetail(id);
+        } catch (error) {
+          console.error('商品详情刷新失败，继续使用本地快照加购', error);
+        }
+      }
       var selectedVariant = getSelectedVariantForProduct(p, { autoSingle: normalizeProductVariants(p).length === 1 });
       var selectedUnit = getSelectedUnitForProduct(p, { autoSingle: selectedVariant ? normalizeVariantUnits(selectedVariant, Number(selectedVariant.sortOrder || 0), p).length === 1 : false });
       if (!selectedVariant) { alert('请先选择规格'); return false; }
@@ -5604,6 +6574,14 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       if (i) {
         if (i.qty >= selectedUnit.stock) { alert('已达到当前单位可购买上限'); return false; }
         i.qty++;
+        i.name = p.name;
+        i.variantLabel = selectedVariant.label;
+        i.unitId = selectedUnit.id;
+        i.unitLabel = selectedUnit.label;
+        i.unit = selectedUnit.label;
+        i.price = Number(selectedUnit.price || 0);
+        i.deliveryFee = Number(selectedUnit.deliveryFee || 0);
+        i.img = p.img;
       }
       else cart.push(normalizeCartStateItem({
         id: p.id,
@@ -5614,6 +6592,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         unitId: selectedUnit.id,
         unitLabel: selectedUnit.label,
         price: Number(selectedUnit.price || 0),
+        deliveryFee: Number(selectedUnit.deliveryFee || 0),
         unit: selectedUnit.label,
         img: p.img,
         qty: 1
@@ -5624,8 +6603,8 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       return true;
     }
 
-    function buyNow(id) {
-      if (addToCart(id, { alertSuccess: false })) go('cart');
+    async function buyNow(id) {
+      if (await addToCart(id, { alertSuccess: false })) go('cart');
     }
 
     function upd(id, d, variantId, unitId) {
@@ -5667,17 +6646,17 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         var statusPayload = await fetchPaymentStatusOnServer(orderId, { returnCheck: !!config.returnCheck });
         paymentResultState = {
           orderId: orderId,
-          order: statusPayload.order,
+          order: mergeOrderPaymentRuntimeFields(findKnownOrderSnapshot(orderId), statusPayload.order),
           paymentTransaction: statusPayload.paymentTransaction,
           awaitingAsyncNotify: !!statusPayload.awaitingAsyncNotify,
           isLoading: false,
           error: ''
         };
-        orders = upsertRecordById(orders.map(normalizeOrderSnapshot), statusPayload.order).map(normalizeOrderSnapshot).sort(function (a, b) {
+        orders = upsertRecordById(orders.map(normalizeOrderSnapshot), paymentResultState.order).map(normalizeOrderSnapshot).sort(function (a, b) {
           return Number(b.time || 0) - Number(a.time || 0);
         });
         if (currentCheckoutOrder && String(currentCheckoutOrder.id || '') === orderId) {
-          currentCheckoutOrder = normalizeOrderSnapshot(statusPayload.order);
+          currentCheckoutOrder = mergeOrderPaymentRuntimeFields(currentCheckoutOrder, paymentResultState.order);
         }
         if (statusPayload.order && statusPayload.order.status === 'paid') {
           cart = [];
@@ -5696,7 +6675,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     function payOrder(idx) {
       var order = orders[idx];
       if (!order) return;
-      currentCheckoutOrder = normalizeOrderSnapshot(order);
+      currentCheckoutOrder = mergeOrderPaymentRuntimeFields(findKnownOrderSnapshot(order.id), order);
       paymentUiState.showMoreChannels = false;
       pushView('payment');
     }
@@ -5714,10 +6693,11 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         return;
       }
       cancelPendingOrderOnServer(user, order.id).then(async function (saved) {
-        orders = upsertRecordById(orders.map(normalizeOrderSnapshot), saved).map(normalizeOrderSnapshot).sort(function (a, b) {
+        var mergedSaved = mergeOrderPaymentRuntimeFields(findKnownOrderSnapshot(saved && saved.id), saved);
+        orders = upsertRecordById(orders.map(normalizeOrderSnapshot), mergedSaved).map(normalizeOrderSnapshot).sort(function (a, b) {
           return Number(b.time || 0) - Number(a.time || 0);
         });
-        if (currentCheckoutOrder && currentCheckoutOrder.id === saved.id) currentCheckoutOrder = normalizeOrderSnapshot(saved);
+        if (currentCheckoutOrder && currentCheckoutOrder.id === saved.id) currentCheckoutOrder = mergeOrderPaymentRuntimeFields(currentCheckoutOrder, mergedSaved);
         await refreshPersistedEntities({ users: true, orders: true, products: true });
         go('orders');
       }).catch(function (error) {
@@ -5813,6 +6793,8 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       var previousView = view;
       applyRouteFromHash();
       if (previousView !== view) clearAuthSmsCooldowns();
+      if (previousView === 'admin' && view !== 'admin') resetAdminWorkspaceSessionState();
+      if (previousView === 'farmer' && view !== 'farmer') resetFarmerWorkspaceSessionState();
       if (view === 'admin') {
         if (canAccessAdminPanel()) { showAdminPanel(); }
         else if (!user) { go('login'); }
@@ -5832,8 +6814,6 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       if (view !== 'orders') buyerLogisticsRefreshState.lastListFingerprint = '';
       if (view !== 'orderDetail') clearBuyerLogisticsDetailPrompt();
       render();
-      if (view === 'orders') beginBuyerOrderListLogisticsCheck();
-      if (view === 'orderDetail') beginBuyerOrderDetailLogisticsCheck();
       if (view === 'paymentResult') {
         syncPaymentResultStatus({
           orderId: routeQuery.orderId || paymentResultState.orderId || '',
@@ -5890,6 +6870,12 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     window.addEventListener('hashchange', function () {
       handleRouteChange();
     });
+    window.addEventListener('popstate', function (event) {
+      var snapshot = event && event.state && event.state.workspaceSnapshot;
+      if (snapshot && (snapshot.route === 'admin' || snapshot.route === 'farmer')) {
+        restoreWorkspaceHistorySnapshot(snapshot);
+      }
+    });
 
     // ===== 权限体系 =====
     // [ACCESS_CONTROL] 登录角色、管理端/农户端准入、用户列表聚合在这里统一判断。
@@ -5908,6 +6894,97 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     function canAccessFarmerPanel() {
       var role = getUserRole();
       return !!(role.isFarmer || role.isSuperAdmin);
+    }
+    function getWorkspaceCurrentTab(scope) {
+      return scope === 'farmer' ? currentFarmerTab : currentAdminTab;
+    }
+    function getWorkspaceNavOpen(scope) {
+      return scope === 'farmer' ? farmerNavOpen : adminNavOpen;
+    }
+    function getWorkspaceMenuItems(scope) {
+      return (WORKSPACE_MENU_REGISTRY[scope] || []).filter(function (item) {
+        return !item.visible || item.visible();
+      }).map(function (item) {
+        return Object.assign({}, item);
+      });
+    }
+    function getCurrentWorkspaceMenuItem(scope) {
+      var items = getWorkspaceMenuItems(scope);
+      if (!items.length) return null;
+      var currentKey = String(getWorkspaceCurrentTab(scope) || '');
+      return items.find(function (item) { return item.key === currentKey; }) || items[0];
+    }
+    function getWorkspaceToneClass(scope) {
+      return scope === 'farmer' ? 'is-farmer' : 'is-admin';
+    }
+    function getWorkspaceNavCardWidth() {
+      var viewport = Number(window && window.innerWidth || 390);
+      return viewport <= 640 ? 160 : 188;
+    }
+    function getWorkspaceNavPanelWidth() {
+      var viewport = Number(window && window.innerWidth || 390);
+      if (viewport <= 640) {
+        return Math.max(240, viewport - 24);
+      }
+      return 324;
+    }
+    function renderWorkspaceNavShell(scope) {
+      var items = getWorkspaceMenuItems(scope);
+      var currentItem = getCurrentWorkspaceMenuItem(scope);
+      if (!currentItem) return '';
+      var toneClass = getWorkspaceToneClass(scope);
+      var isOpen = getWorkspaceNavOpen(scope);
+      var canExpand = items.length > 1;
+      var switchAction = scope === 'farmer' ? 'switchFarmerTab' : 'switchAdminTab';
+      var heading = scope === 'farmer' ? '切换农户工作区' : '切换后台工作区';
+      var hintText = canExpand ? (isOpen ? '收起菜单' : '展开菜单') : '当前菜单';
+      return (isOpen ? '<button type="button" class="workspace-nav-backdrop" aria-label="关闭菜单" onclick="setWorkspaceNavOpen(\'' + scope + '\', false)"></button>' : '')
+        + '<div class="workspace-nav-shell ' + toneClass + '">'
+        + '<button type="button" class="workspace-nav-card ' + toneClass + (canExpand ? '' : ' is-locked') + '" style="width:' + getWorkspaceNavCardWidth() + 'px;"'
+        + (canExpand ? ' onclick="toggleWorkspaceNav(\'' + scope + '\')"' : '')
+        + '>'
+        + '<span class="workspace-nav-card-badge">' + currentItem.icon + '</span>'
+        + '<span class="workspace-nav-card-label"><strong class="workspace-nav-card-title">' + escapeHtml(currentItem.label) + '</strong><span>' + hintText + '</span></span>'
+        + '<span class="workspace-nav-card-toggle' + (isOpen && canExpand ? ' is-open' : '') + '">' + (canExpand ? '▾' : '·') + '</span>'
+        + '</button>'
+        + '<div class="workspace-nav-panel ' + toneClass + (isOpen ? '' : ' is-hidden') + '" style="width:' + getWorkspaceNavPanelWidth() + 'px;">'
+        + '<div class="workspace-nav-panel-head"><div><strong>' + heading + '</strong><span>' + items.length + ' 项菜单</span></div></div>'
+        + '<div class="workspace-nav-panel-grid">' + items.map(function (item) {
+          var active = item.key === currentItem.key;
+          return '<button type="button" class="workspace-nav-panel-item' + (active ? ' is-active' : '') + '" onclick="' + switchAction + '(\'' + escapeJsSingleQuoted(item.key) + '\')">'
+            + '<div class="workspace-nav-panel-item-top"><span class="workspace-nav-panel-item-icon">' + item.icon + '</span>' + (active ? '<span class="workspace-nav-panel-item-current">当前</span>' : '') + '</div>'
+            + '<div><strong>' + escapeHtml(item.label) + '</strong></div>'
+            + '</button>';
+        }).join('') + '</div>'
+        + '</div>'
+        + '</div>';
+    }
+    function renderWorkspaceNavZone(scope) {
+      var zone = document.getElementById(scope === 'farmer' ? 'farmer-nav-zone' : 'admin-nav-zone');
+      if (!zone) return;
+      zone.innerHTML = renderWorkspaceNavShell(scope);
+    }
+    function setWorkspaceNavOpen(scope, open) {
+      if (scope === 'farmer') {
+        farmerNavOpen = !!open;
+        if (open) adminNavOpen = false;
+      } else {
+        adminNavOpen = !!open;
+        if (open) farmerNavOpen = false;
+      }
+      renderWorkspaceNavZone('admin');
+      renderWorkspaceNavZone('farmer');
+    }
+    function closeAllWorkspaceNavs() {
+      if (!adminNavOpen && !farmerNavOpen) return;
+      adminNavOpen = false;
+      farmerNavOpen = false;
+      renderWorkspaceNavZone('admin');
+      renderWorkspaceNavZone('farmer');
+    }
+    function toggleWorkspaceNav(scope) {
+      if (getWorkspaceMenuItems(scope).length <= 1) return;
+      setWorkspaceNavOpen(scope, !getWorkspaceNavOpen(scope));
     }
     function getAllUsers() {
       return Object.keys(usersState).map(function (uname) {
@@ -6269,6 +7346,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       if (view === 'queue') {
         setAdminFulfillmentDetail(null);
         adminFulfillmentState.meta = createPagingMeta(1, adminFulfillmentState.meta.pageSize || 8, adminFulfillmentState.meta.totalCount || 0);
+        syncWorkspaceHistoryState('push');
         loadAdminFulfillmentWorkspace(1).catch(function (error) {
           alert(error.message || '发货队列加载失败');
         });
@@ -6276,6 +7354,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       }
       adminFulfillmentState.view = view === 'addresses' ? 'addresses' : 'queue';
       renderAdminShip();
+      syncWorkspaceHistoryState('push');
     }
     function openAdminFulfillmentDetail(ownerUsername, orderId) {
       if (adminFulfillmentState.view === 'detail' && adminFulfillmentState.dirty && hasAdminFulfillmentDraftChanges()) {
@@ -6289,6 +7368,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         switchAdminTab('ship');
         return;
       }
+      syncWorkspaceHistoryState('push');
       loadAdminFulfillmentWorkspace().catch(function (error) {
         alert(error.message || '发货详情加载失败');
       });
@@ -6374,12 +7454,22 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         fetchInventoryLogs(Object.assign({}, adminLedgerState.inventoryFilters)),
         fetchAdminLightStats()
       ]);
-      if (currentAdminTab === 'refund' || currentAdminTab === 'db') {
+      if (currentAdminTab === 'refund') {
         renderAdminRefund();
-        renderAdminDb();
+      } else if (currentAdminTab === 'ledger') {
+        renderAdminLedger();
       }
     }
+    async function loadAdminLedgerWorkspace() {
+      await Promise.all([
+        fetchPaymentTransactions(Object.assign({}, adminLedgerState.paymentFilters)),
+        fetchAftersales(Object.assign({}, adminLedgerState.aftersalesFilters)),
+        fetchInventoryLogs(Object.assign({}, adminLedgerState.inventoryFilters))
+      ]);
+      if (currentAdminTab === 'ledger') renderAdminLedger();
+    }
     function applyAdminRefundFilters() {
+      adminRefundState.selectedRefundId = '';
       adminRefundFilters.status = (document.getElementById('refund-filter-status') || {}).value || '';
       adminRefundFilters.orderId = (document.getElementById('refund-filter-order') || {}).value || '';
       adminRefundFilters.ownerUsername = (document.getElementById('refund-filter-owner') || {}).value || '';
@@ -6391,6 +7481,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       });
     }
     function resetAdminRefundFilters() {
+      adminRefundState.selectedRefundId = '';
       adminRefundFilters = { status: 'pending', orderId: '', ownerUsername: '', dateFrom: '', dateTo: '' };
       refundsMetaState = createPagingMeta(1, refundsMetaState.pageSize || 8, 0);
       renderAdminRefund();
@@ -6399,6 +7490,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       });
     }
     function changeAdminRefundPage(page) {
+      adminRefundState.selectedRefundId = '';
       refundsMetaState = createPagingMeta(page, refundsMetaState.pageSize || 8, refundsMetaState.totalCount || 0);
       loadAdminRefundWorkspace().catch(function (error) {
         alert(error.message || '退款工作台翻页失败');
@@ -6406,14 +7498,14 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     }
     function switchAdminLedgerTab(tab) {
       adminLedgerState.tab = tab || 'payment';
-      renderAdminRefund();
+      renderAdminLedger();
     }
     function changeAdminLedgerPage(tab, page) {
       var ledgerTab = tab || adminLedgerState.tab || 'payment';
       if (ledgerTab === 'payment') paymentTransactionsMetaState = createPagingMeta(page, paymentTransactionsMetaState.pageSize || 10, paymentTransactionsMetaState.totalCount || 0);
       else if (ledgerTab === 'aftersales') aftersalesMetaState = createPagingMeta(page, aftersalesMetaState.pageSize || 10, aftersalesMetaState.totalCount || 0);
       else inventoryLogsMetaState = createPagingMeta(page, inventoryLogsMetaState.pageSize || 10, inventoryLogsMetaState.totalCount || 0);
-      loadAdminRefundWorkspace().catch(function (error) {
+      loadAdminLedgerWorkspace().catch(function (error) {
         alert(error.message || '台账翻页失败');
       });
     }
@@ -6429,7 +7521,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         adminLedgerState.paymentFilters.dateFrom = (document.getElementById('payment-filter-date-from') || {}).value || '';
         adminLedgerState.paymentFilters.dateTo = (document.getElementById('payment-filter-date-to') || {}).value || '';
         paymentTransactionsMetaState = createPagingMeta(1, paymentTransactionsMetaState.pageSize || 10, paymentTransactionsMetaState.totalCount || 0);
-        fetchPaymentTransactions(adminLedgerState.paymentFilters).then(renderAdminRefund).catch(function (error) {
+        fetchPaymentTransactions(adminLedgerState.paymentFilters).then(renderAdminLedger).catch(function (error) {
           alert(error.message || '支付流水加载失败');
         });
         return;
@@ -6442,7 +7534,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         adminLedgerState.aftersalesFilters.dateFrom = (document.getElementById('aftersales-filter-date-from') || {}).value || '';
         adminLedgerState.aftersalesFilters.dateTo = (document.getElementById('aftersales-filter-date-to') || {}).value || '';
         aftersalesMetaState = createPagingMeta(1, aftersalesMetaState.pageSize || 10, aftersalesMetaState.totalCount || 0);
-        fetchAftersales(adminLedgerState.aftersalesFilters).then(renderAdminRefund).catch(function (error) {
+        fetchAftersales(adminLedgerState.aftersalesFilters).then(renderAdminLedger).catch(function (error) {
           alert(error.message || '售后记录加载失败');
         });
         return;
@@ -6453,7 +7545,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       adminLedgerState.inventoryFilters.dateFrom = (document.getElementById('inventory-filter-date-from') || {}).value || '';
       adminLedgerState.inventoryFilters.dateTo = (document.getElementById('inventory-filter-date-to') || {}).value || '';
       inventoryLogsMetaState = createPagingMeta(1, inventoryLogsMetaState.pageSize || 10, inventoryLogsMetaState.totalCount || 0);
-      fetchInventoryLogs(adminLedgerState.inventoryFilters).then(renderAdminRefund).catch(function (error) {
+      fetchInventoryLogs(adminLedgerState.inventoryFilters).then(renderAdminLedger).catch(function (error) {
         alert(error.message || '库存流水加载失败');
       });
     }
@@ -6462,8 +7554,8 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       if (ledgerTab === 'payment') {
         adminLedgerState.paymentFilters = { orderId: '', username: '', status: 'paid', dateFrom: '', dateTo: '' };
         paymentTransactionsMetaState = createPagingMeta(1, paymentTransactionsMetaState.pageSize || 10, 0);
-        renderAdminRefund();
-        fetchPaymentTransactions(adminLedgerState.paymentFilters).then(renderAdminRefund).catch(function (error) {
+        renderAdminLedger();
+        fetchPaymentTransactions(adminLedgerState.paymentFilters).then(renderAdminLedger).catch(function (error) {
           alert(error.message || '支付流水加载失败');
         });
         return;
@@ -6471,16 +7563,16 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       if (ledgerTab === 'aftersales') {
         adminLedgerState.aftersalesFilters = { orderId: '', username: '', status: '', type: 'refund', dateFrom: '', dateTo: '' };
         aftersalesMetaState = createPagingMeta(1, aftersalesMetaState.pageSize || 10, 0);
-        renderAdminRefund();
-        fetchAftersales(adminLedgerState.aftersalesFilters).then(renderAdminRefund).catch(function (error) {
+        renderAdminLedger();
+        fetchAftersales(adminLedgerState.aftersalesFilters).then(renderAdminLedger).catch(function (error) {
           alert(error.message || '售后记录加载失败');
         });
         return;
       }
       adminLedgerState.inventoryFilters = { orderId: '', username: '', actionType: '', dateFrom: '', dateTo: '' };
       inventoryLogsMetaState = createPagingMeta(1, inventoryLogsMetaState.pageSize || 10, 0);
-      renderAdminRefund();
-      fetchInventoryLogs(adminLedgerState.inventoryFilters).then(renderAdminRefund).catch(function (error) {
+      renderAdminLedger();
+      fetchInventoryLogs(adminLedgerState.inventoryFilters).then(renderAdminLedger).catch(function (error) {
         alert(error.message || '库存流水加载失败');
       });
     }
@@ -6488,7 +7580,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       if (tab === 'auth' && !canManageAuth()) tab = 'db';
       currentAdminTab = tab;
       scrollPageToTop();
-      ['db', 'refund', 'pd', 'od', 'category', 'coupon', 'banner', 'auth', 'ship'].forEach(function (t) {
+      ['db', 'ledger', 'refund', 'pd', 'od', 'category', 'coupon', 'banner', 'auth', 'ship'].forEach(function (t) {
         var el = document.getElementById('atab-' + t);
         if (el) {
           el.classList.toggle('bg-[#E8F5EC]', t === tab);
@@ -6500,11 +7592,12 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
           el.classList.toggle('border-transparent', t !== tab);
         }
       });
-      ['db', 'refund', 'pd', 'od', 'category', 'coupon', 'banner', 'auth', 'ship'].forEach(function (id) {
+      ['db', 'ledger', 'refund', 'pd', 'od', 'category', 'coupon', 'banner', 'auth', 'ship'].forEach(function (id) {
         var el = document.getElementById('admin-' + id);
         if (el) el.classList.toggle('hidden', id !== tab);
       });
       if (tab === 'db') renderAdminDb();
+      else if (tab === 'ledger') renderAdminLedger();
       else if (tab === 'refund') renderAdminRefund();
       else if (tab === 'pd') renderAdminPd();
       else if (tab === 'od') renderAdminOd();
@@ -6513,7 +7606,9 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       else if (tab === 'banner') renderAdminBanner();
       else if (tab === 'auth') renderAdminAuth();
       else if (tab === 'ship') renderAdminShip();
+      renderWorkspaceNavZone('admin');
       if (tab === 'db') loadAdminDashboardData().catch(function (error) { console.error(error); });
+      else if (tab === 'ledger') loadAdminLedgerWorkspace().catch(function (error) { console.error(error); });
       else if (tab === 'refund') loadAdminRefundWorkspace().catch(function (error) { console.error(error); });
       else if (tab === 'pd') loadAdminProductWorkspace().catch(function (error) { console.error(error); });
       else if (tab === 'od') loadAdminOrderWorkspace().catch(function (error) { console.error(error); });
@@ -6522,7 +7617,9 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     }
     function switchAdminTab(tab) {
       return enqueueNavigation(function () {
+        setWorkspaceNavOpen('admin', false);
         activateAdminTab(tab);
+        syncWorkspaceHistoryState('push');
       });
     }
 
@@ -6539,7 +7636,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       var units = normalizeVariantUnits(variant, Number(variant.sortOrder || 0), product);
       var root = document.getElementById('modal-root');
       if (!root) return;
-      root.innerHTML = '<div class="fixed inset-0 bg-black/30 z-[80] flex items-end sm:items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-md p-4"><div class="flex items-center justify-between mb-3"><div><div class="font-bold">单位库存</div><div class="text-xs text-gray-500 mt-1">' + escapeHtml(product.name) + ' · ' + escapeHtml(variant.label) + '</div></div><button onclick="closeModal()" class="text-gray-400 text-sm">关闭</button></div><div class="space-y-2">' + units.map(function (unit) { return '<div class="rounded-xl bg-[#F9F7F3] p-3 flex items-center justify-between gap-3"><div><div class="font-medium text-sm">' + escapeHtml(unit.label) + (unit.isDefault ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-[#E8F5EC] text-[#2D9D4E]">默认</span>' : '') + '</div><div class="text-xs text-gray-400 mt-1">单位价格 ' + fmt(unit.price || 0) + ' · 单位库存</div></div><div class="font-bold text-[#2D9D4E]">' + Number(unit.stock || 0) + '</div></div>'; }).join('') + '</div></div></div>';
+      root.innerHTML = '<div class="app-modal-shell"><div class="app-modal-card modal-compact p-4"><div class="flex items-center justify-between mb-3"><div><div class="font-bold">单位库存</div><div class="text-xs text-gray-500 mt-1">' + escapeHtml(product.name) + ' · ' + escapeHtml(variant.label) + '</div></div><button onclick="closeModal()" class="text-gray-400 text-sm">关闭</button></div><div class="space-y-2 app-modal-body">' + units.map(function (unit) { return '<div class="rounded-xl bg-[#F9F7F3] p-3 flex items-center justify-between gap-3"><div><div class="font-medium text-sm">' + escapeHtml(unit.label) + (unit.isDefault ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-[#E8F5EC] text-[#2D9D4E]">默认</span>' : '') + '</div><div class="text-xs text-gray-400 mt-1">单位价格 ' + fmt(unit.price || 0) + ' · 配送费 ' + fmt(unit.deliveryFee || 0) + ' · 单位库存</div></div><div class="font-bold text-[#2D9D4E]">' + Number(unit.stock || 0) + '</div></div>'; }).join('') + '</div></div></div>';
     }
 
     function renderInventoryTreeCard(product) {
@@ -6551,9 +7648,109 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         + '<div class="text-xs text-gray-400">' + (expanded ? '收起规格库存' : '展开规格库存') + '</div>'
         + '</button>'
         + (expanded ? '<div class="space-y-2 mt-3 border-t border-gray-200 pt-3">' + variants.map(function (variant) {
-          return '<button onclick=\'openInventoryUnitModal(' + product.id + ', ' + JSON.stringify(String(variant.id || '')) + ')\' class="w-full rounded-xl bg-white border border-gray-200 px-3 py-2 text-left flex items-center justify-between gap-3"><div><div class="font-medium text-sm text-gray-700">' + escapeHtml(variant.label) + '</div><div class="text-xs text-gray-400 mt-1">单位价格 ' + getVariantPriceSummary(variant, product) + ' · 点击查看单位库存</div></div><div class="font-bold text-[#2D9D4E]">' + Number(variant.stock || 0) + '</div></button>';
+          return '<button onclick=\'openInventoryUnitModal(' + product.id + ', ' + JSON.stringify(String(variant.id || '')) + ')\' class="w-full rounded-xl bg-white border border-gray-200 px-3 py-2 text-left flex items-center justify-between gap-3"><div><div class="font-medium text-sm text-gray-700">' + escapeHtml(variant.label) + '</div><div class="text-xs text-gray-400 mt-1">单位价格 ' + getVariantPriceSummary(variant, product) + ' · 点击查看单位配送费与库存</div></div><div class="font-bold text-[#2D9D4E]">' + Number(variant.stock || 0) + '</div></button>';
         }).join('') + '</div>' : '')
         + '</div>';
+    }
+
+    function renderAdminLedgerWorkspace() {
+      if (!paymentTransactionsLoaded || !aftersalesLoaded || !inventoryLogsLoaded) {
+        loadAdminRefundWorkspace().catch(function (error) {
+          console.error(error);
+        });
+        return '<div class="bg-white rounded-xl p-4 shadow mt-4 text-sm text-gray-400">交易台账加载中...</div>';
+      }
+      var ledgerTab = adminLedgerState.tab || 'payment';
+      var ledgerFilters = ledgerTab === 'payment' ? adminLedgerState.paymentFilters : (ledgerTab === 'aftersales' ? adminLedgerState.aftersalesFilters : adminLedgerState.inventoryFilters);
+      var ledgerRows = ledgerTab === 'payment' ? getPaymentTransactions() : (ledgerTab === 'aftersales' ? getAftersaleRecords() : getInventoryLogs());
+      var ledgerFilterHtml = ledgerTab === 'payment'
+        ? '<div class="grid grid-cols-2 gap-2 mb-3"><input id="payment-filter-order" value="' + (ledgerFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="payment-filter-user" value="' + (ledgerFilters.username || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="payment-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="paid" ' + (ledgerFilters.status === 'paid' ? 'selected' : '') + '>paid</option></select><input id="payment-filter-date-from" type="date" value="' + (ledgerFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="payment-filter-date-to" type="date" value="' + (ledgerFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div>'
+        : ledgerTab === 'aftersales'
+          ? '<div class="grid grid-cols-2 gap-2 mb-3"><input id="aftersales-filter-order" value="' + (ledgerFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="aftersales-filter-user" value="' + (ledgerFilters.username || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="aftersales-filter-type" class="p-2 border rounded-lg text-sm"><option value="">全部类型</option><option value="refund" ' + (ledgerFilters.type === 'refund' ? 'selected' : '') + '>refund</option><option value="cancel" ' + (ledgerFilters.type === 'cancel' ? 'selected' : '') + '>cancel</option></select><input id="aftersales-filter-status" value="' + (ledgerFilters.status || '') + '" class="p-2 border rounded-lg text-sm" placeholder="状态"><input id="aftersales-filter-date-from" type="date" value="' + (ledgerFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="aftersales-filter-date-to" type="date" value="' + (ledgerFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div>'
+          : '<div class="grid grid-cols-2 gap-2 mb-3"><input id="inventory-filter-order" value="' + (ledgerFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="inventory-filter-user" value="' + (ledgerFilters.username || '') + '" class="p-2 border rounded-lg text-sm" placeholder="操作人"><input id="inventory-filter-action" value="' + (ledgerFilters.actionType || '') + '" class="p-2 border rounded-lg text-sm" placeholder="动作类型"><input id="inventory-filter-date-from" type="date" value="' + (ledgerFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="inventory-filter-date-to" type="date" value="' + (ledgerFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div>';
+      var ledgerRowHtml = ledgerTab === 'payment'
+        ? ledgerRows.map(function (item) {
+          return '<div class="rounded-xl bg-[#F9F7F3] p-3 mb-2"><div class="flex justify-between gap-3"><div><div class="font-medium text-sm">' + item.orderId + '</div><div class="text-xs text-gray-500 mt-1">' + item.username + ' · ' + item.channel + '</div></div><div class="text-right"><div class="font-bold text-sm text-[#2D9D4E]">¥' + Number(item.amount || 0).toFixed(2) + '</div><div class="text-xs text-gray-400 mt-1">' + formatDateTimeLabel(item.paidAt || item.createdAt) + '</div></div></div><div class="text-xs text-gray-500 mt-2">收货人：' + (item.receiverName || '未填写') + ' / ' + (item.receiverPhone || '未填写') + '</div><div class="text-xs text-gray-500 mt-1">地址：' + (item.receiverFull || '未填写') + '</div></div>';
+        }).join('')
+        : ledgerTab === 'aftersales'
+          ? ledgerRows.map(function (item) {
+            return '<div class="rounded-xl bg-[#F9F7F3] p-3 mb-2"><div class="flex justify-between gap-3"><div><div class="font-medium text-sm">' + item.orderId + '</div><div class="text-xs text-gray-500 mt-1">' + item.username + ' · ' + item.type + '</div></div><div class="text-right"><div class="font-bold text-sm ' + (item.type === 'refund' ? 'text-[#E07B39]' : 'text-[#2D9D4E]') + '">' + (item.status || '未标记') + '</div><div class="text-xs text-gray-400 mt-1">' + formatDateTimeLabel(item.updatedAt || item.createdAt) + '</div></div></div><div class="text-xs text-gray-500 mt-2">金额：¥' + Number(item.amount || 0).toFixed(2) + '</div><div class="text-xs text-gray-500 mt-1">原因：' + (item.reason || '未填写') + '</div></div>';
+          }).join('')
+          : ledgerRows.map(function (item) {
+            return '<div class="rounded-xl bg-[#F9F7F3] p-3 mb-2"><div class="flex justify-between gap-3"><div><div class="font-medium text-sm">' + (item.productName || ('商品#' + item.productId)) + '</div><div class="text-xs text-gray-500 mt-1">' + (item.operatorUsername || 'system') + ' · ' + item.actionType + '</div></div><div class="text-right"><div class="font-bold text-sm text-[#2D9D4E]">' + (item.deltaStock > 0 ? '+' : '') + item.deltaStock + ' / 销量 ' + (item.deltaSales > 0 ? '+' : '') + item.deltaSales + '</div><div class="text-xs text-gray-400 mt-1">' + formatDateTimeLabel(item.createdAt) + '</div></div></div><div class="text-xs text-gray-500 mt-2">库存：' + item.beforeStock + ' → ' + item.afterStock + '</div><div class="text-xs text-gray-500 mt-1">订单：' + (item.orderId || '无') + '</div><div class="text-xs text-gray-500 mt-1">备注：' + (item.note || '无') + '</div></div>';
+          }).join('');
+      return '<div class="bg-white rounded-xl p-4 shadow mt-4"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">交易台账</div><div class="text-xs text-gray-500 mt-1">支付、售后和库存流水统一放在数据页查看。</div></div><div class="flex gap-2 text-xs"><button onclick="switchAdminLedgerTab(\'payment\')" class="px-3 py-2 rounded-full ' + (ledgerTab === 'payment' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F3F1EA] text-gray-500') + '">支付</button><button onclick="switchAdminLedgerTab(\'aftersales\')" class="px-3 py-2 rounded-full ' + (ledgerTab === 'aftersales' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F3F1EA] text-gray-500') + '">售后</button><button onclick="switchAdminLedgerTab(\'inventory\')" class="px-3 py-2 rounded-full ' + (ledgerTab === 'inventory' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F3F1EA] text-gray-500') + '">库存</button></div></div>'
+        + ledgerFilterHtml
+        + '<div class="flex gap-2 mb-3"><button onclick="applyAdminLedgerFilters(\'' + ledgerTab + '\')" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">查询台账</button><button onclick="resetAdminLedgerFilters(\'' + ledgerTab + '\')" class="flex-1 py-2 rounded-lg border text-sm">重置</button></div>'
+        + (ledgerRowHtml || '<div class="text-sm text-gray-400">当前没有匹配的台账记录</div>')
+        + (ledgerTab === 'payment'
+          ? renderPager(paymentTransactionsMetaState, 'changeAdminPaymentPage')
+          : ledgerTab === 'aftersales'
+            ? renderPager(aftersalesMetaState, 'changeAdminAftersalesPage')
+            : renderPager(inventoryLogsMetaState, 'changeAdminInventoryPage'))
+        + '</div>';
+    }
+
+    function buildAdminOrderDetailHtml(order) {
+      var normalizedOrder = normalizeOrderSnapshot(order);
+      var latestRefund = getLatestRefundRequest(normalizedOrder.id, normalizedOrder.owner);
+      var addrText = normalizedOrder.address ? (normalizedOrder.address.name + ' · ' + normalizedOrder.address.phone + ' · ' + normalizedOrder.address.full) : '暂无地址信息';
+      var shouldShowShipmentDetail = normalizedOrder.status === 'paid' || normalizedOrder.status === 'shipped' || normalizedOrder.status === 'done' || (Array.isArray(normalizedOrder.shipments) && normalizedOrder.shipments.length > 0);
+      return '<div class="space-y-4 app-modal-body">'
+        + '<div class="surface-card p-4"><div class="font-medium mb-2">订单状态</div><div class="' + getOrderStatusTone(normalizedOrder.status) + ' font-bold">' + getOrderStatusLabel(normalizedOrder.status) + '</div><div class="text-sm text-gray-500 mt-1">订单号：' + normalizedOrder.id + '</div><div class="text-sm text-gray-500">买家：' + normalizedOrder.owner + (normalizedOrder.ownerDeleted ? '（已删除）' : '') + '</div><div class="text-sm text-gray-500">下单时间：' + formatDateTimeLabel(normalizedOrder.time) + '</div>' + (normalizedOrder.fulfillmentSummary && normalizedOrder.fulfillmentSummary.shipmentCount ? '<div class="text-sm text-gray-500">已录运单：' + normalizedOrder.fulfillmentSummary.shipmentCount + ' 个</div>' : '') + '</div>'
+        + (latestRefund ? '<div class="surface-card p-4"><div class="font-medium mb-2">退款处理</div><div class="' + getRefundStatusTone(latestRefund.status) + ' font-bold">' + getRefundStatusLabel(latestRefund.status) + '</div><div class="text-sm text-gray-500 mt-2">退款原因：' + (latestRefund.reason || '未填写') + '</div>' + (latestRefund.rejectReason ? '<div class="text-sm text-red-500 mt-2">驳回原因：' + latestRefund.rejectReason + '</div>' : '') + (latestRefund.completedAt ? '<div class="text-sm text-gray-500 mt-2">完成时间：' + formatDateTimeLabel(latestRefund.completedAt) + '</div>' : '') + '</div>' : '')
+        + '<div class="surface-card p-4"><div class="font-medium mb-2">商品清单</div>' + normalizedOrder.items.map(function (item) {
+          return '<div class="flex gap-3 py-2 border-b last:border-0"><img src="' + item.img + '" class="w-12 h-12 rounded-lg object-cover"><div class="flex-1"><div class="text-sm">' + item.name + '</div><div class="text-xs text-gray-500">' + (item.variantLabel || '默认规格') + ' / ' + (item.unit || item.unitLabel || '默认单位') + ' × ' + item.qty + '</div>' + (item.shippingAddressSnapshot && item.shippingAddressSnapshot.full ? '<div class="text-xs text-gray-400 mt-1">发货地址：' + getAddressSummary(item.shippingAddressSnapshot) + '</div>' : '') + '</div><div class="text-sm font-bold">' + fmt(item.price * item.qty) + '</div></div>';
+        }).join('') + '<div class="flex justify-between font-bold mt-3 pt-3 border-t"><span>实付金额</span><span class="text-[#2D9D4E]">' + fmt(normalizedOrder.total) + '</span></div></div>'
+        + (shouldShowShipmentDetail ? '<div class="soft-card p-4"><div class="font-medium text-[#2D9D4E] mb-2">📍 物流信息</div>' + renderShipmentDetailList(normalizedOrder.shipments, { emptyText: normalizedOrder.status === 'paid' ? '待发货，暂未录入物流信息' : '暂未录入物流信息', orderId: normalizedOrder.id }) + '</div>' : '')
+        + '<div class="surface-card p-4"><div class="font-medium mb-2">收货地址</div><div class="text-sm text-gray-500">' + addrText + '</div></div>'
+        + '</div>';
+    }
+
+    async function openAdminOrderDetailModal(ownerUsername, orderId) {
+      var root = document.getElementById('modal-root');
+      if (!root) return;
+      root.innerHTML = '<div class="app-modal-shell"><div class="app-modal-card modal-wide p-4"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">订单详情</div><div class="text-xs text-gray-500 mt-1">这里按买家端的视角展示商品、地址、物流和退款状态，方便管理员核对。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div><div class="text-sm text-gray-400 py-6">加载中...</div></div></div>';
+      try {
+        var order = await fetchAdminOrderSnapshot(ownerUsername, orderId);
+        root.innerHTML = '<div class="app-modal-shell"><div class="app-modal-card modal-wide p-4"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">订单详情</div><div class="text-xs text-gray-500 mt-1">这里按买家端的视角展示商品、地址、物流和退款状态，方便管理员核对。</div></div><button onclick="closeModal()" class="text-gray-400 text-sm shrink-0">关闭</button></div>' + buildAdminOrderDetailHtml(order) + '</div></div>';
+      } catch (error) {
+        closeModal();
+        alert(error.message || '订单详情加载失败');
+      }
+    }
+
+    function openAdminRefundDetail(refundId) {
+      var refund = findRefundRequestById(refundId);
+      if (!refund) {
+        alert('退款详情不存在或已被刷新，请重新查询退款');
+        return;
+      }
+      adminRefundState.selectedRefundId = refund.id;
+      switchAdminTab('refund');
+    }
+
+    function openAdminRefundDetailByOrder(ownerUsername, orderId) {
+      adminRefundState.selectedRefundId = '';
+      adminRefundFilters = { status: '', orderId: String(orderId || '').trim(), ownerUsername: String(ownerUsername || '').trim(), dateFrom: '', dateTo: '' };
+      refundsMetaState = createPagingMeta(1, refundsMetaState.pageSize || 8, 0);
+      switchAdminTab('refund');
+      loadAdminRefundWorkspace().then(function () {
+        var refund = getLatestRefundRequest(orderId, ownerUsername);
+        if (!refund) {
+          alert('当前订单没有匹配的退款详情');
+          return;
+        }
+        adminRefundState.selectedRefundId = refund.id;
+        renderAdminRefund();
+      }).catch(function (error) {
+        alert(error.message || '退款详情加载失败');
+      });
+    }
+
+    function clearAdminRefundDetail() {
+      adminRefundState.selectedRefundId = '';
+      renderAdminRefund();
     }
 
     function renderAdminDb() {
@@ -6561,7 +7758,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       var orderList = adminOrderListState.items && adminOrderListState.items.length ? adminOrderListState.items : getAllOrders();
       var pend = orderList.filter(function (o) { return o.status === "paid" || o.status === "pending"; });
       var pendingRefunds = getRefundRequests().filter(function (item) { return item.status === 'pending'; });
-      var h = '<div class="workspace-banner mb-4"><div class="text-xs text-white/75 mb-2">经营总览</div><div class="text-xl font-bold">先看今日订单、退款和库存，再进入明细工作台</div><div class="text-sm text-white/80 mt-2">本轮只统一视觉，不改变退款、库存和交易台账的真实逻辑。</div></div>';
+      var h = '<div class="workspace-banner mb-4"><div class="text-xs text-white/75 mb-2">经营总览</div><div class="text-xl font-bold">先看今日订单、退款和库存，再进入明细工作台</div><div class="text-sm text-white/80 mt-2">交易台账已经单拎到独立页签，这里只保留总览和库存树。</div></div>';
       h += '<div class="grid grid-cols-2 gap-3 mb-4">';
       h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#2D9D4E]">' + Number(adminLightStatsState.orderCount || 0) + '</div><div class="text-xs text-gray-500 mt-1">订单总数</div></div>';
       h += '<div class="bg-white rounded-xl p-4 shadow"><div class="text-2xl font-bold text-[#E07B39]">¥' + Number(adminLightStatsState.paidSalesTotal || 0).toFixed(0) + '</div><div class="text-xs text-gray-500 mt-1">累计实付</div></div>';
@@ -6582,10 +7779,17 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       h += '</div>';
       document.getElementById('admin-db').innerHTML = h;
     }
+    function renderAdminLedger() {
+      var mount = document.getElementById('admin-ledger');
+      if (!mount) return;
+      var h = '<div class="workspace-banner mb-4"><div class="text-xs text-white/75 mb-2">台账中心</div><div class="text-xl font-bold">把支付、售后和库存流水单独放到一个后台页签里</div><div class="text-sm text-white/80 mt-2">这里专门做记录查询，不再和退款处理或经营总览混在一起。</div></div>';
+      h += renderAdminLedgerWorkspace();
+      mount.innerHTML = h;
+    }
     function renderAdminRefund() {
       var mount = document.getElementById('admin-refund');
       if (!mount) return;
-      if (!refundsLoaded || !paymentTransactionsLoaded || !aftersalesLoaded || !inventoryLogsLoaded) {
+      if (!refundsLoaded) {
         mount.innerHTML = '<div class="bg-white rounded-xl p-4 shadow text-sm text-gray-400">退款工作台加载中...</div>';
         loadAdminRefundWorkspace().catch(function (error) {
           mount.innerHTML = '<div class="bg-white rounded-xl p-4 shadow text-sm text-red-500">' + (error.message || '退款工作台加载失败') + '</div>';
@@ -6596,6 +7800,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       var pendingRefunds = refunds.filter(function (item) { return item.status === 'pending'; });
       var completedRefunds = refunds.filter(function (item) { return item.status === 'completed'; });
       var rejectedRefunds = refunds.filter(function (item) { return item.status === 'rejected'; });
+      var selectedRefund = findRefundRequestById(adminRefundState.selectedRefundId);
       var refundCards = refunds.map(function (refund) {
         var order = findOrderSnapshot(refund.ownerUsername, refund.orderId);
         var itemList = order && Array.isArray(order.items) && order.items.length ? order.items : refund.itemsSnapshot;
@@ -6614,39 +7819,24 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
           + actionBar
           + '</div>';
       }).join('');
-      var ledgerTab = adminLedgerState.tab || 'payment';
-      var ledgerFilters = ledgerTab === 'payment' ? adminLedgerState.paymentFilters : (ledgerTab === 'aftersales' ? adminLedgerState.aftersalesFilters : adminLedgerState.inventoryFilters);
-      var ledgerRows = ledgerTab === 'payment' ? getPaymentTransactions() : (ledgerTab === 'aftersales' ? getAftersaleRecords() : getInventoryLogs());
-      var ledgerFilterHtml = ledgerTab === 'payment'
-        ? '<div class="grid grid-cols-2 gap-2 mb-3"><input id="payment-filter-order" value="' + (ledgerFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="payment-filter-user" value="' + (ledgerFilters.username || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="payment-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="paid" ' + (ledgerFilters.status === 'paid' ? 'selected' : '') + '>paid</option></select><input id="payment-filter-date-from" type="date" value="' + (ledgerFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="payment-filter-date-to" type="date" value="' + (ledgerFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div>'
-        : ledgerTab === 'aftersales'
-          ? '<div class="grid grid-cols-2 gap-2 mb-3"><input id="aftersales-filter-order" value="' + (ledgerFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="aftersales-filter-user" value="' + (ledgerFilters.username || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="aftersales-filter-type" class="p-2 border rounded-lg text-sm"><option value="">全部类型</option><option value="refund" ' + (ledgerFilters.type === 'refund' ? 'selected' : '') + '>refund</option><option value="cancel" ' + (ledgerFilters.type === 'cancel' ? 'selected' : '') + '>cancel</option></select><input id="aftersales-filter-status" value="' + (ledgerFilters.status || '') + '" class="p-2 border rounded-lg text-sm" placeholder="状态"><input id="aftersales-filter-date-from" type="date" value="' + (ledgerFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="aftersales-filter-date-to" type="date" value="' + (ledgerFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div>'
-          : '<div class="grid grid-cols-2 gap-2 mb-3"><input id="inventory-filter-order" value="' + (ledgerFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="inventory-filter-user" value="' + (ledgerFilters.username || '') + '" class="p-2 border rounded-lg text-sm" placeholder="操作人"><input id="inventory-filter-action" value="' + (ledgerFilters.actionType || '') + '" class="p-2 border rounded-lg text-sm" placeholder="动作类型"><input id="inventory-filter-date-from" type="date" value="' + (ledgerFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="inventory-filter-date-to" type="date" value="' + (ledgerFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div>';
-      var ledgerRowHtml = ledgerTab === 'payment'
-        ? ledgerRows.map(function (item) {
-          return '<div class="rounded-xl bg-[#F9F7F3] p-3 mb-2"><div class="flex justify-between gap-3"><div><div class="font-medium text-sm">' + item.orderId + '</div><div class="text-xs text-gray-500 mt-1">' + item.username + ' · ' + item.channel + '</div></div><div class="text-right"><div class="font-bold text-sm text-[#2D9D4E]">¥' + Number(item.amount || 0).toFixed(2) + '</div><div class="text-xs text-gray-400 mt-1">' + formatDateTimeLabel(item.paidAt || item.createdAt) + '</div></div></div><div class="text-xs text-gray-500 mt-2">收货人：' + (item.receiverName || '未填写') + ' / ' + (item.receiverPhone || '未填写') + '</div><div class="text-xs text-gray-500 mt-1">地址：' + (item.receiverFull || '未填写') + '</div></div>';
-        }).join('')
-        : ledgerTab === 'aftersales'
-          ? ledgerRows.map(function (item) {
-            return '<div class="rounded-xl bg-[#F9F7F3] p-3 mb-2"><div class="flex justify-between gap-3"><div><div class="font-medium text-sm">' + item.orderId + '</div><div class="text-xs text-gray-500 mt-1">' + item.username + ' · ' + item.type + '</div></div><div class="text-right"><div class="font-bold text-sm ' + (item.type === 'refund' ? 'text-[#E07B39]' : 'text-[#2D9D4E]') + '">' + (item.status || '未标记') + '</div><div class="text-xs text-gray-400 mt-1">' + formatDateTimeLabel(item.updatedAt || item.createdAt) + '</div></div></div><div class="text-xs text-gray-500 mt-2">金额：¥' + Number(item.amount || 0).toFixed(2) + '</div><div class="text-xs text-gray-500 mt-1">原因：' + (item.reason || '未填写') + '</div></div>';
-          }).join('')
-          : ledgerRows.map(function (item) {
-            return '<div class="rounded-xl bg-[#F9F7F3] p-3 mb-2"><div class="flex justify-between gap-3"><div><div class="font-medium text-sm">' + (item.productName || ('商品#' + item.productId)) + '</div><div class="text-xs text-gray-500 mt-1">' + (item.operatorUsername || 'system') + ' · ' + item.actionType + '</div></div><div class="text-right"><div class="font-bold text-sm text-[#2D9D4E]">' + (item.deltaStock > 0 ? '+' : '') + item.deltaStock + ' / 销量 ' + (item.deltaSales > 0 ? '+' : '') + item.deltaSales + '</div><div class="text-xs text-gray-400 mt-1">' + formatDateTimeLabel(item.createdAt) + '</div></div></div><div class="text-xs text-gray-500 mt-2">库存：' + item.beforeStock + ' → ' + item.afterStock + '</div><div class="text-xs text-gray-500 mt-1">订单：' + (item.orderId || '无') + '</div><div class="text-xs text-gray-500 mt-1">备注：' + (item.note || '无') + '</div></div>';
-          }).join('');
       var h = '<div class="flex items-center justify-between mb-3"><div><div class="font-bold">退款工作台</div></div><button onclick="loadAdminRefundWorkspace().catch(function(error){alert(error.message||\'退款工作台加载失败\')})" class="px-3 py-2 rounded-full bg-[#2D9D4E] text-white text-xs btn">刷新</button></div>';
       h += '<div class="grid grid-cols-3 gap-3 mb-4"><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">待处理退款</div><div class="text-2xl font-bold text-[#E07B39] mt-2">' + pendingRefunds.length + '</div></div><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">已退款</div><div class="text-2xl font-bold text-[#2D9D4E] mt-2">' + completedRefunds.length + '</div></div><div class="bg-white rounded-xl p-4 shadow"><div class="text-xs text-gray-500">已驳回</div><div class="text-2xl font-bold text-red-500 mt-2">' + rejectedRefunds.length + '</div></div></div>';
       h += '<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="font-bold mb-3">退款筛选</div><div class="grid grid-cols-2 gap-2"><select id="refund-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ' + (adminRefundFilters.status === 'pending' ? 'selected' : '') + '>待处理</option><option value="completed" ' + (adminRefundFilters.status === 'completed' ? 'selected' : '') + '>已退款</option><option value="rejected" ' + (adminRefundFilters.status === 'rejected' ? 'selected' : '') + '>已驳回</option></select><input id="refund-filter-order" value="' + (adminRefundFilters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="refund-filter-owner" value="' + (adminRefundFilters.ownerUsername || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><input id="refund-filter-date-from" type="date" value="' + (adminRefundFilters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="refund-filter-date-to" type="date" value="' + (adminRefundFilters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div><div class="flex gap-2 mt-3"><button onclick="applyAdminRefundFilters()" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">查询退款</button><button onclick="resetAdminRefundFilters()" class="flex-1 py-2 rounded-lg border text-sm">重置</button></div></div>';
+      if (selectedRefund) {
+        var selectedOrder = findOrderSnapshot(selectedRefund.ownerUsername, selectedRefund.orderId);
+        var selectedItems = selectedOrder && Array.isArray(selectedOrder.items) && selectedOrder.items.length ? selectedOrder.items : selectedRefund.itemsSnapshot;
+        h += '<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="flex items-center justify-between gap-3"><div><div class="font-bold">退款详情</div><div class="text-xs text-gray-500 mt-1">' + selectedRefund.orderId + ' · ' + selectedRefund.ownerUsername + '</div></div><button onclick="clearAdminRefundDetail()" class="px-3 py-2 rounded-full border text-xs btn">返回退款列表</button></div>'
+          + '<div class="grid grid-cols-2 gap-2 text-xs text-gray-500 mt-3"><div>申请时间：' + formatDateTimeLabel(selectedRefund.requestedAt) + '</div><div>处理时间：' + formatDateTimeLabel(selectedRefund.completedAt || selectedRefund.reviewedAt) + '</div><div>处理人：' + (selectedRefund.assigneeUsername || '待处理') + '</div><div>申请前状态：' + getOrderStatusLabel(selectedRefund.sourceOrderStatus || '') + '</div></div>'
+          + '<div class="mt-3 rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-500 mb-1">退款状态</div><div class="font-bold ' + getRefundStatusTone(selectedRefund.status) + '">' + getRefundStatusLabel(selectedRefund.status) + '</div><div class="text-sm text-gray-500 mt-2">退款原因：' + (selectedRefund.reason || '未填写') + '</div>' + (selectedRefund.rejectReason ? '<div class="text-sm text-red-500 mt-2">驳回原因：' + selectedRefund.rejectReason + '</div>' : '') + '</div>'
+          + '<div class="grid grid-cols-2 gap-2 mt-3"><div class="rounded-xl bg-[#EFF7EF] p-3"><div class="text-xs text-gray-500">支付退款</div><div class="font-bold text-sm mt-1 ' + (selectedRefund.paymentRefunded ? 'text-[#2D9D4E]' : 'text-gray-400') + '">' + (selectedRefund.paymentRefunded ? '已执行' : '未执行') + '</div></div><div class="rounded-xl bg-[#F7F3EC] p-3"><div class="text-xs text-gray-500">库存恢复</div><div class="font-bold text-sm mt-1 ' + (selectedRefund.inventoryRestored ? 'text-[#2D9D4E]' : 'text-gray-400') + '">' + (selectedRefund.inventoryRestored ? '已恢复' : '未恢复') + '</div></div></div>'
+          + '<div class="mt-3"><div class="text-xs text-gray-500 mb-2">订单商品快照</div><div class="space-y-2">' + (selectedItems && selectedItems.length ? selectedItems.map(function (item) {
+            return '<div class="rounded-lg bg-[#F9F7F3] p-2"><div class="text-sm">' + item.name + ' × ' + item.qty + '</div><div class="text-xs text-gray-500 mt-1">' + (item.variantLabel || '默认规格') + ' / ' + (item.unit || item.unitLabel || '默认单位') + '</div><div class="text-xs text-gray-500 mt-1">发货地址：' + getAddressSummary(item.shippingAddressSnapshot || {}) + '</div></div>';
+          }).join('') : '<div class="text-xs text-gray-400">该退款单没有商品快照</div>') + '</div></div>'
+          + (selectedOrder ? '<div class="mt-3 text-xs text-gray-500">当前订单状态：<span class="' + getOrderStatusTone(selectedOrder.status) + '">' + getOrderStatusLabel(selectedOrder.status) + '</span></div>' : '')
+          + (selectedRefund.status === 'pending' ? '<div class="flex gap-2 mt-3"><button onclick="completeRefundFromAdmin(\'' + selectedRefund.id + '\')" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">退款完成</button><button onclick="rejectRefundFromAdmin(\'' + selectedRefund.id + '\')" class="flex-1 py-2 rounded-lg bg-red-50 text-red-500 text-sm">驳回退款</button></div>' : '<div class="mt-3 text-xs text-gray-400">当前退款单已结束处理</div>')
+          + '</div>';
+      }
       h += '<div class="mb-4">' + (refundCards || '<div class="bg-white rounded-xl p-4 shadow text-sm text-gray-400">没有匹配的退款记录</div>') + (refundCards ? renderPager(refundsMetaState, 'changeAdminRefundPage') : '') + '</div>';
-      h += '<div class="bg-white rounded-xl p-4 shadow"><div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">交易台账</div></div><div class="flex gap-2 text-xs"><button onclick="switchAdminLedgerTab(\'payment\')" class="px-3 py-2 rounded-full ' + (ledgerTab === 'payment' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F3F1EA] text-gray-500') + '">支付</button><button onclick="switchAdminLedgerTab(\'aftersales\')" class="px-3 py-2 rounded-full ' + (ledgerTab === 'aftersales' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F3F1EA] text-gray-500') + '">售后</button><button onclick="switchAdminLedgerTab(\'inventory\')" class="px-3 py-2 rounded-full ' + (ledgerTab === 'inventory' ? 'bg-[#2D9D4E] text-white' : 'bg-[#F3F1EA] text-gray-500') + '">库存</button></div></div>';
-      h += ledgerFilterHtml;
-      h += '<div class="flex gap-2 mb-3"><button onclick="applyAdminLedgerFilters(\'' + ledgerTab + '\')" class="flex-1 py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">查询台账</button><button onclick="resetAdminLedgerFilters(\'' + ledgerTab + '\')" class="flex-1 py-2 rounded-lg border text-sm">重置</button></div>';
-      h += ledgerRowHtml || '<div class="text-sm text-gray-400">当前没有匹配的台账记录</div>';
-      h += ledgerTab === 'payment'
-        ? renderPager(paymentTransactionsMetaState, 'changeAdminPaymentPage')
-        : ledgerTab === 'aftersales'
-          ? renderPager(aftersalesMetaState, 'changeAdminAftersalesPage')
-          : renderPager(inventoryLogsMetaState, 'changeAdminInventoryPage');
-      h += '</div>';
       mount.innerHTML = h;
     }
     function renderAdminPd() {
@@ -6668,25 +7858,27 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       document.getElementById('admin-pd').innerHTML = h;
     }
     function renderAdminOd() {
-      var allOrders = (adminOrderListState.items && adminOrderListState.items.length ? adminOrderListState.items : getAllOrders()) || [];
-      var h = '<div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">订单管理</div><div class="text-xs text-gray-500 mt-1">这里只保留查看、筛选、导出和跳转工作台；退款与发货都去独立工作区处理。</div></div></div>';
+      var allOrders = adminOrderListState.loaded ? (adminOrderListState.items || []) : (getAllOrders() || []);
+      var h = '<div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">订单管理</div><div class="text-xs text-gray-500 mt-1">详情、发货和退款拆成独立动作：详情弹窗只读核对，发货 / 退款分别跳到对应工作区详情。</div></div></div>';
       h += '<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="font-bold mb-3">订单筛选</div><div class="grid grid-cols-2 gap-2"><input id="admin-order-filter-order" value="' + (adminOrderListState.filters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="admin-order-filter-owner" value="' + (adminOrderListState.filters.ownerUsername || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="admin-order-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ' + (adminOrderListState.filters.status === 'pending' ? 'selected' : '') + '>待付款</option><option value="paid" ' + (adminOrderListState.filters.status === 'paid' ? 'selected' : '') + '>待发货</option><option value="shipped" ' + (adminOrderListState.filters.status === 'shipped' ? 'selected' : '') + '>已发货</option><option value="done" ' + (adminOrderListState.filters.status === 'done' ? 'selected' : '') + '>已完成</option><option value="cancelled" ' + (adminOrderListState.filters.status === 'cancelled' ? 'selected' : '') + '>已取消</option><option value="refund_pending" ' + (adminOrderListState.filters.status === 'refund_pending' ? 'selected' : '') + '>退款中</option><option value="refunded" ' + (adminOrderListState.filters.status === 'refunded' ? 'selected' : '') + '>已退款</option></select><input id="admin-order-filter-date-from" type="date" value="' + (adminOrderListState.filters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="admin-order-filter-date-to" type="date" value="' + (adminOrderListState.filters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div><div class="grid grid-cols-3 gap-2 mt-3"><button onclick="applyAdminOrderFilters()" class="py-2 rounded-lg bg-[#2D9D4E] text-white text-sm btn">查询订单</button><button onclick="resetAdminOrderFilters()" class="py-2 rounded-lg border text-sm btn">重置</button><button onclick="downloadAdminOrderCsv()" ' + (adminOrderListState.exporting ? 'disabled ' : '') + 'class="py-2 rounded-lg border text-sm btn ' + (adminOrderListState.exporting ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'text-[#2D9D4E] border-[#2D9D4E]') + '">' + (adminOrderListState.exporting ? '导出中...' : '导出 CSV') + '</button></div></div>';
       if (!allOrders.length) {
         h += "<div class='bg-white rounded-xl p-4 shadow text-center text-gray-400 text-sm'>当前筛选下暂无订单</div>";
       } else {
         h += allOrders.map(function (o) {
           var latestRefund = getLatestRefundRequest(o.id, o.owner);
-          var jumpButtons = '<div class="grid grid-cols-2 gap-2 mt-3">'
-            + '<button onclick="event.stopPropagation();openAdminFulfillmentDetail(\'' + o.owner + '\',\'' + o.id + '\')" class="py-2 rounded-lg border border-[#2D9D4E] text-[#2D9D4E] text-xs">' + (o.status === 'paid' ? '去发货' : '查看详情') + '</button>'
-            + '<button onclick="event.stopPropagation();switchAdminTab(\'refund\')" class="py-2 rounded-lg border border-[#E07B39] text-[#E07B39] text-xs">' + (latestRefund ? '去退款工作台' : '去退款工作台') + '</button>'
+          var hasRefundDetail = !!latestRefund || o.status === 'refund_pending' || o.status === 'refunded';
+          var actionButtons = '<div class="grid gap-2 mt-3 ' + (hasRefundDetail && o.status === 'paid' ? 'grid-cols-3' : (hasRefundDetail || o.status === 'paid' ? 'grid-cols-2' : 'grid-cols-1')) + '">'
+            + '<button onclick="openAdminOrderDetailModal(\'' + o.owner + '\',\'' + o.id + '\')" class="py-2 rounded-lg border border-gray-300 text-gray-600 text-xs btn">详情</button>'
+            + (o.status === 'paid' ? '<button onclick="openAdminFulfillmentDetail(\'' + o.owner + '\',\'' + o.id + '\')" class="py-2 rounded-lg border border-[#2D9D4E] text-[#2D9D4E] text-xs btn">发货</button>' : '')
+            + (hasRefundDetail ? '<button onclick="openAdminRefundDetailByOrder(\'' + o.owner + '\',\'' + o.id + '\')" class="py-2 rounded-lg border border-[#E07B39] text-[#E07B39] text-xs btn">退款</button>' : '')
             + '</div>';
-          return '<div class="bg-white rounded-xl p-3 shadow mb-3 cursor-pointer" onclick="openAdminFulfillmentDetail(\'' + o.owner + '\',\'' + o.id + '\')">'
+          return '<div class="bg-white rounded-xl p-3 shadow mb-3">'
             + '<div class="flex justify-between mb-1 gap-3"><div><div class="text-xs text-gray-500">' + o.id + ' · ' + o.owner + (o.ownerDeleted ? '（已删除）' : '') + '</div><div class="text-xs ' + getOrderStatusTone(o.status) + ' mt-1">' + getOrderStatusLabel(o.status) + '</div></div><div class="text-right text-xs text-gray-400">' + formatDateTimeLabel(o.time) + '</div></div>'
             + (latestRefund ? '<div class="text-xs ' + getRefundStatusTone(latestRefund.status) + ' mb-2">退款申请：' + getRefundStatusLabel(latestRefund.status) + '</div>' : '')
             + '<div class="text-xs text-gray-500 mb-2">收货地址：' + getAddressSummary(o.address) + '</div>'
             + '<div class="space-y-2">' + o.items.map(function (i) { return '<div class="rounded-lg bg-[#F9F7F3] p-2"><div class="text-sm">' + i.name + ' × ' + i.qty + '</div><div class="text-xs text-gray-500 mt-1">' + (i.variantLabel || '默认规格') + ' / ' + (i.unit || i.unitLabel || '默认单位') + '</div><div class="text-xs text-gray-500 mt-1">发货地址：' + getAddressSummary(i.shippingAddressSnapshot) + '</div></div>'; }).join("") + '</div>'
             + renderShipmentCardList(o.shipments, { compact: true, emptyText: o.status === 'paid' ? '待发货，暂未录入物流信息' : '暂未录入物流信息' })
-            + jumpButtons
+            + actionButtons
             + '<div class="text-right font-bold text-[#2D9D4E] mt-3">¥' + o.total.toFixed(2) + '</div>'
             + '</div>';
         }).join('');
@@ -6743,8 +7935,8 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
           h += '<div class="text-sm text-gray-400">当前订单没有可继续发货的商品，详情页只读展示完整履约信息。</div>';
         } else {
           h += '<div class="grid grid-cols-2 gap-2"><input id="admin-fulfillment-tracking" value="' + (adminFulfillmentState.draft.trackingNo || '') + '" oninput="setAdminFulfillmentDraftField(\'trackingNo\', this.value)" class="p-2 border rounded-lg text-sm" placeholder="快递单号"><input id="admin-fulfillment-carrier-name" value="' + (adminFulfillmentState.draft.carrierName || '') + '" oninput="setAdminFulfillmentDraftField(\'carrierName\', this.value)" class="p-2 border rounded-lg text-sm" placeholder="快递公司"><input id="admin-fulfillment-carrier-code" value="' + (adminFulfillmentState.draft.carrierCode || '') + '" oninput="setAdminFulfillmentDraftField(\'carrierCode\', this.value)" class="p-2 border rounded-lg text-sm" placeholder="快递代码"></div>';
-          h += '<div class="text-xs text-gray-400 mt-3">先勾选本次随单发出的商品，再填写快递单号；一个订单可以重复录入多条运单。</div>';
-          h += '<button onclick="submitAdminFulfillmentShipment()" class="w-full mt-3 py-3 rounded-xl bg-[#2D9D4E] text-white text-sm btn">' + (adminFulfillmentState.loading ? '保存中...' : '保存发货信息') + '</button>';
+          h += '<div class="text-xs text-gray-400 mt-3">先勾选本次随单发出的商品，再填写快递单号；同地址商品可以共用一条运单合包，一个订单也可以重复录入多条运单继续拆包。</div>';
+          h += '<button onclick="submitAdminFulfillmentShipment()" class="w-full mt-3 py-3 rounded-xl bg-[#2D9D4E] text-white text-sm btn">' + (adminFulfillmentState.loading ? '正在保存...' : '保存发货信息') + '</button>';
         }
         h += '</div>';
         h += '</div>';
@@ -6803,7 +7995,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         return '<div class="bg-white rounded-xl p-4 shadow mb-3"><div class="flex items-start justify-between gap-3"><div><div class="font-medium">' + item.name + '</div><div class="text-xs text-gray-500 mt-1">' + getCouponMetaText(item) + '</div></div><span class="text-xs px-2 py-1 rounded-full bg-[#F9F7F3] text-gray-500">' + getCouponTypeLabel(item.type) + '</span></div><div class="grid grid-cols-3 gap-2 mt-3"><button onclick="openCouponUserPicker(\'' + item.templateId + '\')" class="py-2 rounded-lg border border-[#2D9D4E] text-[#2D9D4E] text-xs">选择用户发放</button><button onclick="issueCouponTemplateToAll(\'' + item.templateId + '\')" class="py-2 rounded-lg bg-[#E07B39] text-white text-xs">全员发放</button><button onclick="deleteCouponTemplate(\'' + item.templateId + '\')" class="py-2 rounded-lg bg-gray-100 text-gray-500 text-xs">删除</button></div></div>';
       }).join('') : '<div class="bg-white rounded-xl p-4 text-sm text-gray-400 shadow">暂无优惠券模板</div>') + '</div>';
       if (currentTemplate) {
-        h += '<div class="fixed inset-0 bg-black/30 z-50 flex items-end sm:items-center justify-center p-4"><div class="bg-white rounded-2xl w-full max-w-md p-4"><div class="flex items-center justify-between mb-3"><div><div class="font-bold">发放优惠券</div><div class="text-xs text-gray-500 mt-1">' + currentTemplate.name + ' · ' + getCouponBenefitText(currentTemplate) + '</div></div><button onclick="closeCouponUserPicker()" class="text-gray-400 text-sm">关闭</button></div><div class="grid grid-cols-[1fr,110px] gap-2 mb-3"><input value="' + (couponRecipientState.keyword || '') + '" oninput="setCouponRecipientKeyword(this.value)" placeholder="搜索用户名" class="w-full p-2 border rounded-lg text-sm"><select onchange="setCouponRecipientRoleFilter(this.value)" class="w-full p-2 border rounded-lg text-sm"><option value="all"' + (couponRecipientState.roleFilter === 'all' ? ' selected' : '') + '>全部用户</option><option value="normal"' + (couponRecipientState.roleFilter === 'normal' ? ' selected' : '') + '>普通用户</option><option value="farmer"' + (couponRecipientState.roleFilter === 'farmer' ? ' selected' : '') + '>农户</option></select></div><div class="max-h-64 overflow-y-auto space-y-2 mb-3">' + (filteredUsers.length ? filteredUsers.map(function (u) { return '<label class="flex items-center justify-between bg-[#F9F7F3] rounded-lg px-3 py-2 text-sm"><div><div class="font-medium">' + u.username + '</div><div class="text-xs text-gray-500 mt-1">' + getRoleLabelByMeta({ roles: u.roles }) + '</div></div><input type="checkbox" ' + (couponRecipientState.selectedUsers[u.username] ? 'checked' : '') + ' onchange="toggleCouponRecipient(\'' + u.username + '\')"></label>'; }).join('') : '<div class="text-sm text-gray-400 text-center py-6">没有匹配到用户</div>') + '</div><button onclick="confirmSelectedCouponRecipients()" class="w-full py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">确认发放</button></div></div>';
+        h += '<div class="app-modal-shell" style="z-index:50"><div class="app-modal-card modal-compact p-4"><div class="flex items-center justify-between mb-3"><div><div class="font-bold">发放优惠券</div><div class="text-xs text-gray-500 mt-1">' + currentTemplate.name + ' · ' + getCouponBenefitText(currentTemplate) + '</div></div><button onclick="closeCouponUserPicker()" class="text-gray-400 text-sm">关闭</button></div><div class="grid grid-cols-[1fr,110px] gap-2 mb-3"><input value="' + (couponRecipientState.keyword || '') + '" oninput="setCouponRecipientKeyword(this.value)" placeholder="搜索用户名" class="w-full p-2 border rounded-lg text-sm"><select onchange="setCouponRecipientRoleFilter(this.value)" class="w-full p-2 border rounded-lg text-sm"><option value="all"' + (couponRecipientState.roleFilter === 'all' ? ' selected' : '') + '>全部用户</option><option value="normal"' + (couponRecipientState.roleFilter === 'normal' ? ' selected' : '') + '>普通用户</option><option value="farmer"' + (couponRecipientState.roleFilter === 'farmer' ? ' selected' : '') + '>农户</option></select></div><div class="max-h-64 space-y-2 mb-3 app-modal-body">' + (filteredUsers.length ? filteredUsers.map(function (u) { return '<label class="flex items-center justify-between bg-[#F9F7F3] rounded-lg px-3 py-2 text-sm"><div><div class="font-medium">' + u.username + '</div><div class="text-xs text-gray-500 mt-1">' + getRoleLabelByMeta({ roles: u.roles }) + '</div></div><input type="checkbox" ' + (couponRecipientState.selectedUsers[u.username] ? 'checked' : '') + ' onchange="toggleCouponRecipient(\'' + u.username + '\')"></label>'; }).join('') : '<div class="text-sm text-gray-400 text-center py-6">没有匹配到用户</div>') + '</div><button onclick="confirmSelectedCouponRecipients()" class="w-full py-2 rounded-lg bg-[#2D9D4E] text-white text-sm">确认发放</button></div></div>';
       }
       h += '</div>';
       document.getElementById('admin-coupon').innerHTML = h;
@@ -7193,18 +8385,22 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     function switchFarmerTab(tab) {
       return enqueueNavigation(function () {
         currentFarmerTab = tab;
+        setWorkspaceNavOpen('farmer', false);
         showFarmerPanel();
+        syncWorkspaceHistoryState('push');
       });
     }
     function showFarmerPanel() {
       setWorkspaceMode('farmer');
       document.getElementById('farmer-panel').classList.remove('hidden');
       document.getElementById('admin-panel').classList.add('hidden');
+      farmerNavOpen = false;
+      adminNavOpen = false;
+      renderWorkspaceNavZone('farmer');
       var role = getUserRole();
       var myProds = getFarmerProducts();
       var h = '<div class="space-y-4">';
       h += '<div class="workspace-banner warm"><div class="text-xs text-white/75 mb-2">农户工作台</div><div class="text-xl font-bold">维护你自己的商品、单位库存和发货地址</div><div class="text-sm text-white/80 mt-2">保持现有商品链路不变，只把工作区做得更清晰、更统一。</div></div>';
-      h += '<div class="grid grid-cols-2 gap-2 surface-card p-2"><button onclick="switchFarmerTab(\'product\')" class="py-2 rounded-lg text-sm btn ' + (currentFarmerTab === 'product' ? 'bg-[#E07B39] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">商品管理</button><button onclick="switchFarmerTab(\'ship\')" class="py-2 rounded-lg text-sm btn ' + (currentFarmerTab === 'ship' ? 'bg-[#E07B39] text-white' : 'bg-[#F9F7F3] text-gray-500') + '">发货地址</button></div>';
       if (currentFarmerTab === 'ship') {
         var meta = getUserMeta();
         var list = meta.shippingAddresses || [];
@@ -7229,10 +8425,13 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       }
       h += '</div>';
       document.getElementById('farmer-content').innerHTML = h;
+      syncWorkspaceHistoryState('replace');
       stabilizeViewportTop();
     }
     function farmerBack() {
       return enqueueNavigation(function () {
+        closeAllWorkspaceNavs();
+        resetFarmerWorkspaceSessionState();
         document.getElementById('farmer-panel').classList.add('hidden');
         document.getElementById('nav').style.display = 'flex';
         applyRouteState('profile', 0);
@@ -7244,14 +8443,17 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       setWorkspaceMode('admin');
       document.getElementById('admin-panel').classList.remove('hidden');
       document.getElementById('farmer-panel').classList.add('hidden');
-      var authTabButton = document.getElementById('atab-auth');
-      if (authTabButton) authTabButton.classList.toggle('hidden', !canManageAuth());
+      adminNavOpen = false;
+      farmerNavOpen = false;
       if (!canManageAuth() && currentAdminTab === 'auth') currentAdminTab = 'db';
       activateAdminTab(currentAdminTab || 'db');
+      syncWorkspaceHistoryState('replace');
       stabilizeViewportTop();
     }
     function adminBack() {
       return enqueueNavigation(function () {
+        closeAllWorkspaceNavs();
+        resetAdminWorkspaceSessionState();
         document.getElementById('admin-panel').classList.add('hidden');
         document.getElementById('nav').style.display = 'flex';
         applyRouteState('profile', 0);
@@ -7267,29 +8469,11 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       <div class="flex gap-2"><button onclick="adminBack()" class="text-xs bg-white/20 px-3 py-1 rounded-full">←
           返回</button><button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded-full">退出</button></div>
     </div>
-    <div class="flex items-start min-h-[calc(100vh-56px)]">
-      <div class="workspace-side w-24 shrink-0 bg-[#F8F5EF] border-r border-[#E9E1D4] p-2 space-y-2 sticky top-[56px] self-start">
-        <button onclick="switchAdminTab('db')" id="atab-db"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border bg-[#E8F5EC] text-[#2D9D4E] border-[#D8EBD8] shadow-sm">📊<div class="mt-1">数据</div></button>
-        <button onclick="switchAdminTab('refund')" id="atab-refund"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">💸<div class="mt-1">退款</div></button>
-        <button onclick="switchAdminTab('pd')" id="atab-pd"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">📦<div class="mt-1">商品</div></button>
-        <button onclick="switchAdminTab('od')" id="atab-od"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">📋<div class="mt-1">订单</div></button>
-        <button onclick="switchAdminTab('category')" id="atab-category"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🏷<div class="mt-1">分类</div></button>
-        <button onclick="switchAdminTab('ship')" id="atab-ship"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🚚<div class="mt-1">发货</div></button>
-        <button onclick="switchAdminTab('coupon')" id="atab-coupon"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🎟<div class="mt-1">优惠券</div></button>
-        <button onclick="switchAdminTab('banner')" id="atab-banner"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🖼<div class="mt-1">Banner</div></button>
-        <button onclick="switchAdminTab('auth')" id="atab-auth"
-          class="w-full px-2 py-3 rounded-2xl text-xs font-medium border border-transparent text-gray-500 bg-transparent">🔐<div class="mt-1">权限</div></button>
-      </div>
-      <div class="workspace-main min-w-0 flex-1">
+    <div id="admin-nav-zone" class="workspace-nav-zone"></div>
+    <div class="workspace-layout">
+      <div class="workspace-main">
         <div id="admin-db" class="p-4"></div>
+        <div id="admin-ledger" class="hidden p-4"></div>
         <div id="admin-refund" class="hidden p-4"></div>
         <div id="admin-pd" class="hidden p-4"></div>
         <div id="admin-od" class="hidden p-4"></div>
@@ -7307,6 +8491,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       <div class="flex gap-2"><button onclick="farmerBack()" class="text-xs bg-white/20 px-3 py-1 rounded-full">←
           返回</button></div>
     </div>
+    <div id="farmer-nav-zone" class="workspace-nav-zone"></div>
     <div id="farmer-content" class="workspace-main p-4"></div>
   </div>
 

@@ -107,6 +107,8 @@ async function main() {
   if (!match) throw new Error('未找到前端内联脚本');
 
   const document = createDocument();
+  const eventHandlers = {};
+  const historyCalls = { push: [], replace: [] };
   [
     'app',
     'nav',
@@ -171,9 +173,9 @@ async function main() {
     member: { levelId: 'normal', points: 0, totalSpent: 0 },
     createdAt: '2026/04/13'
   };
-  const sampleOrder = {
+  const shippedOrder = {
     id: 'order_relation_17',
-    sourceId: 'ORD-001',
+    sourceId: 'ORD-SHIPPED',
     owner: 'buyerA',
     ownerDeleted: false,
     status: 'shipped',
@@ -261,6 +263,124 @@ async function main() {
       unassignedItemCount: 0
     }
   };
+  const paidOrder = {
+    id: 'order_relation_18',
+    sourceId: 'ORD-PAID',
+    owner: 'buyerA',
+    ownerDeleted: false,
+    status: 'paid',
+    time: Date.now() - 3600 * 1000,
+    total: 44.9,
+    subtotal: 39.9,
+    deliveryFee: 5,
+    discount: 0,
+    address: { name: '李四', phone: '13822223333', full: '待发货地址 A' },
+    items: [
+      {
+        orderItemId: 201,
+        id: 601,
+        productId: 601,
+        name: '鹅蛋',
+        qty: 1,
+        price: 39.9,
+        img: 'https://example.com/c.png',
+        variantLabel: '大份',
+        unit: '24枚',
+        unitLabel: '24枚',
+        shippingAddressSnapshot: { name: '仓库丙', phone: '13855556666', full: '测试仓库 3 号' }
+      }
+    ],
+    shipments: [],
+    fulfillmentSummary: {
+      shipmentCount: 0,
+      assignedItemCount: 0,
+      totalItemCount: 1,
+      unassignedItemCount: 1
+    }
+  };
+  const refundOrder = {
+    id: 'order_relation_19',
+    sourceId: 'ORD-REFUND',
+    owner: 'buyerA',
+    ownerDeleted: false,
+    status: 'refund_pending',
+    trackingNo: 'LEGACY-TRACK-001',
+    time: Date.now() - 7200 * 1000,
+    total: 52.6,
+    subtotal: 47.6,
+    deliveryFee: 5,
+    discount: 0,
+    address: { name: '王五', phone: '13711112222', full: '退款地址 B' },
+    items: [
+      {
+        orderItemId: 301,
+        id: 701,
+        productId: 701,
+        name: '山药',
+        qty: 2,
+        price: 23.8,
+        img: 'https://example.com/d.png',
+        variantLabel: '精品',
+        unit: '箱',
+        unitLabel: '箱',
+        shippingAddressSnapshot: { name: '仓库丁', phone: '13877778888', full: '测试仓库 4 号' }
+      }
+    ],
+    shipments: [],
+    fulfillmentSummary: {
+      shipmentCount: 0,
+      assignedItemCount: 0,
+      totalItemCount: 1,
+      unassignedItemCount: 1
+    }
+  };
+  const refundRequest = {
+    id: 'refund_001',
+    orderId: 'order_relation_19',
+    ownerUsername: 'buyerA',
+    status: 'pending',
+    reason: '商品破损',
+    rejectReason: '',
+    paymentRefunded: false,
+    inventoryRestored: false,
+    createdAt: Date.now() - 1800 * 1000,
+    completedAt: 0,
+    items: cloneJson(refundOrder.items)
+  };
+  const paymentLedger = {
+    id: 'pay_tx_001',
+    orderId: 'order_relation_18',
+    username: 'buyerA',
+    amount: 44.9,
+    channel: 'alipay_wap',
+    status: 'pending',
+    createdAt: Date.now() - 1200 * 1000
+  };
+  const aftersalesLedger = {
+    id: 'after_001',
+    orderId: 'order_relation_19',
+    ownerUsername: 'buyerA',
+    type: 'refund',
+    status: 'pending',
+    createdAt: Date.now() - 900 * 1000
+  };
+  const inventoryLedger = {
+    id: 'inventory_001',
+    productId: 701,
+    productName: '山药',
+    delta: -2,
+    reason: '订单占用',
+    createdAt: Date.now() - 600 * 1000
+  };
+  const orderMap = {
+    order_relation_17: shippedOrder,
+    order_relation_18: paidOrder,
+    order_relation_19: refundOrder,
+    'ORD-SHIPPED': shippedOrder,
+    'ORD-PAID': paidOrder,
+    'ORD-REFUND': refundOrder
+  };
+  const adminOrders = [shippedOrder, paidOrder, refundOrder];
 
   const sandbox = {
     console,
@@ -280,9 +400,9 @@ async function main() {
       setItem() { },
       removeItem() { }
     },
-    location: { hash: '#/profile' },
+    location: { hash: '#/profile', href: 'http://127.0.0.1:3000/#/profile' },
     window: {
-      addEventListener() { },
+      addEventListener(type, handler) { eventHandlers[type] = handler; },
       removeEventListener() { },
       scrollTo() { },
       open() { },
@@ -290,7 +410,18 @@ async function main() {
         createObjectURL() { return 'blob:orders-export'; },
         revokeObjectURL() { }
       },
-      history: { back() { } },
+      history: {
+        state: null,
+        back() { },
+        pushState(state) {
+          this.state = cloneJson(state);
+          historyCalls.push.push(cloneJson(state));
+        },
+        replaceState(state) {
+          this.state = cloneJson(state);
+          historyCalls.replace.push(cloneJson(state));
+        }
+      },
       prompt() { return ''; }
     },
     document,
@@ -307,25 +438,38 @@ async function main() {
       if (parsed.pathname === '/api/users' && method === 'GET') return createJsonResponse([currentUser, buyerUser]);
       if (parsed.pathname === '/api/orders' && method === 'GET') {
         return createJsonResponse({
-          items: [sampleOrder],
-          meta: { page: 1, pageSize: 8, totalCount: 1, totalPages: 1, hasPrev: false, hasNext: false }
+          items: adminOrders,
+          meta: { page: 1, pageSize: 8, totalCount: adminOrders.length, totalPages: 1, hasPrev: false, hasNext: false }
         });
       }
       if (parsed.pathname === '/api/admin/fulfillment/orders' && method === 'GET') {
         return createJsonResponse({
-          items: [sampleOrder],
-          meta: { page: 1, pageSize: 8, totalCount: 1, totalPages: 1, hasPrev: false, hasNext: false }
+          items: [paidOrder, shippedOrder],
+          meta: { page: 1, pageSize: 8, totalCount: 2, totalPages: 1, hasPrev: false, hasNext: false }
         });
       }
       if (/^\/api\/admin\/fulfillment\/orders\/[^/]+\/[^/]+$/.test(parsed.pathname) && method === 'GET') {
-        return createJsonResponse(sampleOrder);
+        const orderId = decodeURIComponent(parsed.pathname.split('/').pop());
+        return createJsonResponse(orderMap[orderId] || shippedOrder);
       }
       if (parsed.pathname === '/api/admin/orders/export' && method === 'GET') {
         exportRequests.push(parsed.searchParams.toString());
-        return createBlobResponse('\uFEFF"订单号","商品名称"\r\n"ORD-001","白萝卜"', {
+        return createBlobResponse('\uFEFF"订单号","商品名称"\r\n"ORD-SHIPPED","白萝卜"', {
           contentType: 'text/csv; charset=utf-8',
           contentDisposition: 'attachment; filename="orders-export-test.csv"'
         });
+      }
+      if (parsed.pathname === '/api/refunds') {
+        return createJsonResponse([refundRequest]);
+      }
+      if (parsed.pathname === '/api/payment-transactions') {
+        return createJsonResponse([paymentLedger]);
+      }
+      if (parsed.pathname === '/api/aftersales') {
+        return createJsonResponse([aftersalesLedger]);
+      }
+      if (parsed.pathname === '/api/inventory-logs') {
+        return createJsonResponse([inventoryLedger]);
       }
       if (
         parsed.pathname === '/api/products'
@@ -333,10 +477,6 @@ async function main() {
         || parsed.pathname === '/api/banners'
         || parsed.pathname === '/api/announcements'
         || parsed.pathname === '/api/coupon-templates'
-        || parsed.pathname === '/api/refunds'
-        || parsed.pathname === '/api/payment-transactions'
-        || parsed.pathname === '/api/aftersales'
-        || parsed.pathname === '/api/inventory-logs'
       ) {
         return createJsonResponse([]);
       }
@@ -348,7 +488,10 @@ async function main() {
   vm.runInContext(match[1], context, { filename: 'index-inline.js' });
   await vm.runInContext('initApp()', context);
 
-  sandbox.__sampleOrder = sampleOrder;
+  sandbox.__shippedOrder = shippedOrder;
+  sandbox.__paidOrder = paidOrder;
+  sandbox.__refundOrder = refundOrder;
+  sandbox.__refundRequest = refundRequest;
   sandbox.__currentUser = currentUser;
   sandbox.__buyerUser = buyerUser;
 
@@ -359,41 +502,123 @@ async function main() {
       buyerA: normalizeUserRecord(__buyerUser)
     };
     allOrdersLoaded = true;
-    allOrdersState = [normalizeOrderSnapshot(__sampleOrder)];
-    adminOrderListState.items = [normalizeOrderSnapshot(__sampleOrder)];
+    allOrdersState = [normalizeOrderSnapshot(__shippedOrder), normalizeOrderSnapshot(__paidOrder), normalizeOrderSnapshot(__refundOrder)];
+    refundsState = [normalizeRefundRequest(__refundRequest)];
+    refundsLoaded = true;
+    paymentTransactionsState = [{ id: 'pay_tx_001', orderId: 'ORD-PAID', username: 'buyerA', amount: 44.9, channel: 'alipay_wap', status: 'pending', createdAt: Date.now() - 1200 * 1000 }];
+    paymentTransactionsLoaded = true;
+    aftersalesState = [{ id: 'after_001', orderId: 'ORD-REFUND', ownerUsername: 'buyerA', type: 'refund', status: 'pending', createdAt: Date.now() - 900 * 1000 }];
+    aftersalesLoaded = true;
+    inventoryLogsState = [{ id: 'inventory_001', productId: 701, productName: '山药', delta: -2, reason: '订单占用', createdAt: Date.now() - 600 * 1000 }];
+    inventoryLogsLoaded = true;
+    adminLightStatsState = { productCount: 2, userCount: 2, orderCount: 3, pendingRefundCount: 1, pendingOrderCount: 1, paidSalesTotal: 98 };
+    adminOrderListState.items = [normalizeOrderSnapshot(__shippedOrder), normalizeOrderSnapshot(__paidOrder), normalizeOrderSnapshot(__refundOrder)];
     adminOrderListState.loaded = true;
-    adminOrderListState.filters = { orderId: 'ORD-001', ownerUsername: 'buyerA', status: 'shipped', dateFrom: '2026-04-10', dateTo: '2026-04-13' };
-    adminFulfillmentState.items = [normalizeOrderSnapshot(__sampleOrder)];
+    adminOrderListState.filters = { orderId: 'ORD-SHIPPED', ownerUsername: 'buyerA', status: 'shipped', dateFrom: '2026-04-10', dateTo: '2026-04-13' };
+    adminFulfillmentState.items = [normalizeOrderSnapshot(__paidOrder), normalizeOrderSnapshot(__shippedOrder)];
     adminFulfillmentState.loaded = true;
-    adminFulfillmentState.detail = normalizeOrderSnapshot(__sampleOrder);
+    adminFulfillmentState.detail = normalizeOrderSnapshot(__paidOrder);
     currentAdminTab = 'od';
   `, context);
 
   vm.runInContext('renderAdminOd()', context);
   const orderHtml = document.getElementById('admin-od').innerHTML;
   assert(orderHtml.includes('导出 CSV'), '管理员订单页应提供显式导出 CSV 按钮');
-  assert(orderHtml.includes('去发货') || orderHtml.includes('查看详情'), '管理员订单页应保留跳转发货工作台入口');
+  assert((orderHtml.match(/>详情<\/button>/g) || []).length === 3, '管理员订单页中所有订单都应显示详情按钮');
+  assert((orderHtml.match(/>发货<\/button>/g) || []).length === 1, '只有已支付待发货订单应显示发货按钮');
+  assert((orderHtml.match(/>退款<\/button>/g) || []).length === 1, '只有退款申请中的订单应显示退款按钮');
   assert(orderHtml.includes('物流信息：运输中，下一站杭州分拨中心'), '管理员订单页应展示物流卡片摘要');
 
-  await vm.runInContext('(async function(){ openAdminFulfillmentDetail("buyerA", "ORD-001"); await Promise.resolve(); await Promise.resolve(); })()', context);
-  assert(vm.runInContext('currentAdminTab', context) === 'ship', '管理员订单页点击查看详情后应切到发货工作台');
+  vm.runInContext(`
+    adminOrderListState.items = [];
+    adminOrderListState.loaded = true;
+    renderAdminOd();
+  `, context);
+  const emptyOrderHtml = document.getElementById('admin-od').innerHTML;
+  assert(emptyOrderHtml.includes('当前筛选下暂无订单'), '管理员订单筛选为空时应展示空态');
+  assert(!emptyOrderHtml.includes('白萝卜'), '管理员订单筛选为空时不应退回全量订单');
+
+  vm.runInContext(`
+    adminOrderListState.items = [normalizeOrderSnapshot(__shippedOrder), normalizeOrderSnapshot(__paidOrder), normalizeOrderSnapshot(__refundOrder)];
+    adminOrderListState.loaded = true;
+    document.getElementById('admin-panel').classList.remove('hidden');
+    document.getElementById('farmer-panel').classList.add('hidden');
+    currentAdminTab = 'od';
+    syncWorkspaceHistoryState('replace');
+  `, context);
+  assert(historyCalls.replace.length >= 1, '管理员订单页应写入后台历史快照');
+  assert(historyCalls.replace[historyCalls.replace.length - 1].workspaceSnapshot.adminTab === 'od', '订单页历史快照应记录当前页签');
+  vm.runInContext('renderWorkspaceNavZone("admin")', context);
+  const adminNavHtml = document.getElementById('admin-nav-zone').innerHTML;
+  assert(adminNavHtml.includes('台账'), '管理员后台导航应新增独立台账页签');
+
+  await vm.runInContext('(async function(){ await openAdminOrderDetailModal("buyerA", "order_relation_17"); })()', context);
+  const adminOrderDetailModalHtml = document.getElementById('modal-root').innerHTML;
+  assert(adminOrderDetailModalHtml.includes('订单详情'), '管理员点击详情后应弹出订单详情弹窗');
+  assert(adminOrderDetailModalHtml.includes('这里按买家端的视角展示商品、地址、物流和退款状态'), '管理员订单详情弹窗应按买家视角展示说明');
+  assert(adminOrderDetailModalHtml.includes('白萝卜'), '管理员订单详情弹窗应展示商品信息');
+  assert(adminOrderDetailModalHtml.includes('物流信息'), '管理员订单详情弹窗应展示物流区块');
+  await vm.runInContext('(async function(){ await openAdminOrderDetailModal("buyerA", "order_relation_19"); })()', context);
+  const legacyTrackingModalHtml = document.getElementById('modal-root').innerHTML;
+  assert(legacyTrackingModalHtml.includes('LEGACY-TRACK-001'), '管理员订单详情应兼容展示仅存在 trackingNo 的旧订单运单号');
+
+  await vm.runInContext('(async function(){ openAdminFulfillmentDetail("buyerA", "order_relation_18"); await Promise.resolve(); await Promise.resolve(); })()', context);
+  assert(vm.runInContext('currentAdminTab', context) === 'ship', '管理员订单页点击发货后应切到发货工作台');
   const orderJumpDetailHtml = document.getElementById('admin-ship').innerHTML;
-  assert(orderJumpDetailHtml.includes('发货详情'), '管理员订单页点击查看详情后应直接展示发货详情');
+  assert(orderJumpDetailHtml.includes('发货详情'), '管理员订单页点击发货后应直接展示发货详情');
+  assert(orderJumpDetailHtml.includes('鹅蛋'), '管理员发货详情应展示目标订单商品');
+  assert(historyCalls.push.length >= 1, '管理员进入发货详情后应新增历史快照');
+  assert(historyCalls.push[historyCalls.push.length - 1].workspaceSnapshot.adminTab === 'ship', '发货详情历史快照应记录发货页签');
+  await vm.runInContext('(function(){ adminFulfillmentState.loading = true; renderAdminShip(); })()', context);
+  const savingShipHtml = document.getElementById('admin-ship').innerHTML;
+  assert(savingShipHtml.includes('正在保存...'), '发货详情保存中状态应使用清晰文案');
+  assert(historyCalls.push[historyCalls.push.length - 1].workspaceSnapshot.adminFulfillmentView === 'detail', '发货详情历史快照应记录 detail 视图');
+
+  await vm.runInContext('(async function(){ openAdminRefundDetailByOrder("buyerA", "order_relation_19"); for (var i = 0; i < 6; i += 1) await Promise.resolve(); })()', context);
+  assert(vm.runInContext('currentAdminTab', context) === 'refund', '管理员订单页点击退款后应切到退款工作台');
+  vm.runInContext('openAdminRefundDetail("refund_001")', context);
+  vm.runInContext('renderAdminRefund()', context);
+  const adminRefundHtml = document.getElementById('admin-refund').innerHTML;
+  assert(adminRefundHtml.includes('退款详情'), '管理员点击退款后应展示退款详情');
+  assert(adminRefundHtml.includes('商品破损'), '退款详情应展示退款原因');
+  assert(!adminRefundHtml.includes('交易台账'), '退款工作台不应再包含交易台账区块');
+
+  vm.runInContext("currentAdminTab = 'db'; renderAdminDb();", context);
+  const adminDbHtml = document.getElementById('admin-db').innerHTML;
+  assert(!adminDbHtml.includes('支付、售后和库存流水统一放在数据页查看'), '数据页签不应再直接包含交易台账区块');
+  assert(adminDbHtml.includes('交易台账已经单拎到独立页签'), '数据页签应提示交易台账已迁移到独立页签');
+
+  vm.runInContext("currentAdminTab = 'ledger'; renderAdminLedger();", context);
+  const adminLedgerHtml = document.getElementById('admin-ledger').innerHTML;
+  assert(adminLedgerHtml.includes('交易台账'), '交易台账应迁移到独立台账页签中');
+  assert(adminLedgerHtml.includes('支付、售后和库存流水统一放在数据页查看'), '台账页签应展示交易台账说明');
+
+  assert(typeof eventHandlers.popstate === 'function', '前端应注册 popstate 处理手机侧滑返回');
+  eventHandlers.popstate({ state: { workspaceSnapshot: { route: 'admin', adminTab: 'od' } } });
+  assert(vm.runInContext('currentAdminTab', context) === 'od', '手机侧滑返回时应先回到管理员上一层页签');
+  assert(!document.getElementById('admin-panel').classList.contains('hidden'), '恢复管理员历史快照后不应直接退出后台');
+
+  await vm.runInContext('(async function(){ await adminBack(); await Promise.resolve(); await Promise.resolve(); })()', context);
+  assert(vm.runInContext('currentAdminTab', context) === 'db', '退出管理员页面时应重置当前页签');
+  assert(vm.runInContext('adminFulfillmentState.view', context) === 'queue', '退出管理员页面时应清理发货详情状态');
 
   vm.runInContext("adminFulfillmentState.view = 'queue'; renderAdminShip();", context);
   const fulfillmentQueueHtml = document.getElementById('admin-ship').innerHTML;
   assert(fulfillmentQueueHtml.includes('履约工作台'), '发货工作台队列页应渲染顶部工作区 banner');
   assert(fulfillmentQueueHtml.includes('待发货订单'), '发货工作台队列页应显示摘要统计');
 
-  vm.runInContext("adminFulfillmentState.view = 'detail'; renderAdminShip();", context);
+  vm.runInContext("adminFulfillmentState.detail = normalizeOrderSnapshot(__shippedOrder); adminFulfillmentState.view = 'detail'; renderAdminShip();", context);
   const fulfillmentDetailHtml = document.getElementById('admin-ship').innerHTML;
   assert(fulfillmentDetailHtml.includes('商品名称：白萝卜, 青菜'), '发货详情应完整展示同运单下的商品名称');
   assert(fulfillmentDetailHtml.includes('快递单号：YT123456789CN'), '发货详情应完整展示快递单号');
   assert(fulfillmentDetailHtml.includes('物流信息：运输中，下一站杭州分拨中心'), '发货详情应展示完整物流信息');
+  vm.runInContext("adminFulfillmentState.detail = normalizeOrderSnapshot(__paidOrder); adminFulfillmentState.view = 'detail'; renderAdminShip();", context);
+  const paidFulfillmentDetailHtml = document.getElementById('admin-ship').innerHTML;
+  assert(paidFulfillmentDetailHtml.includes('同地址商品可以共用一条运单合包'), '发货详情应明确说明同地址商品可共用一条运单');
 
   await vm.runInContext('downloadAdminOrderCsv()', context);
   assert(exportRequests.length === 1, '管理员订单页导出按钮应发起一次导出请求');
-  assert(exportRequests[0].includes('orderId=ORD-001'), '导出请求应复用当前订单号筛选');
+  assert(exportRequests[0].includes('orderId=ORD-SHIPPED'), '导出请求应复用当前订单号筛选');
   assert(exportRequests[0].includes('ownerUsername=buyerA'), '导出请求应复用当前用户名筛选');
   assert(exportRequests[0].includes('status=shipped'), '导出请求应复用当前状态筛选');
   assert(exportRequests[0].includes('dateFrom=2026-04-10'), '导出请求应复用当前开始日期筛选');

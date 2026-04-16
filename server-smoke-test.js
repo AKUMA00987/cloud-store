@@ -5,6 +5,7 @@ const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
 const baseUrl = process.env.BASE_URL || 'http://127.0.0.1:3000';
+const LOGISTICS_THROTTLE_MS = 2 * 60 * 60 * 1000;
 
 class SessionClient {
   constructor() {
@@ -86,7 +87,7 @@ function resolveUploadFilePath(uploadUrl) {
 }
 
 function buildAlipaySignContent(params, options) {
-  const config = Object.assign({ excludeSignType: true }, options || {});
+  const config = Object.assign({ excludeSignType: false }, options || {});
   return Object.keys(params || {})
     .filter(function (key) {
       const value = params[key];
@@ -102,8 +103,9 @@ function buildAlipaySignContent(params, options) {
 }
 
 function signAlipayPayload(params, privateKey) {
+  const config = Object.assign({ excludeSignType: false }, arguments[2] || {});
   const signer = crypto.createSign('RSA-SHA256');
-  signer.update(buildAlipaySignContent(params, { excludeSignType: true }), 'utf8');
+  signer.update(buildAlipaySignContent(params, { excludeSignType: config.excludeSignType }), 'utf8');
   return signer.sign(privateKey, 'base64');
 }
 
@@ -184,9 +186,16 @@ async function settlePendingOrder(client, preparedOrder, options) {
       headers: Object.assign({ 'Content-Type': 'application/json' }, config.headers || {}),
       body: JSON.stringify({})
     });
+    const bizContent = JSON.parse(String(launch && launch.params && launch.params.biz_content || '{}'));
     assert(launch.channel === 'alipay_wap', config.label + ' 应返回 alipay_wap 渠道');
     assert(launch.method === 'POST', config.label + ' 应返回 POST 表单方式');
     assert(launch.params && launch.params.method === 'alipay.trade.wap.pay', config.label + ' 应返回手机网站支付 method');
+    assert(bizContent.product_code === 'QUICK_WAP_PAY', config.label + ' 应返回正确的 QUICK_WAP_PAY 产品编码');
+    assert(bizContent.out_trade_no === String(launch && launch.paymentTransaction && launch.paymentTransaction.externalTradeNo || ''), config.label + ' 应使用支付流水 externalTradeNo 作为网关单号');
+    assert(String(bizContent.out_trade_no || '').indexOf(':') < 0, config.label + ' 的支付宝 out_trade_no 不应再包含冒号');
+    assert(/^cs_[0-9A-Za-z_]+$/.test(String(bizContent.out_trade_no || '')), config.label + ' 的支付宝 out_trade_no 应收口为网关友好格式');
+    assert(bizContent.quit_url === (new URL(String(launch && launch.params && launch.params.return_url || '')).origin + '/#/orders'), config.label + ' 的 quit_url 应与当前 return_url 保持同域');
+    assert(launch.params && launch.params.sign === signAlipayPayload(launch.params, alipayTestPrivateKey), config.label + ' 的支付宝请求签名应按包含 sign_type 的规则生成');
     assert(launch.paymentTransaction && launch.paymentTransaction.channel === 'alipay_wap', config.label + ' 应切到 alipay_wap 流水');
 
     const pendingStatusPayload = await client.requestJson('/api/orders/' + encodeURIComponent(preparedOrder.id) + '/payment-status', {
@@ -195,7 +204,7 @@ async function settlePendingOrder(client, preparedOrder, options) {
     assert(pendingStatusPayload.awaitingAsyncNotify === true, config.label + ' 在异步通知前应处于等待确认状态');
 
     const notifyPayload = buildTestAlipayNotifyPayload(launch, preparedOrder, config.notifyOverrides);
-    notifyPayload.sign = signAlipayPayload(notifyPayload, alipayTestPrivateKey);
+    notifyPayload.sign = signAlipayPayload(notifyPayload, alipayTestPrivateKey, { excludeSignType: true });
     const notifyResponse = await client.request('/api/payments/alipay/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -301,11 +310,24 @@ function countCsvDataRows(csvText) {
   return Math.max(0, lines.length - 1);
 }
 
+async function waitForCondition(check, options) {
+  const config = Object.assign({ timeoutMs: 4000, intervalMs: 150, label: 'condition' }, options || {});
+  const start = Date.now();
+  while ((Date.now() - start) < config.timeoutMs) {
+    const result = await check();
+    if (result) return result;
+    await new Promise(function (resolve) {
+      setTimeout(resolve, config.intervalMs);
+    });
+  }
+  throw new Error('等待超时: ' + config.label);
+}
+
 async function fetchShipmentRowsBySourceOrderId(sourceOrderId) {
   const db = openDatabase();
   try {
     return await db.all(
-      'SELECT id, orderSourceId, trackingNo, logisticsSummary, logisticsState, lastLogisticsQueryAt, lastLogisticsSuccessAt FROM shipments WHERE orderSourceId = ? ORDER BY createdAt ASC, id ASC',
+      'SELECT id, orderSourceId, trackingNo, logisticsSummary, logisticsState, logisticsProviderState, logisticsDataJson, lastLogisticsQueryAt, lastLogisticsSuccessAt FROM shipments WHERE orderSourceId = ? ORDER BY createdAt ASC, id ASC',
       [String(sourceOrderId || '').trim()]
     );
   } finally {
@@ -422,6 +444,10 @@ async function main() {
     }
     assert(String(homeResponse.headers.get('x-robots-tag') || '').toLowerCase().indexOf('noindex') >= 0, 'staging 首页响应应带 noindex 边界');
   }
+  const contentSecurityPolicy = String(homeResponse.headers.get('content-security-policy') || '');
+  assert(contentSecurityPolicy.indexOf("form-action 'self'") >= 0, '首页 CSP 应保留 self form-action 边界');
+  assert(contentSecurityPolicy.indexOf('https://openapi.alipay.com') >= 0, '首页 CSP 应允许提交到支付宝网关');
+  assert(contentSecurityPolicy.indexOf('https://api.mch.weixin.qq.com') >= 0, '首页 CSP 应允许提交到微信支付网关');
 
   const publicProducts = await anonClient.requestJson('/api/products');
   const publicProductPage = await anonClient.requestJson('/api/products?page=1&pageSize=2&status=active');
@@ -817,6 +843,7 @@ async function main() {
             id: 'smoke_payment_unit',
             label: '测试装',
             price: 18,
+            deliveryFee: 5,
             stock: 8,
             sortOrder: 0,
             isDefault: true
@@ -894,7 +921,7 @@ async function main() {
       }],
       address: { name: '张三', phone: '13800000000', full: '测试地址' },
       subtotal: 0,
-      deliveryFee: 5,
+      deliveryFee: 0,
       discount: 0,
       total: 0,
       couponId: '',
@@ -902,6 +929,7 @@ async function main() {
     })
   });
   assert(buyerOrderPrepare.status === 'pending', '买家应能创建待支付订单');
+  assert(Number(buyerOrderPrepare.deliveryFee || 0) === 5, '待支付订单应按商品单位配置重算配送费');
   assert(Number(buyerOrderPrepare.reserveExpiresAt || 0) > Number(buyerOrderPrepare.time || 0), '待支付订单应带过期时间');
   if (wechatPayEnabled) {
     assert(Array.isArray(buyerOrderPrepare.availableChannels) && buyerOrderPrepare.availableChannels.indexOf('wechat_h5_external') >= 0, '非微信环境的待支付订单应暴露微信外 H5 备选渠道');
@@ -960,7 +988,7 @@ async function main() {
     assert(cancelledOrder.status === 'cancelled', '第二笔待支付订单应可取消');
 
     const cancelledNotifyPayload = buildTestAlipayNotifyPayload(cancelLaunch, buyerCancelPrepare);
-    cancelledNotifyPayload.sign = signAlipayPayload(cancelledNotifyPayload, alipayTestPrivateKey);
+    cancelledNotifyPayload.sign = signAlipayPayload(cancelledNotifyPayload, alipayTestPrivateKey, { excludeSignType: true });
     const cancelledNotifyResponse = await buyerClient.request('/api/payments/alipay/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1097,6 +1125,7 @@ async function main() {
           id: 'fulfillment_unit',
           label: '测试装',
           price: 12,
+          deliveryFee: 5,
           stock: 8,
           sortOrder: 0,
           isDefault: true
@@ -1220,8 +1249,9 @@ async function main() {
   const exportBuffer = Buffer.from(await exportResponse.arrayBuffer());
   const exportCsv = exportBuffer.toString('utf8');
   assert(exportBuffer[0] === 0xEF && exportBuffer[1] === 0xBB && exportBuffer[2] === 0xBF, 'CSV 导出应带 UTF-8 BOM');
-  assert(exportCsv.includes('"订单号","订单状态","下单时间","买家","收货姓名","收货手机号","收货详细地址"'), 'CSV 导出应包含拆分后的收货字段列头');
+  assert(exportCsv.includes('"订单号","订单状态","下单时间","买家","收货姓名","收货手机号","收货详细地址","商品名称","规格","单位","数量","发货人","发货人电话","发货地址"'), 'CSV 导出应包含拆分后的收货与发货字段列头');
   assert(exportCsv.includes('商品名称') && exportCsv.includes('快递单号'), 'CSV 导出应包含商品名称和快递单号列');
+  assert(exportCsv.includes('履约烟测农户') && exportCsv.includes('13800008888') && exportCsv.includes('履约测试村 9 号'), 'CSV 导出应包含拆分后的发货地址字段值');
   assert(countCsvDataRows(exportCsv) === exportOrder.items.length, 'CSV 数据行数应与同筛选条件下的订单商品数一致');
   assert(exportCsv.includes("\"'=2+3公式商品\""), 'CSV 导出应转义以公式前缀开头的商品名称');
   assert(exportCsv.includes("\"'@YTFORMULA001\""), 'CSV 导出应转义以公式前缀开头的快递单号');
@@ -1301,18 +1331,50 @@ async function main() {
     trackingNo: '',
     logisticsSummary: '旧物流文案',
     logisticsState: 'active_success',
+    logisticsProviderState: '',
+    logisticsDataJson: '[]',
     lastLogisticsQueryAt: 0,
     lastLogisticsSuccessAt: 0
   });
-  await updateShipmentByOrderId(waitLogisticsOrder.id, {
-    logisticsSummary: '旧物流文案',
+  await updateShipmentByOrderId(fulfillmentPaidOrder.id, {
+    logisticsSummary: '杭州分拨中心 已发出',
     logisticsState: 'active_success',
-    lastLogisticsQueryAt: 0,
+    logisticsProviderState: '0',
+    logisticsDataJson: JSON.stringify([
+      { context: '杭州分拨中心 已发出', ftime: '04-13 10:20' },
+      { context: '包裹已到达杭州分拨中心', ftime: '04-13 08:10' }
+    ]),
+    lastLogisticsQueryAt: Date.now() - (30 * 60 * 1000),
+    lastLogisticsSuccessAt: Date.now() - (30 * 60 * 1000)
+  });
+  await updateShipmentByOrderId(waitLogisticsOrder.id, {
+    logisticsSummary: '已录入单号，等待物流公司返回轨迹',
+    logisticsState: 'no_trace',
+    logisticsProviderState: '0',
+    logisticsDataJson: JSON.stringify([
+      { context: '查无结果', ftime: '04-13 11:00' }
+    ]),
+    lastLogisticsQueryAt: Date.now() - (30 * 60 * 1000),
     lastLogisticsSuccessAt: 0
+  });
+  await updateShipmentByOrderId(signedLogisticsOrder.id, {
+    logisticsSummary: '已签收 · 04-13 10:40',
+    logisticsState: 'signed',
+    logisticsProviderState: '3',
+    logisticsDataJson: JSON.stringify([
+      { context: '包裹已签收，签收人：本人', ftime: '04-13 10:40' }
+    ]),
+    lastLogisticsQueryAt: Date.now() - (30 * 60 * 1000),
+    lastLogisticsSuccessAt: Date.now() - (30 * 60 * 1000)
   });
   await updateShipmentByOrderId(failLogisticsOrder.id, {
     logisticsSummary: '旧物流成功摘要',
-    logisticsState: 'active_success',
+    logisticsState: 'stale_success',
+    logisticsProviderState: '0',
+    logisticsDataJson: JSON.stringify([
+      { context: '杭州分拨中心 已发出', ftime: '04-13 09:00' },
+      { context: '包裹已揽收', ftime: '04-13 07:00' }
+    ]),
     lastLogisticsQueryAt: Date.now() - (3 * 60 * 60 * 1000),
     lastLogisticsSuccessAt: Date.now() - (4 * 60 * 60 * 1000)
   });
@@ -1322,70 +1384,70 @@ async function main() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ visibleOrderIds: [fulfillmentPaidOrder.id] })
   });
-  assert(Array.isArray(listRefreshPayload.changedOrderIds), '订单列表 refresh-check 应返回变化订单列表');
-  assert(Number(listRefreshPayload.changedCount || 0) >= 4, '订单列表 refresh-check 应检查当前买家的全部订单，而不只看当前可见订单');
-  assert(Array.isArray(listRefreshPayload.visibleChangedOrderIds) && listRefreshPayload.visibleChangedOrderIds.length === 1, '订单列表 refresh-check 应返回当前可见订单里的变化交集');
-  assert(listRefreshPayload.visibleChangedOrderIds[0] === fulfillmentPaidOrder.id, '当前可见变化订单应命中传入的订单号');
-  assert(typeof listRefreshPayload.message === 'undefined', 'refresh-check 响应不应暴露面向用户的节流或失败文案');
+  assert(listRefreshPayload.mode === 'background_polling', '订单列表 refresh-check 兼容接口应明确切到后台轮询模式');
+  assert(Number(listRefreshPayload.changedCount || 0) === 0, '订单列表 refresh-check 兼容接口不应再触发实时物流查询');
+  assert(Array.isArray(listRefreshPayload.visibleChangedOrderIds) && listRefreshPayload.visibleChangedOrderIds.length === 0, '后台轮询模式下，refresh-check 兼容接口不应再返回实时变化订单');
 
   const refreshedFulfillmentOrder = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(fulfillmentPaidOrder.id));
   assert(Array.isArray(refreshedFulfillmentOrder.shipments) && refreshedFulfillmentOrder.shipments.every(function (shipment) {
-    return shipment.logisticsState === 'active_success' && Number(shipment.lastLogisticsQueryAt || 0) > 0;
-  }), '物流刷新后，普通运单应落成 active_success 并持久化最近查询时间');
+    return shipment.logisticsState === 'active_success' && String(shipment.state || '') === '0' && Array.isArray(shipment.data) && shipment.data.length > 0;
+  }), '普通运单应返回运输中 state 与可展示的轨迹 data');
 
   const compatibilityOrderDetail = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(compatibilityPaidOrder.id));
   assert(compatibilityOrderDetail.shipments[0].logisticsState === 'no_tracking', '无单号运单应归一化为 no_tracking');
   assert(compatibilityOrderDetail.shipments[0].logisticsSummary === '待发货，暂未录入物流信息', '无单号运单应回退到待发货文案');
+  assert(String(compatibilityOrderDetail.shipments[0].state || '') === '', '无单号运单不应伪造快递状态 state');
+  assert(Array.isArray(compatibilityOrderDetail.shipments[0].data) && compatibilityOrderDetail.shipments[0].data.length === 0, '无单号运单不应返回轨迹 data');
 
   const waitOrderDetail = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(waitLogisticsOrder.id));
   assert(waitOrderDetail.shipments[0].logisticsState === 'no_trace', '无轨迹运单应归一化为 no_trace');
   assert(waitOrderDetail.shipments[0].logisticsSummary === '已录入单号，等待物流公司返回轨迹', '无轨迹运单应使用等待轨迹文案');
+  assert(String(waitOrderDetail.shipments[0].state || '') === '0', '无轨迹运单应保留快递接口 state');
+  assert(Array.isArray(waitOrderDetail.shipments[0].data) && String(waitOrderDetail.shipments[0].data[0] && waitOrderDetail.shipments[0].data[0].context || '') === '查无结果', '无轨迹运单应把查无结果类 data 原样返回给前端判定');
 
   const signedOrderDetail = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(signedLogisticsOrder.id));
   assert(signedOrderDetail.shipments[0].logisticsState === 'signed', '已签收运单应归一化为 signed');
   assert(String(signedOrderDetail.shipments[0].logisticsSummary || '').indexOf('已签收') >= 0, '已签收运单摘要应直接强调已签收');
+  assert(String(signedOrderDetail.shipments[0].state || '') === '3', '已签收运单应透出 provider state=3');
+  assert(Array.isArray(signedOrderDetail.shipments[0].data) && signedOrderDetail.shipments[0].data.length === 1, '已签收运单仍应保留原始轨迹 data');
 
   const failOrderDetail = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(failLogisticsOrder.id));
   assert(failOrderDetail.shipments[0].logisticsState === 'stale_success', '失败但已有旧结果时应回退为 stale_success');
   assert(failOrderDetail.shipments[0].logisticsSummary === '旧物流成功摘要', '失败但已有旧结果时应保留上次成功摘要');
+  assert(String(failOrderDetail.shipments[0].state || '') === '0', '已有旧结果的失败运单应保留原 provider state');
+  assert(Array.isArray(failOrderDetail.shipments[0].data) && failOrderDetail.shipments[0].data.length === 2, '已有旧结果的失败运单应保留上一份轨迹 data');
 
-  const fulfillmentRowsBeforeThrottle = await fetchShipmentRowsBySourceOrderId(fulfillmentPaidOrder.id);
-  const throttleQueryAtBefore = Number(fulfillmentRowsBeforeThrottle[0] && fulfillmentRowsBeforeThrottle[0].lastLogisticsQueryAt || 0);
-  const secondListRefreshPayload = await buyerClient.requestJson('/api/orders/logistics-refresh-check', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ visibleOrderIds: [fulfillmentPaidOrder.id] })
-  });
-  const fulfillmentRowsAfterThrottle = await fetchShipmentRowsBySourceOrderId(fulfillmentPaidOrder.id);
-  assert(Number(secondListRefreshPayload.changedCount || 0) === 0, '两小时内重复检查不应继续产出新的变化提示');
-  assert(Number(fulfillmentRowsAfterThrottle[0] && fulfillmentRowsAfterThrottle[0].lastLogisticsQueryAt || 0) === throttleQueryAtBefore, '两小时节流命中后，不应改写最近查询时间');
-
-  await updateShipmentByOrderId(fulfillmentPaidOrder.id, {
-    lastLogisticsQueryAt: Date.now() - (3 * 60 * 60 * 1000)
-  });
-  const thirdListRefreshPayload = await buyerClient.requestJson('/api/orders/logistics-refresh-check', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ visibleOrderIds: [fulfillmentPaidOrder.id] })
-  });
-  const fulfillmentRowsAfterExpiry = await fetchShipmentRowsBySourceOrderId(fulfillmentPaidOrder.id);
-  assert(Number(thirdListRefreshPayload.changedCount || 0) === 0, '超过两小时后重复查询但结果不变时，不应误报有更新');
-  assert(Number(fulfillmentRowsAfterExpiry[0] && fulfillmentRowsAfterExpiry[0].lastLogisticsQueryAt || 0) > throttleQueryAtBefore, '超过两小时后应重新回查并更新最近查询时间');
-
-  const detailOnlyOrder = await createLegacyShippedOrderWithTracking('SIGNED-DETAIL-001', 'yd', '韵达快递');
-  const failRowsBeforeDetail = await fetchShipmentRowsBySourceOrderId(failLogisticsOrder.id);
-  const detailRefreshPayload = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(detailOnlyOrder.id) + '/logistics-refresh-check', {
+  const detailRefreshPayload = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(failLogisticsOrder.id) + '/logistics-refresh-check', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({})
   });
-  const failRowsAfterDetail = await fetchShipmentRowsBySourceOrderId(failLogisticsOrder.id);
-  const detailOnlyOrderSnapshot = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(detailOnlyOrder.id));
-  assert(detailRefreshPayload.changed === true && detailRefreshPayload.orderId === detailOnlyOrder.id, '订单详情 refresh-check 应只返回当前订单的变化结论');
-  assert(detailOnlyOrderSnapshot.shipments[0].logisticsState === 'signed', '订单详情 refresh-check 后应可按 order.id 定向读取最新运单结果');
-  assert(Number(failRowsAfterDetail[0] && failRowsAfterDetail[0].lastLogisticsQueryAt || 0) === Number(failRowsBeforeDetail[0] && failRowsBeforeDetail[0].lastLogisticsQueryAt || 0), '订单详情 refresh-check 不应顺带刷新其他订单');
+  assert(detailRefreshPayload.mode === 'background_polling' && detailRefreshPayload.changed === false, '订单详情 refresh-check 兼容接口也不应再触发实时物流查询');
 
-  const foreignBuyerOrderError = await duplicateBuyerClient.requestError('/api/orders/' + encodeURIComponent(detailOnlyOrder.id));
+  const backgroundPollInterval = Number(process.env.CS_LOGISTICS_POLL_INTERVAL_MS || 0);
+  if (backgroundPollInterval > 0 && backgroundPollInterval < LOGISTICS_THROTTLE_MS) {
+    const backgroundPolledOrder = await createLegacyShippedOrderWithTracking('SIGNED-BG-001', 'yd', '韵达快递');
+    await updateShipmentByOrderId(backgroundPolledOrder.id, {
+      logisticsSummary: '待后台轮询刷新',
+      logisticsState: 'no_trace',
+      logisticsProviderState: '',
+      logisticsDataJson: '[]',
+      lastLogisticsQueryAt: Date.now() - (3 * 60 * 60 * 1000),
+      lastLogisticsSuccessAt: 0
+    });
+    const backgroundSnapshot = await waitForCondition(async function () {
+      const order = await buyerClient.requestJson('/api/orders/' + encodeURIComponent(backgroundPolledOrder.id));
+      return order && order.shipments && order.shipments[0] && String(order.shipments[0].state || '') === '3' ? order : null;
+    }, {
+      timeoutMs: Math.max(5000, backgroundPollInterval * 20),
+      intervalMs: Math.max(120, backgroundPollInterval),
+      label: '后台物流轮询'
+    });
+    assert(backgroundSnapshot.shipments[0].logisticsState === 'signed', '后台轮询应能把非终态运单更新到最新状态');
+    assert(Array.isArray(backgroundSnapshot.shipments[0].data) && backgroundSnapshot.shipments[0].data.length > 0, '后台轮询应同步写入最新轨迹 data');
+  }
+
+  const foreignBuyerOrderError = await duplicateBuyerClient.requestError('/api/orders/' + encodeURIComponent(failLogisticsOrder.id));
   assert(foreignBuyerOrderError.status === 404, '非订单所属买家不应读取其他人的单订单接口');
 
   const farmerUpload = await farmerClient.requestJson('/api/upload', {
@@ -1426,7 +1488,7 @@ async function main() {
       variants: [{
         id: 'phase12_variant',
         label: '标准规格',
-        units: [{ id: 'phase12_unit', label: '袋装', price: 18, stock: 8, sortOrder: 0, isDefault: true }],
+        units: [{ id: 'phase12_unit', label: '袋装', price: 18, deliveryFee: 5, stock: 8, sortOrder: 0, isDefault: true }],
         sortOrder: 0,
         isDefault: true
       }]

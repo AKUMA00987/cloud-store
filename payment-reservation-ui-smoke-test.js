@@ -122,8 +122,8 @@ async function main() {
           label: '大份',
           price: 26,
           units: [
-            { id: 'large-bag', label: '袋装', stock: 4, sortOrder: 0, isDefault: true },
-            { id: 'large-box', label: '箱装', stock: 2, sortOrder: 1, isDefault: false }
+            { id: 'large-bag', label: '袋装', stock: 4, deliveryFee: 5, sortOrder: 0, isDefault: true },
+            { id: 'large-box', label: '箱装', stock: 2, deliveryFee: 8, sortOrder: 1, isDefault: false }
           ],
           sortOrder: 0,
           isDefault: true
@@ -373,7 +373,11 @@ async function main() {
           gateway: 'https://openapi.alipay.com/gateway.do',
           method: 'POST',
           params: {
+            app_id: '2021006146624607',
             method: 'alipay.trade.wap.pay',
+            charset: 'utf-8',
+            sign_type: 'RSA2',
+            product_code: 'QUICK_WAP_PAY',
             return_url: 'https://putiguoguo.com/#/paymentResult?orderId=' + encodeURIComponent(orderId)
           },
           paymentTransaction: cloneJson(transaction || {})
@@ -495,10 +499,23 @@ async function main() {
   assert(prepareCall.body.items[0].variantId === 'veg-large', '待支付下单应带上规格 ID');
   assert(prepareCall.body.items[0].unitId === 'large-bag', '待支付下单应带上单位 ID');
   assert(prepareCall.body.items[0].unitLabel === '袋装', '待支付下单应带上单位名称');
+  assert(prepareCall.body.items[0].deliveryFee === 5, '待支付下单应带上所选单位的配送费');
+  assert(prepareCall.body.deliveryFee === 5, '待支付下单应按所选单位汇总配送费');
   assert(exec('currentCheckoutOrder && currentCheckoutOrder.items[0].unitId') === 'large-bag', '待支付订单快照应保留单位 ID');
   assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 3, '进入支付后应立即预占单位库存');
   assert(exec("paymentPage().indexOf('支付宝支付') >= 0") === true, '非微信环境下主按钮应默认推荐支付宝支付');
   assert(exec("paymentPage().indexOf('更多支付方式') >= 0") === true, '非微信环境下应提供更多支付方式入口');
+  exec(`
+    (function () {
+      var refreshed = Object.assign({}, currentCheckoutOrder);
+      delete refreshed.availableChannels;
+      delete refreshed.recommendedChannel;
+      delete refreshed.wechatBrowser;
+      updateBuyerOrderCache(refreshed);
+    })();
+  `);
+  assert(exec("paymentPage().indexOf('更多支付方式') >= 0") === true, '支付页刷新后的订单快照缺少通道字段时也应保留更多支付方式入口');
+  assert(exec('getRecommendedPaymentChannel(currentCheckoutOrder)') === 'alipay_wap', '支付页刷新后的订单快照缺少通道字段时应保留原推荐支付方式');
 
   await execAsync('await startRecommendedPayment();');
   await flush(4);
@@ -508,6 +525,11 @@ async function main() {
   assert(alipayCall, '非微信环境默认支付应请求服务端发起支付宝 WAP 支付');
   assert(fetchCalls.every(function (item) { return !/\/pay$/.test(item.path); }), '支付 UI 默认主路径不应再调用 /pay mock 支付接口');
   assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.method') === 'alipay.trade.wap.pay', '支付宝主按钮应准备支付宝手机网站支付表单');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.product_code') === 'QUICK_WAP_PAY', '支付宝主按钮应准备正确的 QUICK_WAP_PAY 产品编码');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.method') === 'GET', '支付宝主按钮应改为通过 query string 跳转网关');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.submissionMode') === 'query', '支付宝主按钮应把参数拼进 query string');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.url && window.__lastPaymentLaunch.url.indexOf("charset=utf-8") >= 0') === true, '支付宝跳转 URL 中应显式包含 charset=utf-8');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.acceptCharset') === 'utf-8', '支付宝主按钮应显式按 utf-8 提交网关表单');
 
   getUser('buyer1').orders[0].status = 'paid';
   getUser('buyer1').cart = [];
@@ -534,6 +556,11 @@ async function main() {
   });
   assert(wechatEnvAlipayCall, '微信环境主按钮应继续请求服务端发起支付宝 WAP 支付');
   assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.method') === 'alipay.trade.wap.pay', '微信环境的支付宝主按钮应准备支付宝手机网站支付表单');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.params.product_code') === 'QUICK_WAP_PAY', '微信环境的支付宝主按钮也应准备正确的 QUICK_WAP_PAY 产品编码');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.method') === 'GET', '微信环境的支付宝主按钮也应通过 query string 跳转网关');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.submissionMode') === 'query', '微信环境的支付宝主按钮也应把参数拼进 query string');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.url && window.__lastPaymentLaunch.url.indexOf("charset=utf-8") >= 0') === true, '微信环境的支付宝跳转 URL 中也应显式包含 charset=utf-8');
+  assert(exec('window.__lastPaymentLaunch && window.__lastPaymentLaunch.acceptCharset') === 'utf-8', '微信环境的支付宝表单也应显式按 utf-8 提交');
 
   await execAsync('toggleMorePaymentChannels();');
   await flush(2);
@@ -583,14 +610,76 @@ async function main() {
   assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock === 1, '三笔支付完成后库存应反映真实锁定结果');
 
   exec('cart = [normalizeCartStateItem({ id: 1, productId: 1, name: "高山青菜", variantId: "veg-large", variantLabel: "大份", unitId: "large-box", unitLabel: "箱装", unit: "箱装", price: 26, img: "https://example.com/veg.jpg", qty: 1 })]; updateCartBadge();');
+  assert(exec('cartPage().indexOf(\'配送费</span><span class="text-gray-500">¥8.00</span>\') >= 0') === true, '购物车页应按当前单位展示配送费，而不是固定 5 元');
   await execAsync('await confirmCheckout();');
   await flush(4);
+  assert(exec('currentCheckoutOrder && currentCheckoutOrder.deliveryFee') === 8, '切换到不同单位后应使用该单位配置的配送费');
   assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).stock === 1, '第四笔待支付订单应预占对应单位库存');
 
   await execAsync('await cancelOrder(0);');
   await flush(6);
   assert(products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).stock === 2, '取消待支付订单后应恢复单位库存');
   assert(getUser('buyer1').orders.find(function (order) { return order.cancelReason === "buyer_pending_cancel"; }), '取消待支付订单应记录取消原因');
+
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).deliveryFee = 0;
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).stock = 5;
+  exec(`
+    cart = [normalizeCartStateItem({
+      id: 1,
+      productId: 1,
+      name: "高山青菜",
+      variantId: "veg-large",
+      variantLabel: "大份",
+      unitId: "large-bag",
+      unitLabel: "袋装",
+      unit: "袋装",
+      price: 26,
+      deliveryFee: 5,
+      img: "https://example.com/veg.jpg",
+      qty: 1
+    })];
+    view = "product";
+    paramId = 1;
+    selectedVariantState[1] = { variantId: "veg-large", unitId: "large-bag" };
+    updateCartBadge();
+  `);
+  await execAsync('await addToCart(1, { alertSuccess: false });');
+  await flush(4);
+  assert(exec('cart[0].qty') === 2, '重复加入同一单位时应继续累加数量');
+  assert(exec('cart[0].deliveryFee') === 0, '重复加入同一单位时应把旧购物车条目的配送费刷新成当前商品单位真相');
+  await execAsync('await pushView("confirmOrder");');
+  await flush(4);
+  await execAsync('await confirmCheckout();');
+  await flush(4);
+  assert(exec('currentCheckoutOrder && currentCheckoutOrder.deliveryFee') === 0, '旧购物车条目在重新加购后应按当前商品单位配送费 0 元创建待支付订单');
+
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).deliveryFee = 5;
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).isDefault = true;
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).deliveryFee = 8;
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).isDefault = false;
+  exec('cart = []; selectedVariantState = {}; updateCartBadge();');
+  await execAsync('await pushView("product", 1);');
+  await flush(4);
+  assert(exec('getSelectedUnitForProduct(getProds()[0], { autoSingle: false }).id') === 'large-bag', '单规格商品首次进入详情时应先跟随当前默认单位');
+
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).isDefault = false;
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-box'; }).isDefault = true;
+  await execAsync('await fetchProductDetail(1);');
+  await execAsync('await pushView("product", 1);');
+  await flush(4);
+  assert(exec('getSelectedUnitForProduct(getProds()[0], { autoSingle: false }).id') === 'large-box', '默认单位切换后，买家端应跟随新的默认单位而不是黏住旧默认');
+  assert(((exec('product(1)').match(/choice-pill warm active/g) || []).length) === 1, '默认单位切换后，买家端单位按钮不应出现多个同时点亮');
+  await execAsync('await addToCart(1, { alertSuccess: false });');
+  await flush(4);
+  assert(exec('cart[0].unitId') === 'large-box', '默认单位切换后重新加购应使用新的默认单位 ID');
+  assert(exec('cart[0].deliveryFee') === 8, '默认单位切换后重新加购应带上新的单位配送费');
+
+  exec('cart = [normalizeCartStateItem({ id: 1, productId: 1, name: "高山青菜", variantId: "veg-large", variantLabel: "大份", unitId: "large-bag", unitLabel: "袋装", unit: "袋装", price: 26, deliveryFee: 5, img: "https://example.com/veg.jpg", qty: 1 })]; updateCartBadge();');
+  products[0].variants[0].units.find(function (unit) { return unit.id === 'large-bag'; }).deliveryFee = 10;
+  await execAsync('await go("cart");');
+  await flush(6);
+  assert(exec('cart[0].deliveryFee') === 10, '进入购物车时应把旧购物车条目的配送费刷新成服务端最新商品真相');
+  assert(exec('buildCheckoutSummary(getUserMeta()).deliveryFee') === 10, '购物车汇总应跟随服务端最新单位配送费，而不是继续显示旧的 5 元');
 
   console.log('Payment reservation UI smoke test passed.');
 }

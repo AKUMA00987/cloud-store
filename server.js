@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
+const http = require('http');
 const https = require('https');
 const path = require('path');
 const vm = require('vm');
@@ -38,6 +39,7 @@ const SMS_CODE_SHORT_WINDOW_MS = 10 * 60 * 1000;
 const SMS_CODE_SHORT_LIMIT = 5;
 const ALIPAY_GATEWAY_DEFAULT = 'https://openapi.alipay.com/gateway.do';
 const ALIPAY_WAP_METHOD = 'alipay.trade.wap.pay';
+const ALIPAY_REFUND_METHOD = 'alipay.trade.refund';
 const ALIPAY_CHARSET = 'utf-8';
 const ALIPAY_SIGN_TYPE = 'RSA2';
 const ALIPAY_VERSION = '1.0';
@@ -45,6 +47,18 @@ const ALIPAY_TIMEOUT_EXPRESS = '10m';
 const WECHAT_PAY_H5_GATEWAY_DEFAULT = 'https://api.mch.weixin.qq.com/v3/pay/transactions/h5';
 const WECHAT_PAY_JSAPI_GATEWAY_DEFAULT = 'https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi';
 const LOGISTICS_THROTTLE_MS = 2 * 60 * 60 * 1000;
+const LOGISTICS_BACKGROUND_POLL_MS = Math.max(60 * 1000, Number(process.env.CS_LOGISTICS_POLL_INTERVAL_MS || 0) || LOGISTICS_THROTTLE_MS);
+const LOGISTICS_BACKGROUND_POLL_DISABLED = parseEnvFlag(process.env.CS_DISABLE_LOGISTICS_POLLING);
+const LOGISTICS_STATUS_ONLY_PROVIDER_STATES = ['3', '4', '14'];
+const logisticsBackgroundPollingState = {
+  timer: null,
+  running: false,
+  lastStartedAt: 0,
+  lastCompletedAt: 0,
+  lastProcessedCount: 0,
+  lastChangedCount: 0,
+  lastError: ''
+};
 const authAttemptBuckets = new Map();
 
 function parseEnvFlag(value) {
@@ -88,6 +102,24 @@ function getRuntimeMeta(req) {
   };
 }
 
+function getPaymentFormActionOrigins() {
+  const sources = ["'self'"];
+  [
+    String(process.env.ALIPAY_GATEWAY || '').trim() || ALIPAY_GATEWAY_DEFAULT,
+    String(process.env.WECHAT_PAY_H5_GATEWAY || '').trim() || WECHAT_PAY_H5_GATEWAY_DEFAULT,
+    String(process.env.WECHAT_PAY_JSAPI_GATEWAY || '').trim() || WECHAT_PAY_JSAPI_GATEWAY_DEFAULT
+  ].forEach(function (gateway) {
+    if (!gateway) return;
+    try {
+      const origin = new URL(gateway).origin;
+      if (origin && sources.indexOf(origin) < 0) sources.push(origin);
+    } catch (error) {
+      // Ignore malformed overrides and keep the default boundary intact.
+    }
+  });
+  return sources.join(' ');
+}
+
 app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ limit: '12mb', extended: true }));
 
@@ -99,7 +131,7 @@ function setSecurityHeaders(req, res) {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self' https: data: blob:; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    "default-src 'self' https: data: blob:; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action " + getPaymentFormActionOrigins()
   );
   if (isStagingRuntime()) {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
@@ -471,7 +503,7 @@ function buildAlipaySignContent(params, options) {
 
 function signAlipayParams(params, privateKey) {
   const signer = crypto.createSign('RSA-SHA256');
-  signer.update(buildAlipaySignContent(params, { excludeSignType: false }), 'utf8');
+  signer.update(buildAlipaySignContent(params), 'utf8');
   return signer.sign(privateKey, 'base64');
 }
 
@@ -481,6 +513,7 @@ function verifyAlipaySignature(params, publicKey) {
   if (!sign) return false;
   delete payload.sign;
   const verifier = crypto.createVerify('RSA-SHA256');
+  // Alipay async notifications are verified with sign/sign_type excluded from the source string.
   verifier.update(buildAlipaySignContent(payload, { excludeSignType: true }), 'utf8');
   return verifier.verify(publicKey, sign, 'base64');
 }
@@ -489,8 +522,15 @@ function formatCurrencyAmount(value) {
   return Number(value || 0).toFixed(2);
 }
 
+function buildGatewayOutTradeNo(prefix, sourceOrderId) {
+  const normalizedPrefix = String(prefix || '').replace(/[^0-9A-Za-z_]/g, '');
+  const normalizedOrderId = String(sourceOrderId || '').trim().replace(/[^0-9A-Za-z_]/g, '_');
+  const composite = (normalizedPrefix + normalizedOrderId).replace(/^_+/, '');
+  return (composite || ('trade_' + Date.now())).slice(0, 64);
+}
+
 function buildAlipayOutTradeNo(ownerUsername, sourceOrderId) {
-  return buildPaymentTransactionId(ownerUsername, sourceOrderId);
+  return buildGatewayOutTradeNo('cs_', sourceOrderId);
 }
 
 function parseAlipayOutTradeNo(value) {
@@ -518,6 +558,116 @@ function buildAlipayReturnUrl(config, order) {
   return base + separator + 'orderId=' + encodeURIComponent(String(order && order.id || ''));
 }
 
+function buildAlipayQuitUrl(config) {
+  const returnUrl = String(config && config.returnUrl || '').trim();
+  if (returnUrl) {
+    try {
+      return new URL(returnUrl).origin + '/#/orders';
+    } catch (error) {
+      // Fall through to the configured public base URL when returnUrl is malformed.
+    }
+  }
+  const publicBaseUrl = String(config && config.publicBaseUrl || '').trim();
+  return publicBaseUrl ? (publicBaseUrl + '/#/orders') : '';
+}
+
+function buildAlipayGatewayRequest(methodName, bizContent, config, extraParams) {
+  const params = Object.assign({
+    app_id: config.appId,
+    method: String(methodName || '').trim(),
+    format: 'JSON',
+    charset: config.charset,
+    sign_type: config.signType,
+    timestamp: formatAlipayTimestamp(Date.now()),
+    version: config.version
+  }, extraParams || {});
+  if (config.sellerId && !params.seller_id) params.seller_id = config.sellerId;
+  if (bizContent && Object.keys(bizContent).length) params.biz_content = JSON.stringify(bizContent);
+  params.sign = signAlipayParams(params, config.privateKey);
+  return {
+    gateway: config.gateway,
+    method: 'POST',
+    params: params
+  };
+}
+
+function getAlipayResponseNodeKey(methodName) {
+  return String(methodName || '').trim().replace(/\./g, '_') + '_response';
+}
+
+function requestUrlEncodedForm(targetUrl, params) {
+  const endpoint = new URL(String(targetUrl || '').trim());
+  const body = new URLSearchParams(params || {}).toString();
+  const transport = endpoint.protocol === 'http:' ? http : https;
+  return new Promise(function (resolve, reject) {
+    const request = transport.request({
+      protocol: endpoint.protocol,
+      hostname: endpoint.hostname,
+      port: endpoint.port || (endpoint.protocol === 'http:' ? 80 : 443),
+      path: endpoint.pathname + endpoint.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=' + ALIPAY_CHARSET,
+        'Accept-Charset': ALIPAY_CHARSET,
+        'Content-Length': Buffer.byteLength(body, 'utf8')
+      }
+    }, function (response) {
+      const chunks = [];
+      response.on('data', function (chunk) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on('end', function () {
+        resolve({
+          statusCode: Number(response.statusCode || 0),
+          headers: response.headers || {},
+          body: Buffer.concat(chunks).toString('utf8')
+        });
+      });
+    });
+    request.on('error', reject);
+    request.write(body);
+    request.end();
+  });
+}
+
+async function callAlipayGateway(methodName, bizContent, config, extraParams) {
+  const requestPayload = buildAlipayGatewayRequest(methodName, bizContent, config, extraParams);
+  let gatewayResponse = null;
+  try {
+    gatewayResponse = await requestUrlEncodedForm(requestPayload.gateway, requestPayload.params);
+  } catch (error) {
+    throw new Error('支付宝网关请求失败：' + (error && error.message ? error.message : String(error)));
+  }
+  if (gatewayResponse.statusCode < 200 || gatewayResponse.statusCode >= 300) {
+    throw new Error('支付宝网关响应失败（HTTP ' + gatewayResponse.statusCode + '）');
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(String(gatewayResponse.body || '{}'));
+  } catch (error) {
+    throw new Error('支付宝网关返回了无法解析的响应');
+  }
+  const responseNodeKey = getAlipayResponseNodeKey(methodName);
+  const responseNode = payload && payload[responseNodeKey] && typeof payload[responseNodeKey] === 'object'
+    ? payload[responseNodeKey]
+    : null;
+  if (!responseNode) {
+    throw new Error('支付宝网关返回缺少 ' + responseNodeKey);
+  }
+  if (String(responseNode.code || '') !== '10000') {
+    const errorParts = [];
+    if (responseNode.sub_code) errorParts.push(String(responseNode.sub_code));
+    errorParts.push(String(responseNode.sub_msg || responseNode.msg || '支付宝接口调用失败'));
+    if (responseNode.code) errorParts.push('(code ' + String(responseNode.code) + ')');
+    throw new Error(errorParts.join(' '));
+  }
+  return {
+    request: requestPayload,
+    raw: payload,
+    response: responseNode
+  };
+}
+
 function buildAlipayWapRequest(order, paymentTransaction, config) {
   const normalizedOrder = normalizeOrderRecord(order);
   const payment = normalizePaymentTransaction(paymentTransaction);
@@ -525,30 +675,15 @@ function buildAlipayWapRequest(order, paymentTransaction, config) {
     out_trade_no: payment.externalTradeNo || buildAlipayOutTradeNo(normalizedOrder.owner, normalizedOrder.id),
     total_amount: formatCurrencyAmount(normalizedOrder.total),
     subject: buildAlipayOrderSubject(normalizedOrder),
-    product_code: 'QUICK_WAP_WAY',
-    quit_url: (config && config.publicBaseUrl ? (config.publicBaseUrl + '/#/orders') : '')
+    product_code: 'QUICK_WAP_PAY',
+    quit_url: buildAlipayQuitUrl(config)
   };
-  const params = {
-    app_id: config.appId,
-    method: ALIPAY_WAP_METHOD,
-    format: 'JSON',
-    charset: config.charset,
-    sign_type: config.signType,
-    timestamp: formatAlipayTimestamp(Date.now()),
-    version: config.version,
+  return buildAlipayGatewayRequest(ALIPAY_WAP_METHOD, Object.assign(bizContent, {
+    timeout_express: ALIPAY_TIMEOUT_EXPRESS
+  }), config, {
     notify_url: config.notifyUrl,
-    return_url: buildAlipayReturnUrl(config, normalizedOrder),
-    biz_content: JSON.stringify(Object.assign(bizContent, {
-      timeout_express: ALIPAY_TIMEOUT_EXPRESS
-    }))
-  };
-  if (config.sellerId) params.seller_id = config.sellerId;
-  params.sign = signAlipayParams(params, config.privateKey);
-  return {
-    gateway: config.gateway,
-    method: 'POST',
-    params: params
-  };
+    return_url: buildAlipayReturnUrl(config, normalizedOrder)
+  });
 }
 
 function isWechatBrowser(req) {
@@ -1327,6 +1462,26 @@ function buildUnitId(value, index) {
   return seed ? ('unit_' + seed + '_' + Number(index || 0)) : ('unit_' + Number(index || 0));
 }
 
+function buildUniqueUnitId(preferredId, label, index, usedIds) {
+  const registry = usedIds || {};
+  const preferred = String(preferredId || '').trim();
+  const fallback = buildUnitId(label, index);
+  let candidate = preferred || fallback;
+  if (!registry[candidate]) {
+    registry[candidate] = true;
+    return candidate;
+  }
+  if (!registry[fallback]) {
+    registry[fallback] = true;
+    return fallback;
+  }
+  let suffix = 1;
+  while (registry[fallback + '_' + suffix]) suffix += 1;
+  candidate = fallback + '_' + suffix;
+  registry[candidate] = true;
+  return candidate;
+}
+
 function normalizeVariantUnits(variant, index, product) {
   const payload = variant || {};
   const baseProduct = product || {};
@@ -1334,21 +1489,26 @@ function normalizeVariantUnits(variant, index, product) {
   const fallbackLabel = String(payload.unit || payload.label || baseProduct.unit || '').trim() || (index === 0 ? '默认单位' : ('单位' + (index + 1)));
   const fallbackStock = Math.max(0, Number(payload.stock != null ? payload.stock : 0));
   const fallbackPrice = Number(payload.price != null ? payload.price : (index === 0 ? Number(baseProduct.price || 0) : 0));
+  const fallbackDeliveryFee = Math.max(0, Number(payload.deliveryFee != null ? payload.deliveryFee : (index === 0 ? Number(baseProduct.deliveryFee || 0) : 0)));
   const sourceList = rawList.length ? rawList : [{
     id: payload.defaultUnitId || buildUnitId(fallbackLabel || 'default', 0),
     label: fallbackLabel,
     price: fallbackPrice,
+    deliveryFee: fallbackDeliveryFee,
     stock: fallbackStock,
     sortOrder: 0,
     isDefault: true
   }];
+  const usedUnitIds = {};
   const normalized = sourceList.map(function (item, unitIndex) {
     const unit = item || {};
     const label = String(unit.label || '').trim() || (unitIndex === 0 ? fallbackLabel : ('单位' + (unitIndex + 1)));
+    const unitId = buildUniqueUnitId(unit.id, label, unitIndex, usedUnitIds);
     return {
-      id: String(unit.id || buildUnitId(label, unitIndex)),
+      id: unitId,
       label: label,
       price: Number(unit.price != null ? unit.price : (unitIndex === 0 ? fallbackPrice : fallbackPrice)),
+      deliveryFee: Math.max(0, Number(unit.deliveryFee != null ? unit.deliveryFee : fallbackDeliveryFee)),
       stock: Math.max(0, Number(unit.stock != null ? unit.stock : (unitIndex === 0 ? fallbackStock : 0))),
       sortOrder: Number(unit.sortOrder != null ? unit.sortOrder : unitIndex),
       isDefault: !!unit.isDefault
@@ -1470,6 +1630,7 @@ function normalizeOrderItem(item, index) {
     unitLabel: '',
     unit: '',
     price: 0,
+    deliveryFee: 0,
     qty: 0,
     img: '',
     shippingAddressId: '',
@@ -1485,6 +1646,7 @@ function normalizeOrderItem(item, index) {
     unitLabel: item && (item.unitLabel || item.unit || item.variantLabel) ? String(item.unitLabel || item.unit || item.variantLabel) : '',
     unit: item && (item.unit || item.unitLabel || item.variantLabel) ? String(item.unit || item.unitLabel || item.variantLabel) : '',
     price: Number(item && item.price || 0),
+    deliveryFee: Number(item && item.deliveryFee || 0),
     qty: Number(item && item.qty || 0),
     img: item && item.img ? String(item.img) : '',
     shippingAddressId: item && item.shippingAddressId ? String(item.shippingAddressId) : '',
@@ -1516,17 +1678,89 @@ function normalizeFulfillmentSummary(summary, items, shipments) {
 function normalizeShipmentLogisticsState(state, payload) {
   const raw = String(state || '').trim();
   if (['no_tracking', 'no_trace', 'active_success', 'stale_success', 'signed'].indexOf(raw) >= 0) return raw;
+  const providerState = String(payload && (payload.state != null ? payload.state : payload.logisticsProviderState) || '').trim();
+  if (providerState === '3') return 'signed';
+  if (providerState === '4' || providerState === '14') return 'stale_success';
+  if (hasValidShipmentLogisticsData(payload && payload.data != null ? payload.data : payload && payload.logisticsDataJson)) return 'active_success';
   if (String(payload && payload.trackingNo || '').trim()) return 'no_trace';
   return 'no_tracking';
+}
+
+function normalizeShipmentLogisticsData(value) {
+  const rows = Array.isArray(value) ? value : parseJsonArray(value);
+  return rows.map(function (entry) {
+    const payload = entry && typeof entry === 'object' ? entry : {};
+    const context = String(payload.context || payload.desc || payload.description || '').trim();
+    const ftime = String(payload.ftime || payload.time || payload.acceptTime || '').trim();
+    const area = String(payload.area || payload.location || '').trim();
+    const status = String(payload.status || payload.state || '').trim();
+    const time = Math.max(0, Number(payload.timestamp || payload.timeValue || 0));
+    return {
+      context: context,
+      ftime: ftime,
+      area: area,
+      status: status,
+      time: time
+    };
+  }).filter(function (entry) {
+    return !!(entry.context || entry.ftime || entry.area || entry.status || entry.time);
+  });
+}
+
+function isShipmentInvalidLogisticsContext(value) {
+  const text = String(value || '').trim();
+  if (!text) return true;
+  return /(查无结果|暂无结果|暂无轨迹|暂无物流|无物流信息|暂未查询到)/.test(text);
+}
+
+function hasValidShipmentLogisticsData(value) {
+  return normalizeShipmentLogisticsData(value).some(function (entry) {
+    return !isShipmentInvalidLogisticsContext(entry.context);
+  });
+}
+
+function normalizeShipmentProviderState(value, logisticsState, logisticsData) {
+  const raw = String(value || '').trim();
+  if (raw) return raw;
+  if (String(logisticsState || '').trim() === 'signed') return '3';
+  if (hasValidShipmentLogisticsData(logisticsData)) return '0';
+  return '';
+}
+
+function describeShipmentProviderState(value, logisticsState) {
+  const providerState = String(value || '').trim();
+  if (providerState === '3') return '已签收';
+  if (providerState === '4') return '已退签';
+  if (providerState === '14') return '已拒签';
+  if (String(logisticsState || '').trim() === 'signed') return '已签收';
+  return '';
+}
+
+function getLatestShipmentLogisticsContext(logisticsData) {
+  const validEntries = normalizeShipmentLogisticsData(logisticsData).filter(function (entry) {
+    return !isShipmentInvalidLogisticsContext(entry.context);
+  });
+  return validEntries.length ? String(validEntries[0].context || '').trim() : '';
 }
 
 function buildShipmentLogisticsSummary(state, payload) {
   const trackingNo = String(payload && payload.trackingNo || '').trim();
   const existing = String(payload && payload.logisticsSummary || '').trim();
+  const logisticsData = payload && (payload.data != null ? payload.data : payload.logisticsDataJson);
+  const providerState = normalizeShipmentProviderState(
+    payload && (payload.state != null ? payload.state : payload.logisticsProviderState),
+    state,
+    logisticsData
+  );
+  const providerLabel = describeShipmentProviderState(providerState, state);
+  const latestContext = getLatestShipmentLogisticsContext(logisticsData);
   if (existing) {
     if (state === 'signed' && existing.indexOf('已签收') < 0) return '已签收 · ' + existing;
+    if ((providerState === '4' || providerState === '14') && providerLabel && existing.indexOf(providerLabel) < 0) return providerLabel + ' · ' + existing;
     return existing;
   }
+  if (latestContext) return latestContext;
+  if (providerLabel) return providerLabel;
   if (state === 'signed') return '已签收';
   if (state === 'active_success' || state === 'stale_success') {
     return trackingNo ? '已录入单号，等待物流公司返回轨迹' : '待发货，暂未录入物流信息';
@@ -1537,7 +1771,9 @@ function buildShipmentLogisticsSummary(state, payload) {
 
 function normalizeShipmentRecord(record) {
   const payload = record || {};
+  const logisticsData = normalizeShipmentLogisticsData(payload.data != null ? payload.data : payload.logisticsDataJson);
   const logisticsState = normalizeShipmentLogisticsState(payload.logisticsState, payload);
+  const providerState = normalizeShipmentProviderState(payload.state != null ? payload.state : payload.logisticsProviderState, logisticsState, logisticsData);
   return {
     id: payload.id ? String(payload.id) : '',
     orderRelationId: payload.orderRelationId ? String(payload.orderRelationId) : (payload.orderId ? String(payload.orderId) : ''),
@@ -1548,6 +1784,8 @@ function normalizeShipmentRecord(record) {
     carrierName: payload.carrierName ? String(payload.carrierName) : '',
     status: payload.status ? String(payload.status) : 'shipped',
     logisticsState: logisticsState,
+    state: providerState,
+    data: logisticsData,
     logisticsSummary: buildShipmentLogisticsSummary(logisticsState, payload),
     lastLogisticsQueryAt: Math.max(0, Number(payload.lastLogisticsQueryAt || 0)),
     lastLogisticsSuccessAt: Math.max(0, Number(payload.lastLogisticsSuccessAt || 0)),
@@ -1612,6 +1850,7 @@ function hydrateOrderRows(orderRow, itemRows, shipmentRows, shipmentItemRows) {
       unitLabel: itemRow.unitLabel,
       unit: itemRow.unit,
       price: itemRow.price,
+      deliveryFee: itemRow.deliveryFee,
       qty: itemRow.qty,
       img: itemRow.img,
       shippingAddressId: itemRow.shippingAddressId,
@@ -1726,7 +1965,7 @@ async function syncUserOrderRelations(username, orders) {
     for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
       const item = normalizeOrderItem(order.items[itemIndex], itemIndex);
       const insertItemResult = await run(
-        'INSERT INTO order_items (id, orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO order_items (id, orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, deliveryFee, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           item.orderItemId > 0 ? item.orderItemId : null,
           relationOrderId,
@@ -1738,6 +1977,7 @@ async function syncUserOrderRelations(username, orders) {
           item.unitLabel,
           item.unit,
           item.price,
+          item.deliveryFee,
           item.qty,
           item.img,
           item.shippingAddressId,
@@ -1764,7 +2004,7 @@ async function syncUserOrderRelations(username, orders) {
       const shipmentUpdatedAt = Number(shipment.updatedAt || shipmentCreatedAt);
       const shipmentLogistics = normalizeShipmentRecord(shipment);
       await run(
-        'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, logisticsProviderState, logisticsDataJson, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           shipmentId,
           relationOrderId,
@@ -1776,6 +2016,8 @@ async function syncUserOrderRelations(username, orders) {
           shipmentLogistics.status || 'shipped',
           shipmentLogistics.logisticsSummary || '',
           shipmentLogistics.logisticsState || 'no_tracking',
+          shipmentLogistics.state || '',
+          JSON.stringify(shipmentLogistics.data || []),
           Number(shipmentLogistics.lastLogisticsQueryAt || 0),
           Number(shipmentLogistics.lastLogisticsSuccessAt || 0),
           shipmentCreatedAt,
@@ -1885,6 +2127,11 @@ function buildPaymentTransactionId(username, sourceOrderId) {
   return buildOrderRelationId(username, sourceOrderId);
 }
 
+function resolveOrderItemUnitDeliveryFee(unit, item) {
+  if (unit && unit.deliveryFee != null) return Math.max(0, Number(unit.deliveryFee || 0));
+  return Math.max(0, Number(item && item.deliveryFee || 0));
+}
+
 function getReserveExpiresAt(createdAt) {
   return Number(createdAt || Date.now()) + 600000;
 }
@@ -1956,6 +2203,7 @@ function applyVariantUnitInventoryDelta(product, item, deltaQty, options) {
       id: String(payload.unitId || buildUnitId(fallbackUnitLabel, targetVariant.units.length)),
       label: fallbackUnitLabel,
       price: Number(payload.price || targetVariant.price || 0),
+      deliveryFee: Math.max(0, Number(payload.deliveryFee || 0)),
       stock: 0,
       sortOrder: targetVariant.units.length,
       isDefault: targetVariant.units.length === 0
@@ -2091,6 +2339,7 @@ async function createPendingOrderFromCheckout(username, payload) {
     const relationOrderId = buildOrderRelationId(ownerUsername, sourceOrderId);
     const orderItems = [];
     let subtotal = 0;
+    let deliveryFee = 0;
     for (let index = 0; index < request.items.length; index++) {
       const requestItem = normalizeOrderItem(request.items[index], index);
       if (!(Number(requestItem.productId || 0) > 0) || !(Number(requestItem.qty || 0) > 0)) {
@@ -2140,16 +2389,18 @@ async function createPendingOrderFromCheckout(username, payload) {
         unitLabel: unit.label,
         unit: unit.label,
         price: Number(unit.price || 0),
+        deliveryFee: resolveOrderItemUnitDeliveryFee(unit, requestItem),
         qty: Number(requestItem.qty || 0),
         img: product.img,
         shippingAddressId: shippingAddressId,
         shippingAddressSnapshot: shippingAddressSnapshot
       }, index);
       subtotal += Number(orderItem.price || 0) * Number(orderItem.qty || 0);
+      deliveryFee += Number(orderItem.deliveryFee || 0) * Number(orderItem.qty || 0);
       orderItems.push(orderItem);
     }
     const reserveExpiresAt = getReserveExpiresAt(now);
-    const deliveryFee = Math.max(0, Number(request.deliveryFee || 0));
+    deliveryFee = Math.max(0, Number(deliveryFee || 0));
     const discount = Math.max(0, Number(request.discount || 0));
     const total = Math.max(0, subtotal + deliveryFee - discount);
     await run(
@@ -2180,7 +2431,7 @@ async function createPendingOrderFromCheckout(username, payload) {
     for (let index = 0; index < orderItems.length; index++) {
       const item = orderItems[index];
       await run(
-        'INSERT INTO order_items (orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO order_items (orderId, productId, name, variantId, variantLabel, unitId, unitLabel, unit, price, deliveryFee, qty, img, shippingAddressId, shippingName, shippingPhone, shippingFull, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           relationOrderId,
           item.productId,
@@ -2191,6 +2442,7 @@ async function createPendingOrderFromCheckout(username, payload) {
           item.unitLabel,
           item.unit,
           item.price,
+          item.deliveryFee,
           item.qty,
           item.img,
           item.shippingAddressId,
@@ -2342,6 +2594,40 @@ async function getPaymentTransactionByOwnerAndOrder(username, sourceOrderId) {
   return row ? normalizePaymentTransaction(row) : null;
 }
 
+async function getPaymentTransactionByExternalTradeNo(externalTradeNo) {
+  const normalizedExternalTradeNo = String(externalTradeNo || '').trim();
+  if (!normalizedExternalTradeNo) return null;
+  const row = await get(
+    'SELECT * FROM payment_transactions WHERE externalTradeNo = ? ORDER BY createdAt DESC LIMIT 1',
+    [normalizedExternalTradeNo]
+  );
+  return row ? normalizePaymentTransaction(row) : null;
+}
+
+async function resolvePaymentNotificationContext(externalTradeNo) {
+  const normalizedExternalTradeNo = String(externalTradeNo || '').trim();
+  let paymentTransaction = await getPaymentTransactionByExternalTradeNo(normalizedExternalTradeNo);
+  let owner = paymentTransaction && paymentTransaction.username ? paymentTransaction.username : '';
+  let orderId = paymentTransaction && paymentTransaction.orderId ? paymentTransaction.orderId : '';
+  if (!owner || !orderId) {
+    const identifier = parseAlipayOutTradeNo(normalizedExternalTradeNo);
+    if (!identifier) return null;
+    owner = identifier.ownerUsername;
+    orderId = identifier.sourceOrderId;
+    paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  }
+  if (!owner || !orderId) return null;
+  const relationOrderId = buildOrderRelationId(owner, orderId);
+  return {
+    owner: owner,
+    orderId: orderId,
+    relationOrderId: relationOrderId,
+    transactionId: buildPaymentTransactionId(owner, orderId),
+    order: await getOrderSnapshotByRelationId(relationOrderId),
+    paymentTransaction: paymentTransaction
+  };
+}
+
 async function updatePaymentTransactionState(transactionId, updates) {
   const payload = Object.assign({
     status: null,
@@ -2442,11 +2728,11 @@ const ORDER_LIST_COLUMNS = [
 
 const ORDER_ITEM_COLUMNS = [
   'id', 'orderId', 'productId', 'name', 'variantId', 'variantLabel', 'unitId', 'unitLabel', 'unit', 'price',
-  'qty', 'img', 'shippingAddressId', 'shippingName', 'shippingPhone', 'shippingFull', 'sortOrder'
+  'deliveryFee', 'qty', 'img', 'shippingAddressId', 'shippingName', 'shippingPhone', 'shippingFull', 'sortOrder'
 ].join(', ');
 const SHIPMENT_LIST_COLUMNS = [
   'id', 'orderId', 'orderSourceId', 'ownerUsername', 'trackingNo', 'carrierCode', 'carrierName', 'status',
-  'logisticsSummary', 'logisticsState', 'lastLogisticsQueryAt', 'lastLogisticsSuccessAt',
+  'logisticsSummary', 'logisticsState', 'logisticsProviderState', 'logisticsDataJson', 'lastLogisticsQueryAt', 'lastLogisticsSuccessAt',
   'createdAt', 'updatedAt', 'createdBy', 'legacySource'
 ].join(', ');
 const SHIPMENT_ITEM_COLUMNS = [
@@ -2689,11 +2975,13 @@ function formatOrderExportDateTime(value) {
   return new Date(numeric).toLocaleString('zh-CN');
 }
 
-function formatOrderExportAddress(address) {
+function normalizeOrderExportAddress(address) {
   const payload = address && typeof address === 'object' ? address : {};
-  return [payload.name, payload.phone, payload.full].map(function (item) {
-    return String(item || '').trim();
-  }).filter(Boolean).join(' / ');
+  return {
+    name: String(payload.name || '').trim(),
+    phone: String(payload.phone || '').trim(),
+    full: String(payload.full || '').trim()
+  };
 }
 
 function findShipmentForOrderItem(order, item) {
@@ -2715,6 +3003,7 @@ function buildOrderExportRows(orders) {
     const receiver = order && order.address && typeof order.address === 'object' ? order.address : {};
     items.forEach(function (item) {
       const shipment = findShipmentForOrderItem(order, item);
+      const shippingAddress = normalizeOrderExportAddress(item && item.shippingAddressSnapshot);
       rows.push({
         '订单号': String(order && (order.sourceId || order.id) || ''),
         '订单状态': getOrderStatusExportLabel(order && order.status),
@@ -2727,7 +3016,9 @@ function buildOrderExportRows(orders) {
         '规格': String(item && item.variantLabel || '默认规格'),
         '单位': String(item && (item.unit || item.unitLabel) || '默认单位'),
         '数量': Number(item && item.qty || 0),
-        '商品发货地址': formatOrderExportAddress(item && item.shippingAddressSnapshot),
+        '发货人': shippingAddress.name,
+        '发货人电话': shippingAddress.phone,
+        '发货地址': shippingAddress.full,
         '快递单号': String(shipment && shipment.trackingNo || ''),
         '订单实付': Number(order && order.total || 0).toFixed(2)
       });
@@ -2743,7 +3034,7 @@ function escapeFormulaValue(value) {
 
 function serializeOrderExportCsv(rows) {
   const items = Array.isArray(rows) ? rows : [];
-  const columns = ['订单号', '订单状态', '下单时间', '买家', '收货姓名', '收货手机号', '收货详细地址', '商品名称', '规格', '单位', '数量', '商品发货地址', '快递单号', '订单实付'];
+  const columns = ['订单号', '订单状态', '下单时间', '买家', '收货姓名', '收货手机号', '收货详细地址', '商品名称', '规格', '单位', '数量', '发货人', '发货人电话', '发货地址', '快递单号', '订单实付'];
   const escapeCell = function (value) {
     const normalized = escapeFormulaValue(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     return '"' + normalized.replace(/"/g, '""') + '"';
@@ -2817,7 +3108,12 @@ async function listShipmentItemRowsByOrderId(relationOrderId) {
 
 function buildShipmentLogisticsSignature(record) {
   const shipment = normalizeShipmentRecord(record);
-  return [shipment.logisticsState, shipment.logisticsSummary].join('|');
+  return JSON.stringify({
+    logisticsState: shipment.logisticsState,
+    state: shipment.state,
+    logisticsSummary: shipment.logisticsSummary,
+    data: shipment.data
+  });
 }
 
 function buildMockCourierSummary(prefix, now) {
@@ -2831,6 +3127,26 @@ function buildMockCourierSummary(prefix, now) {
   return prefix + ' · ' + timeText;
 }
 
+function buildMockCourierTimeline(entries) {
+  return (Array.isArray(entries) ? entries : []).map(function (entry) {
+    const payload = entry || {};
+    const time = Math.max(0, Number(payload.time || Date.now()));
+    return {
+      context: String(payload.context || '').trim(),
+      ftime: new Date(time).toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).replace(/\//g, '-'),
+      time: time
+    };
+  }).filter(function (entry) {
+    return !!String(entry.context || '').trim();
+  });
+}
+
 async function queryCourierTrackingAdapter(shipment, now) {
   const trackingNo = String(shipment && shipment.trackingNo || '').trim();
   const carrierName = String(shipment && shipment.carrierName || '').trim();
@@ -2838,6 +3154,8 @@ async function queryCourierTrackingAdapter(shipment, now) {
   if (!trackingNo) {
     return {
       logisticsState: 'no_tracking',
+      state: '',
+      data: [],
       logisticsSummary: '待发货，暂未录入物流信息',
       successAt: 0
     };
@@ -2848,19 +3166,56 @@ async function queryCourierTrackingAdapter(shipment, now) {
   if (upperTracking.indexOf('NO-TRACE') >= 0 || upperTracking.indexOf('NOTRACE') >= 0 || upperTracking.indexOf('WAIT') >= 0) {
     return {
       logisticsState: 'no_trace',
+      state: '0',
+      data: buildMockCourierTimeline([
+        { time: now - 20 * 60 * 1000, context: '查无结果' }
+      ]),
       logisticsSummary: '已录入单号，等待物流公司返回轨迹',
       successAt: 0
+    };
+  }
+  if (upperTracking.indexOf('RETURN') >= 0 || upperTracking.indexOf('BACK') >= 0) {
+    return {
+      logisticsState: 'stale_success',
+      state: '4',
+      data: buildMockCourierTimeline([
+        { time: now - 25 * 60 * 1000, context: '收件人地址异常，包裹已退回' }
+      ]),
+      logisticsSummary: '已退签',
+      successAt: now
+    };
+  }
+  if (upperTracking.indexOf('REJECT') >= 0 || upperTracking.indexOf('REFUSE') >= 0) {
+    return {
+      logisticsState: 'stale_success',
+      state: '14',
+      data: buildMockCourierTimeline([
+        { time: now - 25 * 60 * 1000, context: '收件人拒签，包裹待退回' }
+      ]),
+      logisticsSummary: '已拒签',
+      successAt: now
     };
   }
   if (upperTracking.indexOf('SIGNED') >= 0 || upperTracking.indexOf('DELIVERED') >= 0 || upperTracking.indexOf('DONE') >= 0) {
     return {
       logisticsState: 'signed',
+      state: '3',
+      data: buildMockCourierTimeline([
+        { time: now - 15 * 60 * 1000, context: '包裹已签收，签收人：本人' },
+        { time: now - 60 * 60 * 1000, context: '快件已到达派送站，正在安排派送' }
+      ]),
       logisticsSummary: buildMockCourierSummary('已签收', now - 15 * 60 * 1000),
       successAt: now
     };
   }
   return {
     logisticsState: 'active_success',
+    state: '0',
+    data: buildMockCourierTimeline([
+      { time: now - 30 * 60 * 1000, context: (carrierName || '物流') + '已从杭州分拨中心发出' },
+      { time: now - 3 * 60 * 60 * 1000, context: '包裹已到达杭州分拨中心' },
+      { time: now - 6 * 60 * 60 * 1000, context: '商家已通知快递揽件' }
+    ]),
     logisticsSummary: buildMockCourierSummary((carrierName || '物流') + '运输中，最新节点已同步', now - 30 * 60 * 1000),
     successAt: now
   };
@@ -2870,10 +3225,12 @@ async function saveShipmentLogisticsSnapshot(shipmentId, payload, now) {
   const snapshot = normalizeShipmentRecord(Object.assign({}, payload, { id: shipmentId }));
   const updatedAt = Math.max(Number(now || Date.now()), Number(snapshot.updatedAt || 0));
   await run(
-    'UPDATE shipments SET logisticsSummary = ?, logisticsState = ?, lastLogisticsQueryAt = ?, lastLogisticsSuccessAt = ?, updatedAt = ? WHERE id = ?',
+    'UPDATE shipments SET logisticsSummary = ?, logisticsState = ?, logisticsProviderState = ?, logisticsDataJson = ?, lastLogisticsQueryAt = ?, lastLogisticsSuccessAt = ?, updatedAt = ? WHERE id = ?',
     [
       snapshot.logisticsSummary,
       snapshot.logisticsState,
+      String(snapshot.state || ''),
+      JSON.stringify(snapshot.data || []),
       Math.max(0, Number(snapshot.lastLogisticsQueryAt || 0)),
       Math.max(0, Number(snapshot.lastLogisticsSuccessAt || 0)),
       updatedAt,
@@ -2890,16 +3247,22 @@ async function refreshShipmentLogisticsRow(row, now) {
   if (!shipment.trackingNo) {
     nextPayload = Object.assign({}, shipment, {
       logisticsState: 'no_tracking',
+      state: '',
+      data: [],
       logisticsSummary: '待发货，暂未录入物流信息'
     });
-  } else if (shipment.logisticsState === 'signed' && Number(shipment.lastLogisticsSuccessAt || 0) > 0) {
+  } else if ((shipment.logisticsState === 'signed' || LOGISTICS_STATUS_ONLY_PROVIDER_STATES.indexOf(String(shipment.state || '')) >= 0) && Number(shipment.lastLogisticsSuccessAt || 0) > 0) {
     nextPayload = Object.assign({}, shipment, {
-      logisticsState: 'signed',
-      logisticsSummary: buildShipmentLogisticsSummary('signed', shipment)
+      logisticsState: shipment.logisticsState,
+      state: shipment.state,
+      data: shipment.data,
+      logisticsSummary: buildShipmentLogisticsSummary(shipment.logisticsState, shipment)
     });
   } else if (Number(shipment.lastLogisticsQueryAt || 0) > 0 && now - Number(shipment.lastLogisticsQueryAt || 0) < LOGISTICS_THROTTLE_MS) {
     nextPayload = Object.assign({}, shipment, {
       logisticsState: shipment.logisticsState,
+      state: shipment.state,
+      data: shipment.data,
       logisticsSummary: buildShipmentLogisticsSummary(shipment.logisticsState, shipment)
     });
   } else {
@@ -2907,6 +3270,8 @@ async function refreshShipmentLogisticsRow(row, now) {
       const adapterResult = await queryCourierTrackingAdapter(shipment, now);
       nextPayload = Object.assign({}, shipment, {
         logisticsState: adapterResult.logisticsState,
+        state: adapterResult.state,
+        data: adapterResult.data,
         logisticsSummary: adapterResult.logisticsSummary,
         lastLogisticsQueryAt: now,
         lastLogisticsSuccessAt: Math.max(0, Number(adapterResult.successAt || 0))
@@ -2917,6 +3282,8 @@ async function refreshShipmentLogisticsRow(row, now) {
         logisticsState: hasHistoricalSuccess
           ? (shipment.logisticsState === 'signed' ? 'signed' : 'stale_success')
           : 'no_trace',
+        state: shipment.state,
+        data: shipment.data,
         logisticsSummary: hasHistoricalSuccess
           ? buildShipmentLogisticsSummary(shipment.logisticsState, shipment)
           : '已录入单号，等待物流公司返回轨迹',
@@ -2955,6 +3322,87 @@ async function refreshOrderLogisticsByRelationId(relationOrderId) {
     changed: changed,
     order: await getOrderSnapshotByRelationId(relationOrderId)
   };
+}
+
+function isShipmentBackgroundPollingCandidate(row) {
+  const shipment = normalizeShipmentRecord(row);
+  const orderStatus = String(row && row.orderStatus || '').trim();
+  if (!shipment.trackingNo) return false;
+  if (['done', 'cancelled', 'refunded'].indexOf(orderStatus) >= 0) return false;
+  if (shipment.logisticsState === 'signed') return false;
+  if (LOGISTICS_STATUS_ONLY_PROVIDER_STATES.indexOf(String(shipment.state || '')) >= 0) return false;
+  return true;
+}
+
+async function listShipmentsForBackgroundPolling() {
+  const qualifiedShipmentColumns = SHIPMENT_LIST_COLUMNS.split(', ').map(function (column) {
+    return 's.' + column;
+  }).join(', ');
+  return all(
+    'SELECT ' + qualifiedShipmentColumns + ', o.status AS orderStatus FROM shipments s INNER JOIN orders o ON o.id = s.orderId WHERE TRIM(COALESCE(s.trackingNo, \'\')) <> \'\' ORDER BY s.updatedAt ASC, s.createdAt ASC, s.id ASC'
+  );
+}
+
+async function runBackgroundLogisticsPolling(reason) {
+  if (LOGISTICS_BACKGROUND_POLL_DISABLED) {
+    return { skipped: true, reason: 'disabled' };
+  }
+  if (logisticsBackgroundPollingState.running) {
+    return { skipped: true, reason: 'already_running' };
+  }
+  logisticsBackgroundPollingState.running = true;
+  logisticsBackgroundPollingState.lastStartedAt = Date.now();
+  logisticsBackgroundPollingState.lastError = '';
+  try {
+    const rows = await listShipmentsForBackgroundPolling();
+    let processedCount = 0;
+    let changedCount = 0;
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      if (!isShipmentBackgroundPollingCandidate(row)) continue;
+      processedCount += 1;
+      const result = await refreshShipmentLogisticsRow(row, Date.now());
+      if (result.changed) changedCount += 1;
+    }
+    logisticsBackgroundPollingState.lastProcessedCount = processedCount;
+    logisticsBackgroundPollingState.lastChangedCount = changedCount;
+    logisticsBackgroundPollingState.lastCompletedAt = Date.now();
+    if (processedCount > 0) {
+      console.log('[logistics-poll] ' + reason + ' processed=' + processedCount + ' changed=' + changedCount);
+    }
+    return {
+      skipped: false,
+      processedCount: processedCount,
+      changedCount: changedCount
+    };
+  } catch (error) {
+    logisticsBackgroundPollingState.lastCompletedAt = Date.now();
+    logisticsBackgroundPollingState.lastError = error && error.message ? String(error.message) : 'unknown_error';
+    console.error('[logistics-poll] failed:', error);
+    return {
+      skipped: false,
+      error: logisticsBackgroundPollingState.lastError
+    };
+  } finally {
+    logisticsBackgroundPollingState.running = false;
+  }
+}
+
+function startBackgroundLogisticsPolling() {
+  if (LOGISTICS_BACKGROUND_POLL_DISABLED || logisticsBackgroundPollingState.timer) return;
+  setTimeout(function () {
+    runBackgroundLogisticsPolling('startup').catch(function (error) {
+      console.error('[logistics-poll] startup failed:', error);
+    });
+  }, 1000);
+  logisticsBackgroundPollingState.timer = setInterval(function () {
+    runBackgroundLogisticsPolling('interval').catch(function (error) {
+      console.error('[logistics-poll] interval failed:', error);
+    });
+  }, LOGISTICS_BACKGROUND_POLL_MS);
+  if (logisticsBackgroundPollingState.timer && typeof logisticsBackgroundPollingState.timer.unref === 'function') {
+    logisticsBackgroundPollingState.timer.unref();
+  }
 }
 
 async function listAllOrdersByOwner(ownerUsername) {
@@ -3082,7 +3530,7 @@ async function createShipmentForOrder(ownerUsername, sourceOrderId, payload, act
       logisticsSummary: '已录入单号，等待物流公司返回轨迹'
     });
     await run(
-      'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, logisticsProviderState, logisticsDataJson, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         shipmentId,
         relationOrderId,
@@ -3094,6 +3542,8 @@ async function createShipmentForOrder(ownerUsername, sourceOrderId, payload, act
         'shipped',
         shipmentLogistics.logisticsSummary,
         shipmentLogistics.logisticsState,
+        shipmentLogistics.state || '',
+        JSON.stringify(shipmentLogistics.data || []),
         0,
         0,
         now,
@@ -3485,6 +3935,7 @@ function normalizeCartItem(item, index) {
     unitId: item && item.unitId ? String(item.unitId) : '',
     unitLabel: item && (item.unitLabel || item.unit || item.variantLabel) ? String(item.unitLabel || item.unit || item.variantLabel) : '',
     price: Number(item && item.price || 0),
+    deliveryFee: Number(item && item.deliveryFee || 0),
     unit: item && (item.unit || item.unitLabel || item.variantLabel) ? String(item.unit || item.unitLabel || item.variantLabel) : '',
     img: item && item.img ? String(item.img) : '',
     qty: Number(item && item.qty || 0),
@@ -3501,6 +3952,7 @@ function hydrateCartItem(row) {
     unitId: row.unitId || '',
     unitLabel: row.unitLabel || row.unit || row.variantLabel || '',
     price: row.price,
+    deliveryFee: Number(row.deliveryFee || 0),
     unit: row.unit,
     img: row.img,
     qty: row.qty
@@ -3513,8 +3965,8 @@ async function syncUserCartRelations(username, cart) {
   for (let index = 0; index < cartList.length; index++) {
     const item = normalizeCartItem(cartList[index], index);
     await run(
-      'INSERT INTO cart_items (username, productId, name, variantId, variantLabel, unitId, unitLabel, price, unit, img, qty, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [username, item.productId, item.name, item.variantId, item.variantLabel, item.unitId, item.unitLabel, item.price, item.unit, item.img, item.qty, index]
+      'INSERT INTO cart_items (username, productId, name, variantId, variantLabel, unitId, unitLabel, price, deliveryFee, unit, img, qty, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [username, item.productId, item.name, item.variantId, item.variantLabel, item.unitId, item.unitLabel, item.price, item.deliveryFee, item.unit, item.img, item.qty, index]
     );
   }
 }
@@ -3754,6 +4206,7 @@ function normalizeProduct(product) {
   const defaultVariant = getDefaultVariant(normalized);
   const defaultUnit = defaultVariant ? getDefaultUnitForVariant(defaultVariant, normalized) : null;
   normalized.price = Number(defaultUnit && defaultUnit.price || defaultVariant && defaultVariant.price || 0);
+  normalized.deliveryFee = Number(defaultUnit && defaultUnit.deliveryFee || 0);
   normalized.orig = normalized.price;
   normalized.unit = defaultUnit && defaultUnit.label ? String(defaultUnit.label) : '';
   normalized.stock = normalized.variants.reduce(function (sum, item) {
@@ -4755,16 +5208,16 @@ async function handleAlipayNotification(payload) {
   if (!verifyAlipaySignature(notifyPayload, config.publicKey)) {
     return { ok: false, shouldAcknowledge: false, message: '支付宝异步通知验签失败' };
   }
-  const identifier = parseAlipayOutTradeNo(notifyPayload.out_trade_no);
-  if (!identifier) {
+  const context = await resolvePaymentNotificationContext(notifyPayload.out_trade_no);
+  if (!context) {
     return { ok: false, shouldAcknowledge: false, message: '支付宝订单号无法识别' };
   }
-  const owner = identifier.ownerUsername;
-  const orderId = identifier.sourceOrderId;
-  const relationOrderId = buildOrderRelationId(owner, orderId);
-  const order = await getOrderSnapshotByRelationId(relationOrderId);
-  const transactionId = buildPaymentTransactionId(owner, orderId);
-  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  const owner = context.owner;
+  const orderId = context.orderId;
+  const relationOrderId = context.relationOrderId;
+  const order = context.order;
+  const transactionId = context.transactionId;
+  const paymentTransaction = context.paymentTransaction;
   if (!order || !paymentTransaction) {
     return { ok: false, shouldAcknowledge: false, message: '本地订单或支付流水不存在' };
   }
@@ -4848,16 +5301,16 @@ async function handleWechatNotification(payload) {
     ? notifyPayload.transaction
     : notifyPayload;
   const outTradeNo = String(transaction.out_trade_no || notifyPayload.out_trade_no || '').trim();
-  const identifier = parseAlipayOutTradeNo(outTradeNo);
-  if (!identifier) {
+  const context = await resolvePaymentNotificationContext(outTradeNo);
+  if (!context) {
     return { ok: false, shouldAcknowledge: false, message: '微信支付订单号无法识别' };
   }
-  const owner = identifier.ownerUsername;
-  const orderId = identifier.sourceOrderId;
-  const relationOrderId = buildOrderRelationId(owner, orderId);
-  const order = await getOrderSnapshotByRelationId(relationOrderId);
-  const transactionId = buildPaymentTransactionId(owner, orderId);
-  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(owner, orderId);
+  const owner = context.owner;
+  const orderId = context.orderId;
+  const relationOrderId = context.relationOrderId;
+  const order = context.order;
+  const transactionId = context.transactionId;
+  const paymentTransaction = context.paymentTransaction;
   if (!order || !paymentTransaction) {
     return { ok: false, shouldAcknowledge: false, message: '本地订单或支付流水不存在' };
   }
@@ -5063,6 +5516,67 @@ async function executeMockRefund(refund, actorUsername) {
   };
 }
 
+async function executeAlipayRefund(refund, actorUsername, config) {
+  const normalizedRefund = normalizeRefundRequest(refund);
+  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(normalizedRefund.ownerUsername, normalizedRefund.orderId);
+  if (!paymentTransaction) {
+    throw new Error('支付宝退款失败：缺少支付流水');
+  }
+  assertAlipayReady(config);
+  const bizContent = {
+    refund_amount: formatCurrencyAmount(normalizedRefund.refundAmount),
+    out_request_no: normalizedRefund.id || ('refund_' + Date.now())
+  };
+  if (paymentTransaction.gatewayTradeNo) bizContent.trade_no = paymentTransaction.gatewayTradeNo;
+  else if (paymentTransaction.externalTradeNo) bizContent.out_trade_no = paymentTransaction.externalTradeNo;
+  if (!bizContent.trade_no && !bizContent.out_trade_no) {
+    throw new Error('支付宝退款失败：缺少支付宝交易号或商户订单号');
+  }
+  if (normalizedRefund.reason) bizContent.refund_reason = String(normalizedRefund.reason).slice(0, 256);
+  try {
+    const gatewayResult = await callAlipayGateway(ALIPAY_REFUND_METHOD, bizContent, config);
+    await updatePaymentTransactionAlipayState(paymentTransaction.id, {
+      lastError: ''
+    });
+    return {
+      success: true,
+      processedAt: Date.now(),
+      actorUsername: actorUsername,
+      refundId: normalizedRefund.id,
+      gateway: 'alipay',
+      gatewayTradeNo: String(gatewayResult.response.trade_no || paymentTransaction.gatewayTradeNo || ''),
+      externalTradeNo: String(gatewayResult.response.out_trade_no || paymentTransaction.externalTradeNo || ''),
+      response: gatewayResult.response
+    };
+  } catch (error) {
+    await updatePaymentTransactionAlipayState(paymentTransaction.id, {
+      lastError: '支付宝退款失败：' + String(error && error.message ? error.message : error)
+    });
+    throw error;
+  }
+}
+
+async function executeRefund(refund, actorUsername) {
+  const normalizedRefund = normalizeRefundRequest(refund);
+  const paymentTransaction = await getPaymentTransactionByOwnerAndOrder(normalizedRefund.ownerUsername, normalizedRefund.orderId);
+  const channel = String(paymentTransaction && paymentTransaction.channel || '').trim();
+  if (channel === 'alipay_wap') {
+    const config = getAlipayConfig();
+    const hasRealConfig = config.enabled && config.appId && config.privateKey && config.publicKey;
+    if (!hasRealConfig && isLocalMockPaymentEnabled()) {
+      return executeMockRefund(normalizedRefund, actorUsername);
+    }
+    return executeAlipayRefund(normalizedRefund, actorUsername, config);
+  }
+  if (channel.indexOf('wechat_') === 0) {
+    if (isLocalMockPaymentEnabled()) {
+      return executeMockRefund(normalizedRefund, actorUsername);
+    }
+    throw new Error('当前订单为微信支付，退款接口尚未接入，不能直接标记为已退款');
+  }
+  return executeMockRefund(normalizedRefund, actorUsername);
+}
+
 async function restoreInventoryByRefund(refund, actorUsername) {
   const items = Array.isArray(refund && refund.itemsSnapshot) ? refund.itemsSnapshot : [];
   for (let index = 0; index < items.length; index++) {
@@ -5099,7 +5613,7 @@ async function completeRefundRequest(refundId, actorUsername) {
   if (!orderRow) throw new Error('原订单不存在');
   if (String(orderRow.status || '') === 'refunded') throw new Error('该订单已退款完成');
   if (!refund.paymentRefunded) {
-    const refundResult = await executeMockRefund(refund, actor.username);
+    const refundResult = await executeRefund(refund, actor.username);
     if (!refundResult || !refundResult.success) throw new Error('退款执行失败');
   }
   if (!refund.inventoryRestored) {
@@ -5353,7 +5867,7 @@ async function backfillLegacyTrackingShipments() {
       logisticsSummary: row.trackingNo ? '已录入单号，等待物流公司返回轨迹' : '待发货，暂未录入物流信息'
     });
     await run(
-      'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO shipments (id, orderId, orderSourceId, ownerUsername, trackingNo, carrierCode, carrierName, status, logisticsSummary, logisticsState, logisticsProviderState, logisticsDataJson, lastLogisticsQueryAt, lastLogisticsSuccessAt, createdAt, updatedAt, createdBy, legacySource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         shipmentId,
         row.id,
@@ -5365,6 +5879,8 @@ async function backfillLegacyTrackingShipments() {
         shipmentLogistics.status,
         shipmentLogistics.logisticsSummary,
         shipmentLogistics.logisticsState,
+        shipmentLogistics.state || '',
+        JSON.stringify(shipmentLogistics.data || []),
         0,
         0,
         now,
@@ -5548,6 +6064,7 @@ async function initDatabase() {
       unitLabel TEXT NOT NULL DEFAULT '',
       unit TEXT NOT NULL DEFAULT '',
       price REAL NOT NULL DEFAULT 0,
+      deliveryFee REAL NOT NULL DEFAULT 0,
       qty INTEGER NOT NULL DEFAULT 0,
       img TEXT NOT NULL DEFAULT '',
       shippingAddressId TEXT NOT NULL DEFAULT '',
@@ -5569,6 +6086,8 @@ async function initDatabase() {
       status TEXT NOT NULL DEFAULT 'shipped',
       logisticsSummary TEXT NOT NULL DEFAULT '',
       logisticsState TEXT NOT NULL DEFAULT 'no_tracking',
+      logisticsProviderState TEXT NOT NULL DEFAULT '',
+      logisticsDataJson TEXT NOT NULL DEFAULT '[]',
       lastLogisticsQueryAt INTEGER NOT NULL DEFAULT 0,
       lastLogisticsSuccessAt INTEGER NOT NULL DEFAULT 0,
       createdAt INTEGER NOT NULL DEFAULT 0,
@@ -5598,6 +6117,7 @@ async function initDatabase() {
       unitId TEXT NOT NULL DEFAULT '',
       unitLabel TEXT NOT NULL DEFAULT '',
       price REAL NOT NULL DEFAULT 0,
+      deliveryFee REAL NOT NULL DEFAULT 0,
       unit TEXT NOT NULL DEFAULT '',
       img TEXT NOT NULL DEFAULT '',
       qty INTEGER NOT NULL DEFAULT 0,
@@ -5856,7 +6376,8 @@ async function initDatabase() {
     variantId: "TEXT NOT NULL DEFAULT ''",
     variantLabel: "TEXT NOT NULL DEFAULT ''",
     unitId: "TEXT NOT NULL DEFAULT ''",
-    unitLabel: "TEXT NOT NULL DEFAULT ''"
+    unitLabel: "TEXT NOT NULL DEFAULT ''",
+    deliveryFee: 'REAL NOT NULL DEFAULT 0'
   };
   for (const key of Object.keys(orderItemDefinitions)) {
     if (!orderItemExisting[key]) await run('ALTER TABLE order_items ADD COLUMN ' + key + ' ' + orderItemDefinitions[key]);
@@ -5875,6 +6396,8 @@ async function initDatabase() {
     status: "TEXT NOT NULL DEFAULT 'shipped'",
     logisticsSummary: "TEXT NOT NULL DEFAULT ''",
     logisticsState: "TEXT NOT NULL DEFAULT 'no_tracking'",
+    logisticsProviderState: "TEXT NOT NULL DEFAULT ''",
+    logisticsDataJson: "TEXT NOT NULL DEFAULT '[]'",
     lastLogisticsQueryAt: 'INTEGER NOT NULL DEFAULT 0',
     lastLogisticsSuccessAt: 'INTEGER NOT NULL DEFAULT 0',
     createdAt: 'INTEGER NOT NULL DEFAULT 0',
@@ -5907,7 +6430,8 @@ async function initDatabase() {
     variantId: "TEXT NOT NULL DEFAULT ''",
     variantLabel: "TEXT NOT NULL DEFAULT ''",
     unitId: "TEXT NOT NULL DEFAULT ''",
-    unitLabel: "TEXT NOT NULL DEFAULT ''"
+    unitLabel: "TEXT NOT NULL DEFAULT ''",
+    deliveryFee: 'REAL NOT NULL DEFAULT 0'
   };
   for (const key of Object.keys(cartItemDefinitions)) {
     if (!cartItemExisting[key]) await run('ALTER TABLE cart_items ADD COLUMN ' + key + ' ' + cartItemDefinitions[key]);
@@ -6282,10 +6806,15 @@ app.get('/api/orders/:orderId', async function (req, res) {
 app.post('/api/orders/logistics-refresh-check', async function (req, res) {
   try {
     if (!ensureLoggedIn(req, res, '请先登录后查看物流')) return;
-    const payload = await runBuyerLogisticsRefreshCheck(req.currentUser.username, {
-      visibleOrderIds: req.body && req.body.visibleOrderIds
+    res.json({
+      changed: false,
+      changedOrderIds: [],
+      changedCount: 0,
+      visibleOrderIds: normalizeVisibleOrderIdList(req.body && req.body.visibleOrderIds),
+      visibleChangedOrderIds: [],
+      visibleChangedCount: 0,
+      mode: 'background_polling'
     });
-    res.json(payload);
   } catch (error) {
     res.status(400).json({ message: error.message || '物流检查失败', error: error.message });
   }
@@ -6297,8 +6826,16 @@ app.post('/api/orders/:orderId/logistics-refresh-check', async function (req, re
     const sourceOrderId = String(req.params.orderId || '').trim();
     const order = await getOrderSnapshotByOwner(req.currentUser.username, sourceOrderId);
     if (!order) return res.status(404).json({ message: '订单不存在' });
-    const payload = await runBuyerLogisticsRefreshCheck(req.currentUser.username, { orderId: sourceOrderId });
-    res.json(payload);
+    res.json({
+      orderId: sourceOrderId,
+      changed: false,
+      changedOrderIds: [],
+      changedCount: 0,
+      visibleOrderIds: [],
+      visibleChangedOrderIds: [],
+      visibleChangedCount: 0,
+      mode: 'background_polling'
+    });
   } catch (error) {
     res.status(400).json({ message: error.message || '物流检查失败', error: error.message });
   }
@@ -7024,6 +7561,7 @@ initDatabase()
   .then(function () {
     app.listen(port, host, function () {
       console.log('cloud-store server running on ' + host + ':' + port);
+      startBackgroundLogisticsPolling();
     });
   })
   .catch(function (error) {
