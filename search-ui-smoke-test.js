@@ -285,7 +285,7 @@ async function main() {
   await execAsync('await openSearchPage();');
   await flush(6);
   appHtml = document.getElementById('app').innerHTML;
-  assert(appHtml.includes('输入关键字后可按商品名、农户、产地或标签查找。'), '搜索页初始态应提示搜索说明');
+  assert(appHtml.includes('输入关键字后可按商品名或标签查找。'), '搜索页初始态应提示搜索说明');
 
   await execAsync('await searchProducts("不存在测试");');
   await flush(6);

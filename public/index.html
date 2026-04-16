@@ -1642,6 +1642,7 @@
         unit: '',
         harvest: new Date().toISOString().slice(0, 10),
         dispatchHours: 4,
+        courierNote: '',
         trace: []
       }, p || {});
       var explicitCover = String(normalized.img || normalized.coverImage || '').trim();
@@ -1667,9 +1668,15 @@
       }, 0);
       normalized.defaultVariantId = defaultVariant && defaultVariant.id ? String(defaultVariant.id) : '';
       normalized.defaultUnitId = defaultUnit && defaultUnit.id ? String(defaultUnit.id) : '';
+      normalized.courierNote = String(normalized.courierNote || '').trim();
       normalized.images = imageList;
       normalized.img = explicitCover && imageList.indexOf(explicitCover) > -1 ? explicitCover : imageList[0];
       return normalized;
+    }
+
+    function getCourierNoteText(product, fallback) {
+      var note = String(product && product.courierNote || '').trim();
+      return note || (fallback || '下单后会按商品实际情况安排打包发货，如需指定快递或特殊时效，请先联系客服确认。');
     }
 
     function reconcileProductSelectionState(product, previousProduct) {
@@ -2950,7 +2957,7 @@
       return setAdminOrdersPage(await response.json());
     }
 
-    async function downloadAdminOrderCsv() {
+    async function downloadAdminOrderExport() {
       if (adminOrderListState.exporting) return;
       adminOrderListState.exporting = true;
       if (currentAdminTab === 'od') renderAdminOd();
@@ -2967,7 +2974,7 @@
         var link = document.createElement('a');
         var objectUrl = window.URL.createObjectURL(blob);
         link.href = objectUrl;
-        link.download = parseDownloadFilename(response.headers && response.headers.get ? response.headers.get('content-disposition') : '', 'orders-export.csv');
+        link.download = parseDownloadFilename(response.headers && response.headers.get ? response.headers.get('content-disposition') : '', 'orders-export.xls');
         if (typeof link.click === 'function') link.click();
         if (window.URL && typeof window.URL.revokeObjectURL === 'function') window.URL.revokeObjectURL(objectUrl);
       } catch (error) {
@@ -3124,7 +3131,7 @@
       }
       var plainMatch = source.match(/filename="?([^";]+)"?/i);
       if (plainMatch && plainMatch[1]) return String(plainMatch[1]).trim();
-      return fallbackName || 'orders-export.csv';
+      return fallbackName || 'orders-export.xls';
     }
 
     function normalizePagedPayload(payload, normalizer, fallbackMeta) {
@@ -3473,6 +3480,7 @@
         stock: 0,
         harvest: new Date().toISOString().slice(0, 10),
         dispatchHours: 4,
+        courierNote: '',
         farmer: '',
         village: '',
         images: [DEFAULT_PRODUCT_IMAGE],
@@ -4281,6 +4289,7 @@
         stock: variants.reduce(function (sum, item) { return sum + Number(item.stock || 0); }, 0),
         harvest: document.getElementById(prefix + '-harvest').value.trim(),
         dispatchHours: parseInt(document.getElementById(prefix + '-dispatch-hours').value, 10),
+        courierNote: (document.getElementById(prefix + '-courier-note') || {}).value ? document.getElementById(prefix + '-courier-note').value.trim() : (fallback.courierNote || ''),
         farmer: farmerInput ? farmerInput.value.trim() : (fallback.farmer || ''),
         village: document.getElementById(prefix + '-village').value.trim(),
         shippingAddressId: shippingInput ? shippingInput.value.trim() : (fallback.shippingAddressId || ''),
@@ -4305,10 +4314,11 @@
       h += '<div class="mb-3">' + renderFieldLabel('商品分类', '用于前台分类筛选与商品归类，数据来自后台“商品分类”维护') + '<select id="' + prefix + '-cat" class="w-full p-2 border rounded-lg text-sm">' + categoryOptions.map(function (item) { return '<option value="' + item.id + '"' + (item.id === (product.cat || getDefaultCategoryId()) ? ' selected' : '') + '>' + item.name + '</option>'; }).join('') + '</select></div>';
       h += '<div class="mb-3">' + renderFieldLabel('商品标签', '最多点亮 2 个标签，会展示在商品大图和商品卡片上') + '<input id="' + prefix + '-tags" type="hidden" value="' + selectedTags.join(',') + '"><div class="flex flex-wrap gap-2">' + PRODUCT_TAG_OPTIONS.map(function (tag) { var active = selectedTags.indexOf(tag) > -1; return '<button type="button" id="' + prefix + '-tag-' + tag + '" onclick="toggleFormTag(\'' + prefix + '\',\'' + tag + '\')" class="' + (active ? 'px-3 py-2 rounded-full text-xs bg-[#2D9D4E] text-white' : 'px-3 py-2 rounded-full text-xs bg-gray-100 text-gray-500') + '">' + tag + '</button>'; }).join('') + '</div></div>';
       h += '<div class="mb-3"><div class="flex items-center justify-between mb-2"><div>' + renderFieldLabel('规格列表', '单位价格、单位配送费和单位库存是真相；规格默认先展示价格与配送费摘要，点击规格可展开单位明细') + '</div><button type="button" onclick="openVariantEditor(\'' + prefix + '\',-1)" class="text-xs px-3 py-2 rounded-full bg-[#2D9D4E] text-white">新增规格</button></div><input id="' + prefix + '-variants-json" type="hidden" value=\'' + escapeHtml(serializeVariantsForField(normalizedProduct.variants || [])) + '\'><div id="' + prefix + '-variants-panel">' + renderVariantListPanel(prefix, normalizedProduct) + '</div><div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3"><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">商品总库存</div><div id="' + prefix + '-stock-summary" class="font-bold text-base mt-1">' + Number(normalizedProduct.stock || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认展示价</div><div id="' + prefix + '-price-summary" class="font-bold text-base mt-1">' + fmt(normalizedProduct.price || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认配送费</div><div id="' + prefix + '-delivery-fee-summary" class="font-bold text-base mt-1">' + fmt(normalizedProduct.deliveryFee || 0) + '</div></div><div class="rounded-xl bg-[#F9F7F3] p-3"><div class="text-xs text-gray-400">默认单位</div><div id="' + prefix + '-unit-summary" class="font-bold text-sm mt-1">' + escapeHtml(normalizedProduct.unit || '未设置') + '</div></div></div></div>';
-      h += '<div class="mb-3">' + renderFieldLabel('采摘日期', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-harvest" value="' + (product.harvest || '') + '" placeholder="采摘日期" type="date" class="w-full p-2 border rounded-lg text-sm"></div>';
+      h += '<input id="' + prefix + '-harvest" value="' + escapeHtml(product.harvest || '') + '" type="hidden">';
       h += '<div class="mb-3">' + renderFieldLabel('发货时效', '填写多少小时内发货') + '<input id="' + prefix + '-dispatch-hours" value="' + Number(product.dispatchHours || 4) + '" placeholder="多少小时内发货" type="number" class="w-full p-2 border rounded-lg text-sm"></div>';
-      if (canEditFarmer) h += '<div class="mb-3">' + renderFieldLabel('供货人 / 农户名称', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-farmer" value="' + (product.farmer || '') + '" placeholder="请输入供货人名称（可选）" class="w-full p-2 border rounded-lg text-sm"></div>';
-      h += '<div class="mb-3">' + renderFieldLabel('来源产地', '可选，不填时前台会显示为待补充') + '<input id="' + prefix + '-village" value="' + (product.village || '') + '" placeholder="请输入来源产地（可选）" class="w-full p-2 border rounded-lg text-sm"></div>';
+      if (canEditFarmer) h += '<input id="' + prefix + '-farmer" value="' + escapeHtml(product.farmer || '') + '" type="hidden">';
+      h += '<input id="' + prefix + '-village" value="' + escapeHtml(product.village || '') + '" type="hidden">';
+      h += '<div class="mb-3">' + renderFieldLabel('快递说明', '填写买家在商品详情里会看到的快递补充说明，支持多行') + '<textarea id="' + prefix + '-courier-note" rows="4" placeholder="例如：默认发圆通；偏远地区需补运费；生鲜商品会加冰袋打包。" class="w-full p-3 border rounded-lg text-sm resize-y">' + escapeHtml(product.courierNote || '') + '</textarea></div>';
       h += '<div class="mb-3">' + renderFieldLabel('发货地址', '从当前账号已维护的发货地址中弹窗选择并绑定到商品') + '<input id="' + prefix + '-shipping-address-id" type="hidden" value="' + (product.shippingAddressId || '') + '"><button type="button" onclick="openShippingAddressPicker(\'' + prefix + '\')" class="w-full text-left border rounded-lg p-3 text-sm bg-[#F9F7F3]"><div class="text-xs text-gray-400 mb-1">当前绑定</div><div id="' + prefix + '-shipping-address-label" class="' + ((product.shippingAddressId || '') ? 'text-gray-700' : 'text-gray-400') + '">' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '请选择发货地址') + '</div></button></div>';
       h += renderProductImageUploader(prefix, product);
       return h;
@@ -4321,7 +4331,7 @@
       var expanded = !!options.expanded;
       var category = getCategoryMeta(product.cat || getDefaultCategoryId());
       var tagHtml = getProductTags(product.tags || []).map(renderTagBadge).join('');
-      return '<div class="surface-card p-4 mb-3"><div class="space-y-3"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="w-full text-left flex gap-3 items-start"><img src="' + (product.img || DEFAULT_PRODUCT_IMAGE) + '" class="w-16 h-16 rounded-[18px] object-cover shrink-0"><div class="min-w-0 flex-1"><div class="font-medium text-sm">' + product.name + '</div><div class="text-xs text-gray-500 mt-1">' + renderCategoryInline(category, '来源：' + (product.village || '待补充') + ' · 库存：' + product.stock, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' }) + '</div><div class="text-xs text-gray-500 mt-1">采摘：' + (product.harvest || '待补充') + ' · ' + Number(product.dispatchHours || 4) + ' 小时内发货</div><div class="text-xs text-gray-500 mt-1">发货地址：' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '未绑定') + '</div>' + (tagHtml ? '<div class="flex flex-wrap gap-2 mt-2">' + tagHtml + '</div>' : '') + '</div></button><div class="flex items-center justify-between gap-2 flex-wrap"><button onclick="toggleProd(' + product.id + ')" class="text-xs px-2 py-1 rounded-full h-fit ' + tone.badge + ' btn">' + (product.off ? '已下架' : '在售') + '</button><div class="flex items-center gap-2"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="text-xs px-3 py-1 rounded-full border border-gray-200 text-gray-500 btn">' + (expanded ? '收起编辑' : '展开编辑') + '</button><button onclick="confirmDeleteProduct(' + product.id + ',\'' + options.source + '\')" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500 btn">删除商品</button></div></div></div><div class="' + (expanded ? 'mt-3 pt-3 border-t border-gray-100' : 'hidden') + '">' + renderProductFormFields(options.prefix, product, options.canEditFarmer) + '<button onclick="' + options.saveAction + '" class="w-full mt-2 ' + tone.button + ' text-white py-2 rounded-lg text-sm btn">' + options.saveText + '</button></div></div>';
+      return '<div class="surface-card p-4 mb-3"><div class="space-y-3"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="w-full text-left flex gap-3 items-start"><img src="' + (product.img || DEFAULT_PRODUCT_IMAGE) + '" class="w-16 h-16 rounded-[18px] object-cover shrink-0"><div class="min-w-0 flex-1"><div class="font-medium text-sm">' + product.name + '</div><div class="text-xs text-gray-500 mt-1">' + renderCategoryInline(category, '库存：' + product.stock + ' · 默认配送费：' + fmt(product.deliveryFee || 0), { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' }) + '</div><div class="text-xs text-gray-500 mt-1">' + Number(product.dispatchHours || 4) + ' 小时内发货</div><div class="text-xs text-gray-500 mt-1">快递说明：' + escapeHtml(getCourierNoteText(product, '未填写')) + '</div><div class="text-xs text-gray-500 mt-1">发货地址：' + ((product.shippingAddressId || '') ? getAddressSummary(getSelectedShippingAddressFromProduct(product)) : '未绑定') + '</div>' + (tagHtml ? '<div class="flex flex-wrap gap-2 mt-2">' + tagHtml + '</div>' : '') + '</div></button><div class="flex items-center justify-between gap-2 flex-wrap"><button onclick="toggleProd(' + product.id + ')" class="text-xs px-2 py-1 rounded-full h-fit ' + tone.badge + ' btn">' + (product.off ? '已下架' : '在售') + '</button><div class="flex items-center gap-2"><button onclick="toggleProductEditorState(\'' + options.source + '\',' + product.id + ')" class="text-xs px-3 py-1 rounded-full border border-gray-200 text-gray-500 btn">' + (expanded ? '收起编辑' : '展开编辑') + '</button><button onclick="confirmDeleteProduct(' + product.id + ',\'' + options.source + '\')" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500 btn">删除商品</button></div></div></div><div class="' + (expanded ? 'mt-3 pt-3 border-t border-gray-100' : 'hidden') + '">' + renderProductFormFields(options.prefix, product, options.canEditFarmer) + '<button onclick="' + options.saveAction + '" class="w-full mt-2 ' + tone.button + ' text-white py-2 rounded-lg text-sm btn">' + options.saveText + '</button></div></div>';
     }
 
     function validateAddressPayload(payload) {
@@ -5363,7 +5373,7 @@ ${f.length ? `<div class="space-y-3">${f.map(p => renderCategoryListCard(p)).joi
     function renderSearchResultCard(product) {
       var category = getCategoryMeta(product.cat || getDefaultCategoryId());
       var tags = getProductTags(product.tags || []).map(renderTagBadge).join('');
-      return `<button onclick="pushView('product',${product.id})" class="w-full list-tile text-left overflow-hidden"><img src="${product.img}" class="w-full aspect-[4/3] object-cover"><div class="p-3.5"><div class="text-xs text-gray-500">${renderCategoryInline(category, product.unit, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div><div class="font-semibold text-sm mt-1.5 line-clamp-2 text-[#2C3A2D]">${product.name}</div><div class="flex items-center gap-2 mt-2"><span class="text-[#3D8B5F] font-bold text-lg">${fmt(product.price)}</span></div><div class="text-xs text-gray-400 mt-2">${product.farmer || '待补充'} · ${product.village || '待补充'}</div><div class="text-xs text-gray-400 mt-1">已售${product.sales} · 库存${product.stock}</div>${tags ? '<div class="flex flex-wrap gap-2 mt-2">' + tags + '</div>' : ''}</div></button>`;
+      return `<button onclick="pushView('product',${product.id})" class="w-full list-tile text-left overflow-hidden"><img src="${product.img}" class="w-full aspect-[4/3] object-cover"><div class="p-3.5"><div class="text-xs text-gray-500">${renderCategoryInline(category, product.unit, { iconClassName: 'w-4 h-4 rounded-md object-cover text-base' })}</div><div class="font-semibold text-sm mt-1.5 line-clamp-2 text-[#2C3A2D]">${product.name}</div><div class="flex items-center gap-2 mt-2"><span class="text-[#3D8B5F] font-bold text-lg">${fmt(product.price)}</span></div><div class="text-xs text-gray-400 mt-2">${Number(product.dispatchHours || 4)}小时内发货</div><div class="text-xs text-gray-400 mt-1">已售${product.sales} · 库存${product.stock}</div>${tags ? '<div class="flex flex-wrap gap-2 mt-2">' + tags + '</div>' : ''}</div></button>`;
     }
 
     function search() {
@@ -5373,7 +5383,7 @@ ${f.length ? `<div class="space-y-3">${f.map(p => renderCategoryListCard(p)).joi
       var results = Array.isArray(searchState.results) ? searchState.results : [];
       return `<div class="page-shell compact">
 ${renderPageHeader('搜索商品', '按商品名、农户、产地或标签快速查找。', { back: true })}
-<div class="surface-card p-3 mb-4"><div class="flex gap-2"><div class="flex-1 flex items-center gap-2 rounded-[18px] bg-[#F7F3EA] px-3"><i data-lucide="search" class="w-4 h-4 text-gray-400"></i><input id="search-keyword" value="${keywordLabel}" oninput="setSearchKeyword(this.value)" onkeydown="if(event.key==='Enter'){submitSearch()}" placeholder="搜索商品、农户、产地或标签" class="w-full bg-transparent py-3 text-sm outline-none"></div><button onclick="submitSearch()" class="px-4 rounded-[18px] bg-[#3D8B5F] text-white text-sm btn">搜索</button></div>${recentKeywords.length ? `<div class="mt-3 flex items-center justify-between gap-3"><div class="text-xs text-gray-400">最近搜索</div><button onclick="clearRecentSearchKeywords()" class="text-xs text-gray-400">清空</button></div><div class="flex flex-wrap gap-2 mt-2">${recentKeywords.map(function (item) { return `<button onclick='runRecentSearch(${JSON.stringify(String(item))})' class="chip-muted">${escapeHtml(item)}</button>`; }).join('')}</div>` : '<div class="mt-3 text-xs text-gray-400">输入关键字后可按商品名、农户、产地或标签查找。</div>'}</div>
+<div class="surface-card p-3 mb-4"><div class="flex gap-2"><div class="flex-1 flex items-center gap-2 rounded-[18px] bg-[#F7F3EA] px-3"><i data-lucide="search" class="w-4 h-4 text-gray-400"></i><input id="search-keyword" value="${keywordLabel}" oninput="setSearchKeyword(this.value)" onkeydown="if(event.key==='Enter'){submitSearch()}" placeholder="搜索商品名称或标签" class="w-full bg-transparent py-3 text-sm outline-none"></div><button onclick="submitSearch()" class="px-4 rounded-[18px] bg-[#3D8B5F] text-white text-sm btn">搜索</button></div>${recentKeywords.length ? `<div class="mt-3 flex items-center justify-between gap-3"><div class="text-xs text-gray-400">最近搜索</div><button onclick="clearRecentSearchKeywords()" class="text-xs text-gray-400">清空</button></div><div class="flex flex-wrap gap-2 mt-2">${recentKeywords.map(function (item) { return `<button onclick='runRecentSearch(${JSON.stringify(String(item))})' class="chip-muted">${escapeHtml(item)}</button>`; }).join('')}</div>` : '<div class="mt-3 text-xs text-gray-400">输入关键字后可按商品名或标签查找。</div>'}</div>
 ${searchState.isLoading ? '<div class="surface-card p-6 text-sm text-gray-400 text-center">搜索中，请稍候...</div>' : ''}
 ${!searchState.isLoading && searchState.searched && results.length ? `<div class="section-head"><div><div class="section-title">搜索结果</div></div></div><div class="space-y-3">${results.map(renderSearchResultCard).join('')}</div>` : ''}
 ${!searchState.isLoading && searchState.searched && !results.length ? '<div class="surface-card p-6 text-sm text-gray-400 text-center">没有找到匹配商品，换个关键词再试试吧。</div>' : ''}
@@ -5511,16 +5521,15 @@ ${getProductTags(p.tags || []).map(renderTagBadge).join('')}
 </div>
 </div></div>
 ${variantHtml}
-${p.farmer ? `<div class="soft-card p-4 mb-4">
-<div class="flex items-center gap-2">
-<span class="text-2xl">👨‍🌾</span>
-<div><div class="font-medium text-sm">${p.farmer || '待补充'}</div><div class="text-xs text-gray-500">${p.village || '待补充'} · 种植人</div></div>
-<button onclick="pushView('trace',${p.id})" class="ml-auto flex items-center gap-1 text-xs text-[#2D9D4E]">溯源<i data-lucide="chevron-right" class="w-3 h-3"></i></button>
-</div></div>`: ''}
+<div class="soft-card p-4 mb-4">
+<div class="flex items-start gap-2">
+<span class="text-2xl">🚚</span>
+<div class="min-w-0 flex-1"><div class="font-medium text-sm">快递说明</div><div class="text-xs text-gray-500 whitespace-pre-wrap mt-1">${escapeHtml(getCourierNoteText(p))}</div></div>
+</div></div>
 <div class="surface-card p-4 mb-4">
 <div class="font-medium mb-2">📦 配送信息</div>
-<div class="text-sm text-gray-500">采摘日期: ${p.harvest || '待补充'}</div>
 <div class="text-sm text-gray-500">${p.dispatchHours || 4}小时内发货</div>
+<div class="text-sm text-gray-500 mt-1">实际发货会以商品绑定的发货地址和打包安排为准。</div>
 </div>
 <div class="flex gap-3">
 <button onclick="addToCart(${p.id})" class="flex-1 border-2 border-[#2D9D4E] text-[#2D9D4E] py-3 rounded-xl font-medium btn">加入购物车</button>
@@ -5839,19 +5848,17 @@ ${o.status === 'shipped' ? `<button onclick="confirmOrder(${idx})" class="w-full
 
     function tracePage(id) {
       const p = getProds().find(x => x.id === id);
-      if (!p) return renderEmptyState('🌿', '商品不存在', '没有找到对应的溯源内容，先返回商品列表看看其他商品。', `<button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回首页</button>`);
+      if (!p) return renderEmptyState('🚚', '商品不存在', '没有找到对应的快递说明，先返回商品列表看看其他商品。', `<button onclick="go('home')" class="bg-[#2D9D4E] text-white px-6 py-3 rounded-xl btn">返回首页</button>`);
       return `<div class="page-shell compact">
-${renderPageHeader('溯源档案', '当前阶段只展示来源信息，不扩展为完整时间轴系统。', { back: true })}
+${renderPageHeader('快递说明', '当前阶段先隐藏溯源内容，统一展示商品快递补充说明。', { back: true })}
 <div class="bg-gradient-to-r from-[#E8F5EC] to-[#F5F0E8] rounded-xl p-4 mb-4">
 <div class="flex items-center gap-3">
 <img src="${p.img}" class="w-12 h-12 rounded-lg object-cover">
-<div class="flex-1"><div class="font-bold">${p.name}</div><div class="text-xs text-gray-500">只展示来源信息，不展示物流节点</div></div>
+<div class="flex-1"><div class="font-bold">${p.name}</div><div class="text-xs text-gray-500">当前展示的是买家可见的快递补充说明。</div></div>
 </div>
 </div>
 <div class="surface-card p-4 space-y-3">
-<div><div class="text-sm text-gray-500 mb-1">来源产地</div><div class="font-medium">${p.village || '待补充'}</div></div>
-<div><div class="text-sm text-gray-500 mb-1">种植 / 供货人</div><div class="font-medium">${p.farmer || '待补充'}</div></div>
-<div><div class="text-sm text-gray-500 mb-1">采摘日期</div><div class="font-medium">${p.harvest || '待补充'}</div></div>
+<div><div class="text-sm text-gray-500 mb-1">快递说明</div><div class="font-medium whitespace-pre-wrap">${escapeHtml(getCourierNoteText(p))}</div></div>
 <div><div class="text-sm text-gray-500 mb-1">发货时效</div><div class="font-medium">${p.dispatchHours || 4}小时内发货</div></div>
 </div></div>`;
     }
@@ -7860,7 +7867,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
     function renderAdminOd() {
       var allOrders = adminOrderListState.loaded ? (adminOrderListState.items || []) : (getAllOrders() || []);
       var h = '<div class="flex items-center justify-between gap-3 mb-3"><div><div class="font-bold">订单管理</div><div class="text-xs text-gray-500 mt-1">详情、发货和退款拆成独立动作：详情弹窗只读核对，发货 / 退款分别跳到对应工作区详情。</div></div></div>';
-      h += '<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="font-bold mb-3">订单筛选</div><div class="grid grid-cols-2 gap-2"><input id="admin-order-filter-order" value="' + (adminOrderListState.filters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="admin-order-filter-owner" value="' + (adminOrderListState.filters.ownerUsername || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="admin-order-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ' + (adminOrderListState.filters.status === 'pending' ? 'selected' : '') + '>待付款</option><option value="paid" ' + (adminOrderListState.filters.status === 'paid' ? 'selected' : '') + '>待发货</option><option value="shipped" ' + (adminOrderListState.filters.status === 'shipped' ? 'selected' : '') + '>已发货</option><option value="done" ' + (adminOrderListState.filters.status === 'done' ? 'selected' : '') + '>已完成</option><option value="cancelled" ' + (adminOrderListState.filters.status === 'cancelled' ? 'selected' : '') + '>已取消</option><option value="refund_pending" ' + (adminOrderListState.filters.status === 'refund_pending' ? 'selected' : '') + '>退款中</option><option value="refunded" ' + (adminOrderListState.filters.status === 'refunded' ? 'selected' : '') + '>已退款</option></select><input id="admin-order-filter-date-from" type="date" value="' + (adminOrderListState.filters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="admin-order-filter-date-to" type="date" value="' + (adminOrderListState.filters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div><div class="grid grid-cols-3 gap-2 mt-3"><button onclick="applyAdminOrderFilters()" class="py-2 rounded-lg bg-[#2D9D4E] text-white text-sm btn">查询订单</button><button onclick="resetAdminOrderFilters()" class="py-2 rounded-lg border text-sm btn">重置</button><button onclick="downloadAdminOrderCsv()" ' + (adminOrderListState.exporting ? 'disabled ' : '') + 'class="py-2 rounded-lg border text-sm btn ' + (adminOrderListState.exporting ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'text-[#2D9D4E] border-[#2D9D4E]') + '">' + (adminOrderListState.exporting ? '导出中...' : '导出 CSV') + '</button></div></div>';
+      h += '<div class="bg-white rounded-xl p-4 shadow mb-4"><div class="font-bold mb-3">订单筛选</div><div class="grid grid-cols-2 gap-2"><input id="admin-order-filter-order" value="' + (adminOrderListState.filters.orderId || '') + '" class="p-2 border rounded-lg text-sm" placeholder="订单号"><input id="admin-order-filter-owner" value="' + (adminOrderListState.filters.ownerUsername || '') + '" class="p-2 border rounded-lg text-sm" placeholder="用户名"><select id="admin-order-filter-status" class="p-2 border rounded-lg text-sm"><option value="">全部状态</option><option value="pending" ' + (adminOrderListState.filters.status === 'pending' ? 'selected' : '') + '>待付款</option><option value="paid" ' + (adminOrderListState.filters.status === 'paid' ? 'selected' : '') + '>待发货</option><option value="shipped" ' + (adminOrderListState.filters.status === 'shipped' ? 'selected' : '') + '>已发货</option><option value="done" ' + (adminOrderListState.filters.status === 'done' ? 'selected' : '') + '>已完成</option><option value="cancelled" ' + (adminOrderListState.filters.status === 'cancelled' ? 'selected' : '') + '>已取消</option><option value="refund_pending" ' + (adminOrderListState.filters.status === 'refund_pending' ? 'selected' : '') + '>退款中</option><option value="refunded" ' + (adminOrderListState.filters.status === 'refunded' ? 'selected' : '') + '>已退款</option></select><input id="admin-order-filter-date-from" type="date" value="' + (adminOrderListState.filters.dateFrom || '') + '" class="p-2 border rounded-lg text-sm"><input id="admin-order-filter-date-to" type="date" value="' + (adminOrderListState.filters.dateTo || '') + '" class="p-2 border rounded-lg text-sm"></div><div class="grid grid-cols-3 gap-2 mt-3"><button onclick="applyAdminOrderFilters()" class="py-2 rounded-lg bg-[#2D9D4E] text-white text-sm btn">查询订单</button><button onclick="resetAdminOrderFilters()" class="py-2 rounded-lg border text-sm btn">重置</button><button onclick="downloadAdminOrderExport()" ' + (adminOrderListState.exporting ? 'disabled ' : '') + 'class="py-2 rounded-lg border text-sm btn ' + (adminOrderListState.exporting ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'text-[#2D9D4E] border-[#2D9D4E]') + '">' + (adminOrderListState.exporting ? '导出中...' : '导出 Excel') + '</button></div></div>';
       if (!allOrders.length) {
         h += "<div class='bg-white rounded-xl p-4 shadow text-center text-gray-400 text-sm'>当前筛选下暂无订单</div>";
       } else {
@@ -8051,6 +8058,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
         farmerAccount: payload.farmerAccount || '',
         farmerUserId: Number(payload.farmerUserId || 0),
         village: payload.village || '',
+        courierNote: payload.courierNote || '',
         shippingAddressId: payload.shippingAddressId || '',
         shippingAddressSnapshot: payload.shippingAddressSnapshot || {},
         harvest: payload.harvest || '',
@@ -8216,6 +8224,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
           farmerAccount: source === 'farmer' ? user : (p.farmerAccount || ''),
           farmerUserId: source === 'farmer' ? Number((getUserRecord(user) && getUserRecord(user).id) || 0) : Number(p.farmerUserId || 0),
           village: draft.village,
+          courierNote: draft.courierNote,
           images: draft.images,
           img: draft.img,
           shippingAddressId: shippingSelection.shippingAddressId,
@@ -8263,7 +8272,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       }
       try {
         var imageState = await resolveProductImagesForSave('new', draft);
-        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, images: imageState.images, img: imageState.cover, tags: draft.tags, sales: 0, farmer: draft.farmer, farmerAccount: '', farmerUserId: 0, village: draft.village, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
+        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, images: imageState.images, img: imageState.cover, tags: draft.tags, sales: 0, farmer: draft.farmer, farmerAccount: '', farmerUserId: 0, village: draft.village, courierNote: draft.courierNote, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
           actionType: 'create',
           operatorRole: 'admin',
           note: '管理员新增商品并初始化库存'
@@ -8302,7 +8311,7 @@ ${renderPageHeader('优惠券', '商品浏览阶段不提前折价，优惠只�
       }
       try {
         var imageState = await resolveProductImagesForSave('farmer-new', draft);
-        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, images: imageState.images, img: imageState.cover, tags: draft.tags, sales: 0, farmer: role.farmerName || user, farmerAccount: user, farmerUserId: Number((getUserRecord(user) && getUserRecord(user).id) || 0), village: draft.village, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
+        await saveProductToServer(withProductAudit(normalizeProduct({ name: draft.name, variants: normalizeProductVariants({ variants: draft.variants }), price: draft.price, orig: draft.price, unit: draft.unit, stock: draft.stock, cat: draft.cat, images: imageState.images, img: imageState.cover, tags: draft.tags, sales: 0, farmer: role.farmerName || user, farmerAccount: user, farmerUserId: Number((getUserRecord(user) && getUserRecord(user).id) || 0), village: draft.village, courierNote: draft.courierNote, shippingAddressId: shippingSelection.shippingAddressId, shippingAddressSnapshot: shippingSelection.shippingAddressSnapshot, harvest: draft.harvest, dispatchHours: draft.dispatchHours, trace: [] }), {
           actionType: 'create',
           operatorRole: 'farmer',
           note: '农户新增商品并初始化库存'

@@ -2253,7 +2253,7 @@ async function saveProductMutationWithAudit(previousProduct, nextProduct, auditM
     note: '商品库存或销量发生变更'
   });
   await run(
-    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, imagesJson = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
+    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, courierNote = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, imagesJson = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
     [
       item.name,
       item.price,
@@ -2269,6 +2269,7 @@ async function saveProductMutationWithAudit(previousProduct, nextProduct, auditM
       item.farmerAccount,
       item.farmerUserId,
       item.village,
+      item.courierNote,
       item.shippingAddressId,
       item.shippingAddressSnapshot,
       item.imagesJson,
@@ -2716,7 +2717,7 @@ function normalizeInventoryLog(row) {
 
 const PRODUCT_LIST_COLUMNS = [
   'id', 'name', 'price', 'orig', 'unit', 'cat', 'tags', 'stock', 'sales', 'harvest', 'dispatchHours',
-  'farmer', 'farmerAccount', 'farmerUserId', 'village', 'shippingAddressId', 'shippingAddressSnapshot',
+  'farmer', 'farmerAccount', 'farmerUserId', 'village', 'courierNote', 'shippingAddressId', 'shippingAddressSnapshot',
   'imagesJson', 'img', 'off', '"trace"', 'variantsJson'
 ].join(', ');
 
@@ -2952,7 +2953,24 @@ async function listAllOrdersForExport(filters) {
     'SELECT ' + ORDER_LIST_COLUMNS + ' FROM orders' + filterQuery.whereClause + ' ORDER BY createdAt DESC, id DESC',
     filterQuery.params
   );
-  return hydratePagedOrders(orderRows);
+  const orders = await hydratePagedOrders(orderRows);
+  const ownerUsernames = Array.from(new Set(orders.map(function (order) {
+    return String(order && order.owner || '').trim();
+  }).filter(Boolean)));
+  if (!ownerUsernames.length) return orders;
+  const ownerRows = await all(
+    'SELECT username, phone FROM users WHERE username IN (' + ownerUsernames.map(function () { return '?'; }).join(', ') + ')',
+    ownerUsernames
+  );
+  const ownerPhoneMap = ownerRows.reduce(function (result, row) {
+    result[String(row && row.username || '').trim()] = String(row && row.phone || '').trim();
+    return result;
+  }, {});
+  return orders.map(function (order) {
+    return Object.assign({}, order, {
+      ownerPhone: ownerPhoneMap[String(order && order.owner || '').trim()] || ''
+    });
+  });
 }
 
 function getOrderStatusExportLabel(status) {
@@ -3008,7 +3026,8 @@ function buildOrderExportRows(orders) {
         '订单号': String(order && (order.sourceId || order.id) || ''),
         '订单状态': getOrderStatusExportLabel(order && order.status),
         '下单时间': formatOrderExportDateTime(order && order.time),
-        '买家': String(order && order.owner || ''),
+        '下单人账号': String(order && order.owner || ''),
+        '下单人手机号': String(order && order.ownerPhone || ''),
         '收货姓名': String(receiver.name || ''),
         '收货手机号': String(receiver.phone || ''),
         '收货详细地址': String(receiver.full || ''),
@@ -3032,20 +3051,59 @@ function escapeFormulaValue(value) {
   return /^[\t\r\n ]*[=+\-@]/.test(text) ? ("'" + text) : text;
 }
 
-function serializeOrderExportCsv(rows) {
+const ORDER_EXPORT_COLUMNS = ['订单号', '订单状态', '下单时间', '下单人账号', '下单人手机号', '收货姓名', '收货手机号', '收货详细地址', '商品名称', '规格', '单位', '数量', '发货人', '发货人电话', '发货地址', '快递单号', '订单实付'];
+
+function escapeXmlText(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function serializeOrderExportWorkbook(rows) {
   const items = Array.isArray(rows) ? rows : [];
-  const columns = ['订单号', '订单状态', '下单时间', '买家', '收货姓名', '收货手机号', '收货详细地址', '商品名称', '规格', '单位', '数量', '发货人', '发货人电话', '发货地址', '快递单号', '订单实付'];
-  const escapeCell = function (value) {
-    const normalized = escapeFormulaValue(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    return '"' + normalized.replace(/"/g, '""') + '"';
+  const numericColumns = {
+    '数量': true,
+    '订单实付': true
   };
-  const headerLine = columns.map(escapeCell).join(',');
-  const bodyLines = items.map(function (row) {
-    return columns.map(function (column) {
-      return escapeCell(row && row[column] != null ? row[column] : '');
-    }).join(',');
+  const buildCellXml = function (column, value, isHeader) {
+    if (isHeader) {
+      return '<Cell ss:StyleID="header"><Data ss:Type="String">' + escapeXmlText(column) + '</Data></Cell>';
+    }
+    if (numericColumns[column]) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        return '<Cell><Data ss:Type="Number">' + numeric + '</Data></Cell>';
+      }
+    }
+    const normalized = escapeFormulaValue(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    return '<Cell ss:StyleID="text"><Data ss:Type="String">' + escapeXmlText(normalized) + '</Data></Cell>';
+  };
+  const headerRow = '<Row>' + ORDER_EXPORT_COLUMNS.map(function (column) {
+    return buildCellXml(column, column, true);
+  }).join('') + '</Row>';
+  const bodyRows = items.map(function (row) {
+    return '<Row>' + ORDER_EXPORT_COLUMNS.map(function (column) {
+      return buildCellXml(column, row && row[column] != null ? row[column] : '', false);
+    }).join('') + '</Row>';
   });
-  return '\uFEFF' + [headerLine].concat(bodyLines).join('\r\n');
+  return '\uFEFF<?xml version="1.0" encoding="UTF-8"?>'
+    + '<?mso-application progid="Excel.Sheet"?>'
+    + '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"'
+    + ' xmlns:o="urn:schemas-microsoft-com:office:office"'
+    + ' xmlns:x="urn:schemas-microsoft-com:office:excel"'
+    + ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"'
+    + ' xmlns:html="http://www.w3.org/TR/REC-html40">'
+    + '<Styles>'
+    + '<Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#E8F5EC" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>'
+    + '<Style ss:ID="text"><Alignment ss:Vertical="Center" ss:WrapText="1"/></Style>'
+    + '</Styles>'
+    + '<Worksheet ss:Name="订单导出"><Table>'
+    + headerRow
+    + bodyRows.join('')
+    + '</Table></Worksheet></Workbook>';
 }
 
 function buildOrderExportFilename(timestamp) {
@@ -3061,7 +3119,7 @@ function buildOrderExportFilename(timestamp) {
     + pad(date.getHours())
     + pad(date.getMinutes())
     + pad(date.getSeconds())
-    + '.csv';
+    + '.xls';
 }
 
 async function listAdminFulfillmentOrdersPage(filters) {
@@ -4183,6 +4241,7 @@ function normalizeProduct(product) {
     farmerAccount: '',
     farmerUserId: 0,
     village: '待设置',
+    courierNote: '',
     shippingAddressId: '',
     shippingAddressSnapshot: {},
     images: [],
@@ -4196,6 +4255,7 @@ function normalizeProduct(product) {
     dispatchHours: Number(source && source.dispatchHours || 4),
     off: !!(source && source.off),
     tags: Array.isArray(source && source.tags) ? source.tags : [],
+    courierNote: source && source.courierNote ? String(source.courierNote).trim() : '',
     shippingAddressId: source && source.shippingAddressId ? String(source.shippingAddressId) : '',
     shippingAddressSnapshot: source && source.shippingAddressSnapshot && typeof source.shippingAddressSnapshot === 'object' && !Array.isArray(source.shippingAddressSnapshot) ? source.shippingAddressSnapshot : {},
     trace: Array.isArray(source && source.trace) ? source.trace : []
@@ -4239,6 +4299,7 @@ function hydrateProduct(row) {
     farmerAccount: row.farmerAccount,
     farmerUserId: row.farmerUserId,
     village: row.village,
+    courierNote: row.courierNote,
     shippingAddressId: row.shippingAddressId,
     shippingAddressSnapshot: parseJsonObject(row.shippingAddressSnapshot, {}),
     images: parseJsonArray(row.imagesJson),
@@ -4267,6 +4328,7 @@ function toDbProduct(product) {
     farmerAccount: item.farmerAccount || '',
     farmerUserId: Number(item.farmerUserId || 0),
     village: item.village || '待设置',
+    courierNote: item.courierNote || '',
     shippingAddressId: item.shippingAddressId || '',
     shippingAddressSnapshot: JSON.stringify(item.shippingAddressSnapshot || {}),
     imagesJson: JSON.stringify(item.images || []),
@@ -4435,7 +4497,7 @@ async function insertProduct(product) {
     note: '新商品创建并初始化库存'
   });
   const result = await run(
-    'INSERT INTO products (id, name, price, orig, unit, cat, tags, stock, sales, harvest, dispatchHours, farmer, farmerAccount, farmerUserId, village, shippingAddressId, shippingAddressSnapshot, imagesJson, img, off, "trace", variantsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO products (id, name, price, orig, unit, cat, tags, stock, sales, harvest, dispatchHours, farmer, farmerAccount, farmerUserId, village, courierNote, shippingAddressId, shippingAddressSnapshot, imagesJson, img, off, "trace", variantsJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       item.id || null,
       item.name,
@@ -4452,6 +4514,7 @@ async function insertProduct(product) {
       item.farmerAccount,
       item.farmerUserId,
       item.village,
+      item.courierNote,
       item.shippingAddressId,
       item.shippingAddressSnapshot,
       item.imagesJson,
@@ -4488,7 +4551,7 @@ async function updateProduct(product) {
   const existingRow = await get('SELECT * FROM products WHERE id = ?', [item.id]);
   const previous = existingRow ? hydrateProduct(existingRow) : null;
   const result = await run(
-    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, imagesJson = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
+    'UPDATE products SET name = ?, price = ?, orig = ?, unit = ?, cat = ?, tags = ?, stock = ?, sales = ?, harvest = ?, dispatchHours = ?, farmer = ?, farmerAccount = ?, farmerUserId = ?, village = ?, courierNote = ?, shippingAddressId = ?, shippingAddressSnapshot = ?, imagesJson = ?, img = ?, off = ?, "trace" = ?, variantsJson = ? WHERE id = ?',
     [
       item.name,
       item.price,
@@ -4504,6 +4567,7 @@ async function updateProduct(product) {
       item.farmerAccount,
       item.farmerUserId,
       item.village,
+      item.courierNote,
       item.shippingAddressId,
       item.shippingAddressSnapshot,
       item.imagesJson,
@@ -5917,6 +5981,7 @@ async function initDatabase() {
       farmerAccount TEXT NOT NULL DEFAULT '',
       farmerUserId INTEGER NOT NULL DEFAULT 0,
       village TEXT NOT NULL DEFAULT '',
+      courierNote TEXT NOT NULL DEFAULT '',
       shippingAddressId TEXT NOT NULL DEFAULT '',
       shippingAddressSnapshot TEXT NOT NULL DEFAULT '{}',
       imagesJson TEXT NOT NULL DEFAULT '[]',
@@ -6234,6 +6299,7 @@ async function initDatabase() {
     farmerAccount: "TEXT NOT NULL DEFAULT ''",
     farmerUserId: 'INTEGER NOT NULL DEFAULT 0',
     village: "TEXT NOT NULL DEFAULT ''",
+    courierNote: "TEXT NOT NULL DEFAULT ''",
     shippingAddressId: "TEXT NOT NULL DEFAULT ''",
     shippingAddressSnapshot: "TEXT NOT NULL DEFAULT '{}'",
     imagesJson: "TEXT NOT NULL DEFAULT '[]'",
@@ -6852,10 +6918,10 @@ app.get('/api/admin/orders/export', async function (req, res) {
       dateFrom: req.query && req.query.dateFrom,
       dateTo: req.query && req.query.dateTo
     });
-    const csv = serializeOrderExportCsv(buildOrderExportRows(orders));
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    const workbook = serializeOrderExportWorkbook(buildOrderExportRows(orders));
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="' + buildOrderExportFilename(Date.now()) + '"');
-    res.send(csv);
+    res.send(workbook);
   } catch (error) {
     res.status(500).json({ message: '导出订单失败', error: error.message });
   }

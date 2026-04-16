@@ -86,8 +86,8 @@ function createBlobResponse(text, options) {
     headers: {
       get(name) {
         const key = String(name || '').toLowerCase();
-        if (key === 'content-type') return config.contentType || 'text/csv; charset=utf-8';
-        if (key === 'content-disposition') return config.contentDisposition || 'attachment; filename="orders-export-test.csv"';
+        if (key === 'content-type') return config.contentType || 'application/vnd.ms-excel; charset=utf-8';
+        if (key === 'content-disposition') return config.contentDisposition || 'attachment; filename="orders-export-test.xls"';
         return null;
       }
     },
@@ -454,9 +454,9 @@ async function main() {
       }
       if (parsed.pathname === '/api/admin/orders/export' && method === 'GET') {
         exportRequests.push(parsed.searchParams.toString());
-        return createBlobResponse('\uFEFF"订单号","商品名称"\r\n"ORD-SHIPPED","白萝卜"', {
-          contentType: 'text/csv; charset=utf-8',
-          contentDisposition: 'attachment; filename="orders-export-test.csv"'
+        return createBlobResponse('\uFEFF<?xml version="1.0" encoding="UTF-8"?><Workbook><Worksheet><Table><Row><Cell><Data>订单号</Data></Cell><Cell><Data>商品名称</Data></Cell></Row><Row><Cell><Data>ORD-SHIPPED</Data></Cell><Cell><Data>白萝卜</Data></Cell></Row></Table></Worksheet></Workbook>', {
+          contentType: 'application/vnd.ms-excel; charset=utf-8',
+          contentDisposition: 'attachment; filename="orders-export-test.xls"'
         });
       }
       if (parsed.pathname === '/api/refunds') {
@@ -523,7 +523,7 @@ async function main() {
 
   vm.runInContext('renderAdminOd()', context);
   const orderHtml = document.getElementById('admin-od').innerHTML;
-  assert(orderHtml.includes('导出 CSV'), '管理员订单页应提供显式导出 CSV 按钮');
+  assert(orderHtml.includes('导出 Excel'), '管理员订单页应提供显式导出 Excel 按钮');
   assert((orderHtml.match(/>详情<\/button>/g) || []).length === 3, '管理员订单页中所有订单都应显示详情按钮');
   assert((orderHtml.match(/>发货<\/button>/g) || []).length === 1, '只有已支付待发货订单应显示发货按钮');
   assert((orderHtml.match(/>退款<\/button>/g) || []).length === 1, '只有退款申请中的订单应显示退款按钮');

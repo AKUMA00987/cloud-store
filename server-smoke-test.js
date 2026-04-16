@@ -302,12 +302,10 @@ async function settlePendingOrder(client, preparedOrder, options) {
   };
 }
 
-function countCsvDataRows(csvText) {
-  const normalized = String(csvText || '').replace(/^\uFEFF/, '');
-  const lines = normalized.split(/\r?\n/).filter(function (line) {
-    return String(line || '').trim() !== '';
-  });
-  return Math.max(0, lines.length - 1);
+function countWorkbookDataRows(workbookText) {
+  const normalized = String(workbookText || '').replace(/^\uFEFF/, '');
+  const rowMatches = normalized.match(/<Row>/g);
+  return Math.max(0, (rowMatches ? rowMatches.length : 0) - 1);
 }
 
 async function waitForCondition(check, options) {
@@ -1244,17 +1242,19 @@ async function main() {
 
   const exportResponse = await adminClient.request('/api/admin/orders/export?ownerUsername=' + encodeURIComponent(buyerUsername) + '&orderId=' + encodeURIComponent(fulfillmentPaidOrder.id) + '&status=shipped');
   assert(exportResponse.ok, '管理员订单导出接口应返回成功结果');
-  assert(/text\/csv/i.test(String(exportResponse.headers.get('content-type') || '')), '订单导出接口应返回 text/csv 响应头');
+  assert(/application\/vnd\.ms-excel/i.test(String(exportResponse.headers.get('content-type') || '')), '订单导出接口应返回 Excel 响应头');
   assert(/attachment; filename=/i.test(String(exportResponse.headers.get('content-disposition') || '')), '订单导出接口应返回下载文件名');
   const exportBuffer = Buffer.from(await exportResponse.arrayBuffer());
-  const exportCsv = exportBuffer.toString('utf8');
-  assert(exportBuffer[0] === 0xEF && exportBuffer[1] === 0xBB && exportBuffer[2] === 0xBF, 'CSV 导出应带 UTF-8 BOM');
-  assert(exportCsv.includes('"订单号","订单状态","下单时间","买家","收货姓名","收货手机号","收货详细地址","商品名称","规格","单位","数量","发货人","发货人电话","发货地址"'), 'CSV 导出应包含拆分后的收货与发货字段列头');
-  assert(exportCsv.includes('商品名称') && exportCsv.includes('快递单号'), 'CSV 导出应包含商品名称和快递单号列');
-  assert(exportCsv.includes('履约烟测农户') && exportCsv.includes('13800008888') && exportCsv.includes('履约测试村 9 号'), 'CSV 导出应包含拆分后的发货地址字段值');
-  assert(countCsvDataRows(exportCsv) === exportOrder.items.length, 'CSV 数据行数应与同筛选条件下的订单商品数一致');
-  assert(exportCsv.includes("\"'=2+3公式商品\""), 'CSV 导出应转义以公式前缀开头的商品名称');
-  assert(exportCsv.includes("\"'@YTFORMULA001\""), 'CSV 导出应转义以公式前缀开头的快递单号');
+  const exportWorkbook = exportBuffer.toString('utf8');
+  assert(exportBuffer[0] === 0xEF && exportBuffer[1] === 0xBB && exportBuffer[2] === 0xBF, 'Excel 导出应带 UTF-8 BOM');
+  assert(exportWorkbook.includes('<?mso-application progid="Excel.Sheet"?>'), '导出内容应为 Excel 兼容工作簿');
+  assert(exportWorkbook.includes('下单人账号') && exportWorkbook.includes('下单人手机号'), 'Excel 导出应包含下单人账号和下单人手机号列');
+  assert(exportWorkbook.includes('商品名称') && exportWorkbook.includes('快递单号'), 'Excel 导出应包含商品名称和快递单号列');
+  assert(exportWorkbook.includes('履约烟测农户') && exportWorkbook.includes('13800008888') && exportWorkbook.includes('履约测试村 9 号'), 'Excel 导出应包含拆分后的发货地址字段值');
+  assert(exportWorkbook.includes(buyerUsername) && exportWorkbook.includes(buyerPhone), 'Excel 导出应包含下单人账号和手机号值');
+  assert(countWorkbookDataRows(exportWorkbook) === exportOrder.items.length, 'Excel 数据行数应与同筛选条件下的订单商品数一致');
+  assert(exportWorkbook.includes('&apos;=2+3公式商品'), 'Excel 导出应转义以公式前缀开头的商品名称');
+  assert(exportWorkbook.includes('&apos;@YTFORMULA001'), 'Excel 导出应转义以公式前缀开头的快递单号');
 
   async function createLegacyShippedOrderWithTracking(trackingNo, carrierCode, carrierName) {
     const prepared = await buyerClient.requestJson('/api/orders/prepare-payment', {

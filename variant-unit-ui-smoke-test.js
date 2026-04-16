@@ -523,6 +523,10 @@ async function main() {
   const uploadHtml = exec('renderProductImageUploader("new", { images: ["https://example.com/a.jpg"], img: "https://example.com/a.jpg" })');
   assert(uploadHtml.includes('flex flex-col gap-2 sm:flex-row'), '商品图片上传区在移动端应改成纵向优先布局');
   assert(exec('validateProductPayload({ name: "测试商品", cat: "veg", images: ["https://example.com/a.jpg"], variants: [{ label: "默认规格", units: [{ label: "箱", price: 18, stock: 2 }] }], harvest: "", dispatchHours: 4, shippingAddressId: "ship_admin", tags: [] })') === '', '商品校验不应再强制要求采摘日期');
+  const productFormHtml = exec('renderProductFormFields("new", normalizeProduct({ courierNote: "默认发圆通" }), true)');
+  assert(productFormHtml.includes('快递说明'), '商品表单应新增快递说明多行录入');
+  assert(!productFormHtml.includes('来源产地'), '商品表单应先隐藏来源产地字段');
+  assert(!productFormHtml.includes('采摘日期'), '商品表单应先隐藏采摘日期字段');
   assert(html.includes('workspace-layout'), '管理端应使用统一的 workspace 布局壳子');
   assert(html.includes('.app-modal-shell'), '前端应提供统一的 modal 适配样式');
   assert(html.includes('.workspace-nav-card'), '后台应提供统一的当前菜单卡片样式');
